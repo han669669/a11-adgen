@@ -1,0 +1,192 @@
+@import "tailwindcss";
+
+/* Base tokens (shadcn neutral). Fluid Functionalism components read these. */
+@theme inline {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --radius-lg: var(--radius);
+}
+
+:root {
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.145 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.52 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --radius: 0.75rem;
+  --accent: oklch(0.95 0 0); /* neutral fill; the gray solid Badge reads it */
+}
+
+@layer base {
+  html { font-optical-sizing: auto; }
+  body { @apply bg-background text-foreground font-sans antialiased; }
+}
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --color-hover: var(--hover);
+    --color-active: var(--active);
+    --color-selected: var(--selected);
+    --color-destructive-light: var(--destructive-light);
+    --text-display: var(--fs-display);
+    --text-display--line-height: var(--lh-display);
+    --text-title: var(--fs-title);
+    --text-title--line-height: var(--lh-title);
+    --text-subtitle: var(--fs-subtitle);
+    --text-subtitle--line-height: var(--lh-subtitle);
+    --text-body: var(--fs-body);
+    --text-body--line-height: var(--lh-body);
+    --text-caption: var(--fs-caption);
+    --text-caption--line-height: var(--lh-caption);
+    --text-micro: var(--fs-micro);
+    --text-micro--line-height: var(--lh-micro);
+    --color-warning: var(--warning);
+    --color-success: var(--success);
+    --color-info: var(--info);
+    --lh-micro-compact: var(--lh-micro-compact);
+    --fs-micro-compact: var(--fs-micro-compact);
+    --lh-micro: var(--lh-micro);
+    --fs-micro: var(--fs-micro);
+    --lh-caption-compact: var(--lh-caption-compact);
+    --fs-caption-compact: var(--fs-caption-compact);
+    --lh-caption: var(--lh-caption);
+    --fs-caption: var(--fs-caption);
+    --lh-body-compact: var(--lh-body-compact);
+    --fs-body-compact: var(--fs-body-compact);
+    --lh-body: var(--lh-body);
+    --fs-body: var(--fs-body);
+    --lh-subtitle-compact: var(--lh-subtitle-compact);
+    --fs-subtitle-compact: var(--fs-subtitle-compact);
+    --lh-subtitle: var(--lh-subtitle);
+    --fs-subtitle: var(--fs-subtitle);
+    --lh-title-compact: var(--lh-title-compact);
+    --fs-title-compact: var(--fs-title-compact);
+    --lh-title: var(--lh-title);
+    --fs-title: var(--fs-title);
+    --lh-display-compact: var(--lh-display-compact);
+    --fs-display-compact: var(--fs-display-compact);
+    --lh-display: var(--lh-display);
+    --fs-display: var(--fs-display);
+    --z-tooltip: var(--z-tooltip);
+    --z-popover: var(--z-popover);
+    --z-modal: var(--z-modal);
+    --z-overlay: var(--z-overlay);
+    --z-sticky: var(--z-sticky);
+    --color-tint-hover: var(--tint-hover);
+    --color-tint: var(--tint);
+    --focus-ring: var(--focus-ring);
+    --color-fluid-accent: var(--fluid-accent);
+    --overlay: var(--overlay);
+  @keyframes spinner-move {
+  to {
+    stroke-dashoffset: -100;
+        }
+    }
+  @keyframes spinner-dash {
+  0%, 100% {
+    stroke-dasharray: 15 85;
+        }
+  50% {
+    stroke-dasharray: 40 60;
+        }
+    }
+}
+
+:root {
+    --hover: rgb(0 0 0 / 0.04);
+    --active: rgb(0 0 0 / 0.07);
+    --selected: #D4D4D4;
+    --destructive-light: #FEF2F2;
+    --overlay: 0 0 0;
+    --fluid-accent: #6B97FF;
+    --focus-ring: var(--fluid-accent);
+    --tint: rgb(0 0 0 / 0.08);
+    --tint-hover: rgb(0 0 0 / 0.065);
+    --z-sticky: 30;
+    --z-overlay: 40;
+    --z-modal: 50;
+    --z-popover: 60;
+    --z-tooltip: 70;
+    --fs-display: 28px;
+    --lh-display: 34px;
+    --fs-display-compact: 24px;
+    --lh-display-compact: 30px;
+    --fs-title: 16px;
+    --lh-title: 22px;
+    --fs-title-compact: 15px;
+    --lh-title-compact: 20px;
+    --fs-subtitle: 14px;
+    --lh-subtitle: 20px;
+    --fs-subtitle-compact: 13px;
+    --lh-subtitle-compact: 18px;
+    --fs-body: 13px;
+    --lh-body: 20px;
+    --fs-body-compact: 12px;
+    --lh-body-compact: 18px;
+    --fs-caption: 12px;
+    --lh-caption: 16px;
+    --fs-caption-compact: 11px;
+    --lh-caption-compact: 14px;
+    --fs-micro: 11px;
+    --lh-micro: 14px;
+    --fs-micro-compact: 10px;
+    --lh-micro-compact: 12px;
+    --info: #3B82F6;
+    --success: #22C55E;
+    --warning: #F59E0B;
+}
+
+.dark {
+    --hover: rgb(255 255 255 / 0.06);
+    --active: rgb(255 255 255 / 0.1);
+    --selected: #525252;
+    --destructive-light: #450A0A;
+    --overlay: 255 255 255;
+    --tint: rgb(255 255 255 / 0.25);
+    --tint-hover: rgb(255 255 255 / 0.2);
+    --info: #93C5FD;
+    --success: #86EFAC;
+    --warning: #FCD34D;
+}
+
+@layer base {
+  ::selection {
+    background-color: color-mix(in oklab, var(--fluid-accent, #6B97FF) 25%, transparent);
+    }
+  .dark ::selection {
+    background-color: color-mix(in oklab, var(--fluid-accent, #6B97FF) 40%, transparent);
+    }
+  :focus-visible {
+    outline: 1px solid var(--focus-ring, #6B97FF);
+    outline-offset: 2px;
+    border-radius: var(--shape-input-radius, 8px);
+    }
+  a:focus-visible {
+    border-radius: 2px;
+    }
+}
+  html.transitioning *, html.transitioning *::before, html.transitioning *::after {
+    transition: border-radius 180ms ease-in-out, background-color 180ms ease-in-out, color 180ms ease-in-out, border-color 180ms ease-in-out, fill 180ms ease-in-out, stroke 180ms ease-in-out !important;
+}
+
+/* Theme and shape changes animate every element (Fluid); people who ask for less motion get none. */
+@media (prefers-reduced-motion: reduce) {
+  html.transitioning *, html.transitioning *::before, html.transitioning *::after { transition: none !important; }
+}

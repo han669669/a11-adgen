@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { claimCompose, settleCompose } from "../worker/api";
 import { composeFinal } from "../worker/compose";
 import type { Env } from "../worker/env";
 import { fakeD1 } from "./helpers/d1";
@@ -70,5 +71,31 @@ describe("compose_final success path", () => {
     ]);
     const spend = (env.DB as unknown as { raw: DatabaseSync }).raw.prepare("SELECT service, status FROM spend").all();
     expect(spend).toEqual([{ service: "images", status: "spent" }]);
+  });
+});
+
+describe("board compose claim", () => {
+  const keyOf = (env: Env) =>
+    (env.DB as unknown as { raw: DatabaseSync }).raw.prepare("SELECT composed_key AS k FROM renders WHERE id = ?").get(ID) as { k: string | null };
+
+  it("gives one claim at a time, and lets a stale claim be taken over", async () => {
+    const env = envWith("final", "done");
+    const t0 = new Date("2026-11-06T10:00:00.000Z");
+    const first = await claimCompose(env, ID, t0);
+    expect(first).toMatch(/^pending:2026-11-06T10:00:00.000Z:/);
+    expect(await claimCompose(env, ID, new Date(t0.getTime() + 60_000))).toBeNull();
+    expect(await claimCompose(env, ID, new Date(t0.getTime() + 121_000))).not.toBeNull();
+  });
+
+  it("drops the late result of a superseded compose, success or failure", async () => {
+    const env = envWith("final", "done");
+    const t0 = new Date("2026-11-06T10:00:00.000Z");
+    const old = (await claimCompose(env, ID, t0))!;
+    const fresh = (await claimCompose(env, ID, new Date(t0.getTime() + 121_000)))!;
+    expect(await settleCompose(env, ID, fresh, "renders/x/1-cnew.jpg")).toBe(true);
+    expect(await settleCompose(env, ID, old, "renders/x/1-cold.jpg")).toBe(false);
+    expect(await settleCompose(env, ID, old, "error:late failure")).toBe(false);
+    expect(keyOf(env).k).toBe("renders/x/1-cnew.jpg");
+    expect(await claimCompose(env, ID)).toBeNull();
   });
 });

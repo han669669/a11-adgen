@@ -1,4 +1,5 @@
 import type { Env } from "./env";
+import { handleApi } from "./api";
 import { handleMcp } from "./mcp";
 
 /** A Worker bundle on the Free plan is at most 3 MB. */
@@ -27,6 +28,54 @@ function sameHex(a: string, b: string): boolean {
   return diff === 0;
 }
 
+const APP_PATH = /^(?!.*\.\.)[a-zA-Z0-9][a-zA-Z0-9._/-]{0,199}$/;
+const TYPES: Record<string, string> = {
+  html: "text/html; charset=utf-8",
+  js: "text/javascript; charset=utf-8",
+  css: "text/css; charset=utf-8",
+  svg: "image/svg+xml",
+  png: "image/png",
+  ico: "image/x-icon",
+  woff2: "font/woff2",
+  json: "application/json",
+};
+const typeOf = (path: string) => TYPES[path.split(".").pop() ?? ""] ?? "application/octet-stream";
+
+async function stage(request: Request, env: Env, name: string, pattern: RegExp, prefix: string): Promise<Response> {
+  if (!(await tokenOk(request, env.MCP_TOKEN_SHA256))) return new Response("Unauthorized", { status: 401 });
+  if (!pattern.test(name)) return new Response("Bad name", { status: 400 });
+  // Check the declared size before reading the body, so an oversized upload is never buffered.
+  const declared = request.headers.get("content-length");
+  if (declared === null) return new Response("Content-Length required", { status: 411 });
+  if (Number(declared) > STAGE_MAX_BYTES) return new Response("Too large", { status: 413 });
+  const body = await request.arrayBuffer();
+  if (body.byteLength === 0) return new Response("Empty body", { status: 400 });
+  if (body.byteLength > STAGE_MAX_BYTES) return new Response("Too large", { status: 413 });
+  const contentType = prefix === "app/" ? typeOf(name) : "application/javascript";
+  await env.MEDIA.put(`${prefix}${name}`, body, { httpMetadata: { contentType } });
+  return Response.json({ key: `${prefix}${name}`, bytes: body.byteLength });
+}
+
+/** The web app (a single-page app): a file from R2 app/, else index.html for client routes. */
+async function serveApp(env: Env, pathname: string): Promise<Response> {
+  const path = pathname.replace(/^\/+/, "");
+  const isFile = APP_PATH.test(path) && /\.[a-z0-9]+$/.test(path);
+  const obj = isFile ? await env.MEDIA.get(`app/${path}`) : await env.MEDIA.get("app/index.html");
+  if (!obj) return new Response("Not found", { status: 404 });
+  const immutable = path.startsWith("assets/");
+  return new Response(obj.body, {
+    headers: {
+      "content-type": obj.httpMetadata?.contentType ?? typeOf(isFile ? path : "index.html"),
+      "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
+      "x-content-type-options": "nosniff",
+      ...(isFile && !path.endsWith(".html") ? {} : { "content-security-policy": CSP }),
+    },
+  });
+}
+
+const CSP =
+  "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -38,19 +87,14 @@ export default {
 
     // Deploy staging: put a built bundle into R2 (deploy/<name>), so the Cloudflare connector can deploy it from there.
     if (url.pathname.startsWith("/admin/stage/") && request.method === "PUT") {
-      if (!(await tokenOk(request, env.MCP_TOKEN_SHA256))) return new Response("Unauthorized", { status: 401 });
-      const name = url.pathname.slice("/admin/stage/".length);
-      if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(name)) return new Response("Bad name", { status: 400 });
-      // Check the declared size before reading the body, so an oversized upload is never buffered.
-      const declared = request.headers.get("content-length");
-      if (declared === null) return new Response("Content-Length required", { status: 411 });
-      if (Number(declared) > STAGE_MAX_BYTES) return new Response("Too large", { status: 413 });
-      const body = await request.arrayBuffer();
-      if (body.byteLength === 0) return new Response("Empty body", { status: 400 });
-      if (body.byteLength > STAGE_MAX_BYTES) return new Response("Too large", { status: 413 });
-      await env.MEDIA.put(`deploy/${name}`, body, { httpMetadata: { contentType: "application/javascript" } });
-      return Response.json({ key: `deploy/${name}`, bytes: body.byteLength });
+      return stage(request, env, url.pathname.slice("/admin/stage/".length), /^[a-z0-9][a-z0-9._-]{0,63}$/, "deploy/");
     }
+    // Web app files: the built app goes to R2 app/<path>; the Worker serves it below.
+    if (url.pathname.startsWith("/admin/app/") && request.method === "PUT") {
+      return stage(request, env, url.pathname.slice("/admin/app/".length), APP_PATH, "app/");
+    }
+
+    if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);
 
     // Media: unguessable keys (random UUIDs). fal reads chosen drafts from here as references.
     // GET and HEAD: fal checks a reference URL with HEAD before it downloads it.
@@ -68,7 +112,7 @@ export default {
       return new Response(request.method === "HEAD" ? null : body, { headers });
     }
 
-    if (url.pathname === "/") return new Response("a11adgen: Phase 0 spike. The web app comes in Phase 1.\n");
+    if (request.method === "GET" || request.method === "HEAD") return serveApp(env, url.pathname);
     return new Response("Not found", { status: 404 });
   },
 } satisfies ExportedHandler<Env>;

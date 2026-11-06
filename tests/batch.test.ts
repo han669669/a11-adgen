@@ -186,6 +186,15 @@ describe("batch flow", () => {
     expect((await batch.batchGet(env, b.id)).picks[0]!.finalRenderId).toBe(r.id);
   });
 
+  it("refuses status 'board' while a picked idea with drafts has no final prompt", async () => {
+    const { env, raw } = makeEnv();
+    const { b, ideas } = await seed(env);
+    addDraft(raw, b.id, ideas[0]!.id, "66666666-6666-6666-6666-666666666666");
+    await expect(batch.batchUpdate(env, { id: b.id, status: "board" })).rejects.toThrow("finalPrompt");
+    await batch.ideasUpdate(env, [{ id: ideas[0]!.id, finalPrompt: "B".repeat(50) }]);
+    await expect(batch.batchUpdate(env, { id: b.id, status: "board" })).resolves.toMatchObject({ updated: ["status"] });
+  });
+
   it("ignores a draft whose idea belongs to another batch", async () => {
     const { env, raw } = makeEnv();
     const { b, subject } = await seed(env);
@@ -226,6 +235,18 @@ describe("batch flow", () => {
     vi.stubGlobal("fetch", async () => new Response("down", { status: 500 }));
     await expect(batch.finalRender(env, b.id, keys[0])).rejects.toThrow("fal submit failed");
     expect(raw.prepare("SELECT final_render_id FROM picks").get()).toEqual({ final_render_id: null });
+  });
+
+  it("does not block 'board' on a draft render that has no images", async () => {
+    const { env, raw } = makeEnv();
+    const { b, ideas } = await seed(env);
+    raw
+      .prepare(
+        `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, usd_est, created_at, updated_at)
+         VALUES ('q1', ?, ?, 'draft', 'queued', 'p', '[]', 1024, 1280, 'low', 3, 0.02, 'now', 'now')`,
+      )
+      .run(b.id, ideas[0]!.id);
+    await expect(batch.batchUpdate(env, { id: b.id, status: "board" })).resolves.toMatchObject({ updated: ["status"] });
   });
 
   it("reports an unknown idea id on update", async () => {
@@ -296,5 +317,8 @@ describe("compose_final with brandSlug", () => {
     const res = await tool.run(env, validate(tool.inputSchema, { key: `renders/${renderId}/1.jpg`, brandSlug: "wongi" }));
     expect(res.isError).toBeUndefined();
     expect(asked).toContain(v1Logo);
+    // The newest compose becomes the render's board image.
+    const row = raw.prepare("SELECT composed_key FROM renders WHERE id = ?").get(renderId) as { composed_key: string };
+    expect(row.composed_key).toMatch(new RegExp(`^renders/${renderId}/1-c\\d+\\.jpg$`));
   });
 });

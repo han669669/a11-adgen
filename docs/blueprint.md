@@ -154,4 +154,4 @@ Phase 0 measures the real fal cost at 1536x1920 high and the Claude usage per ba
 | Cloudflare plan | Workers Free (owner, 2026-11-06). Limits in `AGENTS.md` §6. |
 | Cloud session network | Unrestricted. The Worker calls fal and Exa, not the session. |
 | fal `edit` at high keeps the draft's layout | Not verified. Phase 0 tests it. |
-| Auth library on Workers (Better Auth with D1, or a small own implementation) | Decide in Phase 1. |
+| Auth library on Workers (Better Auth with D1, or a small own implementation) | Decided 2026-11-07: small own implementation (`docs/decisions.md`). |

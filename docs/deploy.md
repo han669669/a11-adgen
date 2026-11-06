@@ -4,14 +4,17 @@ There is no Cloudflare API token in the session (owner decision). Deploys go thr
 
 ## Steps
 
+The steps below are for the live Worker `a11adgen` (D1 `a11adgen-db`, R2 `a11adgen-assets`), and only from `main` after a merge. For a branch, use the same steps with the preview targets in "Preview deploy" below. Never the live ones.
+
 1. Build: `npx wrangler deploy --dry-run --minify --outdir .wrangler/dry`. Note the SHA-256 of `.wrangler/dry/index.js`.
-2. Stage: `PUT /admin/stage/<name>.js` on a deployed Worker (`a11adgen` or `a11adgen-preview`), with the `/mcp` bearer token and the bundle as the body. It saves `deploy/<name>.js` in R2 `a11adgen-assets`.
-3. Deploy with the connector: read `deploy/<name>.js` from R2 (`GET /accounts/{id}/r2/buckets/a11adgen-assets/objects/deploy/<name>.js`), check its SHA-256 against step 1, then `PUT /accounts/{id}/workers/scripts/<worker>` (multipart): upload the bundle as a JavaScript module part named `index.js` (`application/javascript+module`) and set metadata `main_module` to `index.js`, with:
+2. Stage: `PUT /admin/stage/<name>.js` on the target Worker, with the `/mcp` bearer token and the bundle as the body. It saves `deploy/<name>.js` in that Worker's R2 bucket. Stage each new SQL file in `migrations/` the same way.
+3. D1 migrations, before the new code goes live (the code may need the new tables): in the connector, read each staged SQL file, check its SHA-256, run it with the D1 query API on the target database, then insert its name into `d1_migrations`. Skip a file already listed there.
+4. Deploy with the connector: read `deploy/<name>.js` from the target bucket, check its SHA-256 against step 1, then `PUT /accounts/{id}/workers/scripts/<worker>` (multipart): upload the bundle as a JavaScript module part named `index.js` (`application/javascript+module`) and set metadata `main_module` to `index.js`, with:
    - `compatibility_date` `2026-10-20`, `compatibility_flags` `["nodejs_compat"]`;
-   - the bindings in `wrangler.jsonc`, plus `MCP_TOKEN_SHA256` as `plain_text` (it is not in `wrangler.jsonc`);
-   - `keep_bindings: ["secret_text"]`, so the owner's `FAL_KEY` and `EXA_API_KEY` stay.
-4. Images binding: metadata `bindings` must include `{ "type": "images", "name": "IMAGES" }` (`compose_final` needs it).
-5. Smoke test: `spend_get` through `/mcp`, and one call of each changed tool.
+   - the bindings in `wrangler.jsonc` (including `{ "type": "images", "name": "IMAGES" }`), plus `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256` as `plain_text` (hashes only; not in `wrangler.jsonc`);
+   - `keep_bindings: ["secret_text"]`, so the owner's `FAL_KEY`, `EXA_API_KEY` and `ALLOWED_EMAILS` stay.
+5. Web app: `npm run build:app`, then `PUT /admin/app/<path>` on the target Worker (same bearer token) for each file in `dist/app`, `index.html` last. It saves to `app/` in that Worker's bucket, and the Worker serves the app from there. Old hashed files in `app/assets/` can stay; `index.html` points to the new ones.
+6. Smoke test: `spend_get` through `/mcp`, `/api/me` (401 without a session), and one call of each changed tool.
 
 ## One-time assets
 
@@ -31,8 +34,8 @@ On 2026-11-07 a 24 KB bundle copied by hand into a connector call had one wrong 
 
 | Worker | Use | Secrets |
 |---|---|---|
-| `a11adgen` | Live. Deploys only `main`. | `FAL_KEY`, `EXA_API_KEY` |
-| `a11adgen-preview` | Tests a branch before its PR merges. Since 2026-11-07 it uses its own D1 `a11adgen-preview-db` (`2c28c64f-f8c0-46f9-9e2d-7ca70d2a0f70`) and R2 `a11adgen-preview-assets`, both APAC. | none (no paid calls from it) |
+| `a11adgen` | Live. Deploys only `main`. | `FAL_KEY`, `EXA_API_KEY`, `ALLOWED_EMAILS` (web app sign-in) |
+| `a11adgen-preview` | Tests a branch before its PR merges. Since 2026-11-07 it uses its own D1 `a11adgen-preview-db` (`2c28c64f-f8c0-46f9-9e2d-7ca70d2a0f70`) and R2 `a11adgen-preview-assets`, both APAC. | none (no paid calls from it); `ALLOWED_EMAILS` is a plain test address |
 
 ### Preview deploy
 
@@ -43,6 +46,8 @@ Deploy a branch to `a11adgen-preview` with the same steps, but with these bindin
 | `DB` | D1 `a11adgen-preview-db` (`2c28c64f-f8c0-46f9-9e2d-7ca70d2a0f70`) |
 | `MEDIA` | R2 `a11adgen-preview-assets` |
 | `PUBLIC_BASE_URL` | `https://a11adgen-preview.gamingcomputing.workers.dev` |
+| `ALLOWED_EMAILS` | a plain test address, not the owner's list |
+| `SIGNUP_CODE_SHA256` | the hash of a test code, never the live one (or leave it out to keep sign-up closed) |
 
 Stage preview bundles and SQL through `a11adgen-preview` (they land in `a11adgen-preview-assets/deploy/`), and read them from that bucket in the connector.
 
