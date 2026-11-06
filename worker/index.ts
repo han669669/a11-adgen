@@ -34,14 +34,19 @@ export default {
     }
 
     // Media: unguessable keys (random UUIDs). fal reads chosen drafts from here as references.
-    if (url.pathname.startsWith("/m/") && request.method === "GET") {
+    // GET and HEAD: fal checks a reference URL with HEAD before it downloads it.
+    if (url.pathname.startsWith("/m/") && (request.method === "GET" || request.method === "HEAD")) {
       const key = url.pathname.slice(3);
       if (!MEDIA_KEY.test(key)) return new Response("Not found", { status: 404 });
-      const obj = await env.MEDIA.get(key);
+      const obj = request.method === "HEAD" ? await env.MEDIA.head(key) : await env.MEDIA.get(key);
       if (!obj) return new Response("Not found", { status: 404 });
-      return new Response(obj.body, {
-        headers: { "content-type": obj.httpMetadata?.contentType ?? "image/jpeg", "cache-control": "private, max-age=3600" },
-      });
+      const headers = {
+        "content-type": obj.httpMetadata?.contentType ?? "image/jpeg",
+        "content-length": String(obj.size),
+        "cache-control": "private, max-age=3600",
+      };
+      const body = "body" in obj ? (obj as R2ObjectBody).body : null;
+      return new Response(request.method === "HEAD" ? null : body, { headers });
     }
 
     if (url.pathname === "/") return new Response("a11adgen: Phase 0 spike. The web app comes in Phase 1.\n");
