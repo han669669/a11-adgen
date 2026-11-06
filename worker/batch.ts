@@ -69,6 +69,15 @@ export async function batchCreate(env: Env, input: { brandSlug: string; subjectI
 export async function batchUpdate(env: Env, input: { id: string; status?: string; insights?: unknown[]; notes?: string }) {
   // Every picked idea with drafts must have its final prompt before the picks are made (D2: Claude picks the drafts).
   if (input.status === "board") {
+    // A funnel batch needs exactly one picked idea per stage. Batches made before the stages are exempt.
+    const counts = await env.DB.prepare(
+      "SELECT format, SUM(picked) AS n FROM ideas WHERE batch_id = ? AND format IN ('tof', 'mof', 'bof') GROUP BY format",
+    ).bind(input.id).all<{ format: string; n: number }>();
+    if (counts.results.length) {
+      const n = new Map(counts.results.map((r) => [r.format, r.n]));
+      const missing = FORMATS.filter((f) => n.get(f) !== 1);
+      if (missing.length) throw new Error(`Pick exactly one idea for each stage before status 'board' (missing: ${missing.join(", ")}).`);
+    }
     const notReady = await env.DB.prepare(
       `SELECT i.n FROM ideas i WHERE i.batch_id = ? AND i.picked = 1 AND i.final_prompt IS NULL
        AND EXISTS (SELECT 1 FROM renders r WHERE r.batch = i.batch_id AND r.idea = i.id AND r.kind = 'draft' AND r.image_keys IS NOT NULL)`,
@@ -173,6 +182,9 @@ export async function picksSave(env: Env, batchId: string, picks: { key: string;
   const keys = await draftKeys(env, batchId);
   const at = now();
   for (const p of picks) if (!keys.has(p.key)) throw new Error(`${p.key} is not a finished draft of batch ${batchId}.`);
+  // One draft per idea in a call: each pick becomes a paid final.
+  const ideaIds = picks.map((p) => keys.get(p.key)!);
+  if (new Set(ideaIds).size !== ideaIds.length) throw new Error("Pick one draft per idea.");
   const listed = picks.map((p) => p.key);
   const stmts = [
     env.DB.prepare(

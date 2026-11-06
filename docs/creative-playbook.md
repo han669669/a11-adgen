@@ -37,7 +37,7 @@ Three ads per batch: 1 tof, 1 mof, 1 bof (owner, 07-11-2026). The database enfor
 |---|---|---|---|
 | `tof` top of funnel (cold) | Stop a stranger who has not heard of the brand. | A human truth or a persona sorting line ("For the one who finishes the jar in one sitting"). Native looks are allowed: a phone notes screen, a handwritten note, a meme layout, a phone-photo moment. | Offer stickers, prices, feature lists. |
 | `mof` middle (warm) | Give a reason to switch. | Sell the switch: name what they eat now (fried chips, the office biscuit tin, the 3 pm vending machine) and the one difference that matters. Or credibility from a figure this buyer trusts (an archetype, never a real person without consent). | Callout lists of every feature. |
-| `bof` bottom (ready to buy) | Give a reason to buy now. | One simple, true offer: free delivery from S$35, a bundle, a guarantee. Show the product clearly. | A freebie stack the brand cannot fund. A wrong price. |
+| `bof` bottom (ready to buy) | Give a reason to buy now. | One simple, true offer from the product facts (for example a delivery threshold, a bundle, a guarantee), with its source. Show the product clearly. | A freebie stack the brand cannot fund. A wrong price. |
 
 ## 4. What works for Singapore snack brands (research, 07-11-2026)
 

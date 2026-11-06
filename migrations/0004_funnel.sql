@@ -33,7 +33,7 @@ BEGIN
   SELECT RAISE(ABORT, 'Pick limit: 1 idea per stage per batch.');
 END;
 
-CREATE TRIGGER ideas_pick_limit_update BEFORE UPDATE OF picked, format ON ideas
+CREATE TRIGGER ideas_pick_limit_update BEFORE UPDATE OF picked, format, batch_id ON ideas
 WHEN NEW.picked = 1 AND (SELECT COUNT(*) FROM ideas WHERE batch_id = NEW.batch_id AND format = NEW.format AND picked = 1 AND id != NEW.id)
   >= 1
 BEGIN
