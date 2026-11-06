@@ -42,7 +42,9 @@ describe("/m/ media route", () => {
     expect((await r.arrayBuffer()).byteLength).toBe(3);
   });
   it("refuses a key outside renders/", async () => {
-    const r = await worker.fetch(new Request("https://x/m/../secret"), media);
+    // Encoded slashes keep the /m/ prefix, so this reaches the key check. The mock would serve any key it is asked for.
+    const open = { MEDIA: { get: async () => obj, head: async () => obj } } as unknown as Env;
+    const r = await worker.fetch(new Request("https://x/m/renders%2F..%2Fsecret"), open);
     expect(r.status).toBe(404);
   });
 });

@@ -29,7 +29,8 @@ One 4:5 ad, made from start to finish through the `a11adgen` MCP server. Claude 
 | Draft check | `image_get` + Claude | seconds | 0 |
 | Final, high, 1536x1920 | `render_submit` | about 60 s | 0.083 |
 | **Total for the shipped ad** | | | **about 0.14** |
-| Ledger total, incl. 2 failed finals | | | 0.323 |
+| 2 failed finals (3 references each, US$0.093 each) | `render_submit` | | 0.186 |
+| Ledger total (0.137 + 0.186) | | | 0.323 |
 
 The ledger counts estimates, not fal's bill. One failed final (HTTP 422) may not be billed by fal: not verified.
 

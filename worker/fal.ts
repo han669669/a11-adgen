@@ -124,7 +124,8 @@ export async function check(env: Env, id: string) {
     keys.push(key);
   }
   const status = keys.length ? "done" : "failed";
-  const error = keys.length === images.length ? null : `saved ${keys.length} of ${images.length} images`;
+  const error =
+    images.length === 0 ? "fal returned no images" : keys.length === images.length ? null : `saved ${keys.length} of ${images.length} images`;
   await env.DB.prepare("UPDATE renders SET status = ?, image_keys = ?, error = ?, updated_at = ? WHERE id = ?")
     .bind(status, JSON.stringify(keys), error, new Date().toISOString(), id)
     .run();
