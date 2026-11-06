@@ -51,7 +51,7 @@ export function SignIn({ onDone }: { onDone: () => void }) {
         {mode === "signup" && (
           <Field>
             <FieldLabel htmlFor="code">Set-up code</FieldLabel>
-            <Input id="code" autoComplete="one-time-code" required value={code} onChange={(e) => setCode(e.target.value)} />
+            <Input id="code" type="password" autoComplete="off" required value={code} onChange={(e) => setCode(e.target.value)} />
           </Field>
         )}
         {error && (

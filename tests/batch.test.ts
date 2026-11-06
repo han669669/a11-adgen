@@ -317,5 +317,8 @@ describe("compose_final with brandSlug", () => {
     const res = await tool.run(env, validate(tool.inputSchema, { key: `renders/${renderId}/1.jpg`, brandSlug: "wongi" }));
     expect(res.isError).toBeUndefined();
     expect(asked).toContain(v1Logo);
+    // The newest compose becomes the render's board image.
+    const row = raw.prepare("SELECT composed_key FROM renders WHERE id = ?").get(renderId) as { composed_key: string };
+    expect(row.composed_key).toMatch(new RegExp(`^renders/${renderId}/1-c\\d+\\.jpg$`));
   });
 });

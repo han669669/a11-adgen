@@ -47,6 +47,7 @@ Deploy a branch to `a11adgen-preview` with the same steps, but with these bindin
 | `MEDIA` | R2 `a11adgen-preview-assets` |
 | `PUBLIC_BASE_URL` | `https://a11adgen-preview.gamingcomputing.workers.dev` |
 | `ALLOWED_EMAILS` | a plain test address, not the owner's list |
+| `SIGNUP_CODE_SHA256` | the hash of a test code, never the live one (or leave it out to keep sign-up closed) |
 
 Stage preview bundles and SQL through `a11adgen-preview` (they land in `a11adgen-preview-assets/deploy/`), and read them from that bucket in the connector.
 

@@ -76,6 +76,12 @@ describe("web app accounts", () => {
     expect((await call(env, "/api/signup", { body: signupBody })).status).toBe(403);
   });
 
+  it("limits sign-up tries, so the set-up code cannot be guessed", async () => {
+    const { env } = makeEnv();
+    for (let i = 0; i < 5; i++) expect((await call(env, "/api/signup", { body: { ...signupBody, code: `guess-${i}` } })).status).toBe(403);
+    expect((await call(env, "/api/signup", { body: signupBody })).status).toBe(429);
+  });
+
   it("refuses a short password", async () => {
     const { env } = makeEnv();
     expect((await call(env, "/api/signup", { body: { ...signupBody, password: "short" } })).status).toBe(400);

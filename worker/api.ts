@@ -33,11 +33,19 @@ async function refresh(env: Env, id: string) {
     .first<{ composed_key: string | null; brand_id: string; kit_version: number }>();
   if (!row) return status;
   if (row.composed_key?.startsWith("error:")) return { ...status, composed: null, composeError: row.composed_key.slice(6) };
-  if (row.composed_key) return { ...status, composed: row.composed_key.startsWith("renders/") ? fal.mediaUrl(env, row.composed_key) : null };
+  if (row.composed_key?.startsWith("renders/")) return { ...status, composed: fal.mediaUrl(env, row.composed_key) };
   const kit = await latestKit(env, row.brand_id, row.kit_version);
   if (!kit) return status;
-  // Claim the compose first, so two refreshes at once draw the logo only once.
-  const claimed = await env.DB.prepare("UPDATE renders SET composed_key = 'pending' WHERE id = ? AND composed_key IS NULL").bind(id).run();
+  // Claim the compose first, so two refreshes at once draw the logo only once. A claim older than
+  // 2 minutes is stale (the Worker stopped mid-compose), so a later refresh takes it over.
+  const now = new Date();
+  const stale = new Date(now.getTime() - 120_000).toISOString();
+  const claimed = await env.DB.prepare(
+    `UPDATE renders SET composed_key = ? WHERE id = ?
+     AND (composed_key IS NULL OR (composed_key LIKE 'pending:%' AND composed_key < ?))`,
+  )
+    .bind(`pending:${now.toISOString()}`, id, `pending:${stale}`)
+    .run();
   if (claimed.meta.changes !== 1) return { ...status, composed: null };
   try {
     const out = await composeFinal(env, {
@@ -51,7 +59,8 @@ async function refresh(env: Env, id: string) {
     await env.DB.prepare("UPDATE renders SET composed_key = ? WHERE id = ?").bind(out.key, id).run();
     return { ...status, composed: out.url };
   } catch (e) {
-    // Record the failure, so the board stops polling and shows it; Claude can re-run compose_final.
+    // Record the failure, so the board stops polling and shows it. compose_final (MCP) on this render
+    // writes its result here, which clears the error.
     const msg = (e instanceof Error ? e.message : String(e)).slice(0, 300);
     await env.DB.prepare("UPDATE renders SET composed_key = ? WHERE id = ?").bind(`error:${msg}`, id).run();
     return { ...status, composed: null, composeError: msg };

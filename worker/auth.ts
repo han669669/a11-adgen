@@ -86,12 +86,15 @@ export async function signup(env: Env, body: { email?: unknown; password?: unkno
   const refused = new AuthError("Sign-up refused. Check the email and the set-up code.", 403);
   const want = (env.SIGNUP_CODE_SHA256 ?? "").toLowerCase();
   if (want.length !== 64 || typeof body.code !== "string" || !body.code) throw refused;
+  // Every sign-up try counts against one shared limit, so the code cannot be guessed by brute force.
+  const attemptId = await reserveAttempt(env, SIGNUP_KEY);
   const got = Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body.code.trim()))).toString("hex");
   let diff = 0;
   for (let i = 0; i < 64; i++) diff |= got.charCodeAt(i) ^ want.charCodeAt(i);
   if (diff !== 0 || !allowed(env, email)) throw refused;
   const exists = await env.DB.prepare("SELECT email FROM users WHERE email = ?").bind(email).first();
   if (exists) throw refused;
+  await env.DB.prepare("DELETE FROM login_failures WHERE id = ?").bind(attemptId).run();
   await env.DB.prepare("INSERT INTO users (email, pw_hash, created_at) VALUES (?, ?, ?)")
     .bind(email, await hashPassword(body.password), new Date().toISOString())
     .run();
@@ -103,15 +106,7 @@ export async function login(env: Env, body: { email?: unknown; password?: unknow
   const bad = new AuthError("Wrong email or password.");
   if (!allowed(env, email)) throw bad;
   if (typeof body.password !== "string" || body.password.length > MAX_PASSWORD) throw bad;
-  // Reserve the attempt first, then count it: parallel tries cannot all pass the limit before any is written.
-  const attempt = await env.DB.prepare("INSERT INTO login_failures (email, at) VALUES (?, ?)").bind(email, new Date().toISOString()).run();
-  const attemptId = attempt.meta.last_row_id;
-  const fails = await env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM login_failures WHERE email = ? AND at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '${FAILURE_WINDOW}')`,
-  )
-    .bind(email)
-    .first<{ n: number }>();
-  if ((fails?.n ?? 0) > MAX_FAILURES) throw new AuthError("Too many tries. Wait 15 minutes.", 429);
+  const attemptId = await reserveAttempt(env, email);
   const user = await env.DB.prepare("SELECT pw_hash FROM users WHERE email = ?").bind(email).first<{ pw_hash: string }>();
   if (!user || !(await verifyPassword(body.password, user.pw_hash))) throw bad;
   // Success: drop this attempt, old failures and expired sessions (keeps both tables small).
@@ -120,6 +115,25 @@ export async function login(env: Env, body: { email?: unknown; password?: unknow
     env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(new Date().toISOString()),
   ]);
   return newSession(env, email);
+}
+
+/** login_failures key for sign-up tries (not an email, so it never matches a real account). */
+const SIGNUP_KEY = "~signup";
+
+/**
+ * Reserve one try in login_failures, but only while fewer than MAX_FAILURES are active in the window.
+ * One statement, so parallel tries cannot pass the limit, and a locked-out caller writes nothing.
+ * The caller deletes the row when the try succeeds.
+ */
+async function reserveAttempt(env: Env, key: string): Promise<number> {
+  const res = await env.DB.prepare(
+    `INSERT INTO login_failures (email, at)
+     SELECT ?, ? WHERE (SELECT COUNT(*) FROM login_failures WHERE email = ? AND at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '${FAILURE_WINDOW}')) < ?`,
+  )
+    .bind(key, new Date().toISOString(), key, MAX_FAILURES)
+    .run();
+  if (res.meta.changes !== 1) throw new AuthError("Too many tries. Wait 15 minutes.", 429);
+  return Number(res.meta.last_row_id);
 }
 
 function tokenFrom(request: Request): string | null {

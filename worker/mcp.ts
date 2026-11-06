@@ -475,17 +475,18 @@ export const TOOLS: Tool[] = [
         place = kit.kit.placement;
       }
       if (!logoKey && !a.logoUrl) throw new Error("Give brandSlug or logoUrl.");
-      return text(
-        await composeFinal(env, {
-          key: a.key,
-          logoKey,
-          logoUrl: logoKey ? undefined : a.logoUrl,
-          logoWidthPct: a.logoWidthPct ?? place.logoWidthPct,
-          logoTopPct: a.logoTopPct ?? place.logoTopPct,
-          grain: a.grain,
-          grainPct: a.grainPct,
-        }),
-      );
+      const out = await composeFinal(env, {
+        key: a.key,
+        logoKey,
+        logoUrl: logoKey ? undefined : a.logoUrl,
+        logoWidthPct: a.logoWidthPct ?? place.logoWidthPct,
+        logoTopPct: a.logoTopPct ?? place.logoTopPct,
+        grain: a.grain,
+        grainPct: a.grainPct,
+      });
+      // The newest compose is the one the board shows (this also clears a failed board compose).
+      await env.DB.prepare("UPDATE renders SET composed_key = ? WHERE id = ?").bind(out.key, String(a.key).split("/")[1]).run();
+      return text(out);
     },
   },
   {
