@@ -25,7 +25,7 @@ Every change must move one of these goals. Say which one in each PR.
 1. **Goal 1:** self-learning, self-curating, self-improving, always high-taste, thoughtful, creative, human-directed static ads for our target client (Singapore F&B and wellness brands that already run Meta ads).
 2. **Goal 2:** a static ad so good that a Singapore company that already runs paid campaigns pays real money for it. It fixes their creative fatigue, or it gets better results than their current ads. They run the winners and stop the losers.
 
-The business: a11studio.pro sells 16 static ads per month (4 per week) for S$2,800 (S$800 for the first 3 founding brands). The site promises a full refund when the first 4 ads do not beat the client's CTR in 72 hours. The site still names four weekly formats (The Hook, The Anatomy, Us vs Them, The Offer). Since 07-11-2026 the tool makes funnel stages instead: 2 top of funnel, 1 middle, 1 bottom each week (`docs/creative-playbook.md`). The site copy needs the owner's update.
+The business: a11studio.pro sells 16 static ads per month (4 per week) for S$2,800 (S$800 for the first 3 founding brands). The site promises a full refund when the first 4 ads do not beat the client's CTR in 72 hours. The site still names four weekly formats (The Hook, The Anatomy, Us vs Them, The Offer). Since 07-11-2026 the tool makes funnel stages instead: each batch makes 3 ads (1 top of funnel, 1 middle, 1 bottom), and the owner runs batches until one ad is top tier (`docs/creative-playbook.md`). The site copy needs the owner's update.
 
 ---
 

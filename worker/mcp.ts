@@ -265,7 +265,7 @@ export const TOOLS: Tool[] = [
   {
     name: "ideas_save",
     description:
-      "Save ideas for a batch (the burst). Each idea = insight + visual idea + headline + funnel stage (format: tof, mof or bof). Read docs/creative-playbook.md first. Set picked true on the critic's 4: 2 tof, 1 mof, 1 bof. Returns the idea ids (use them as render_submit's idea).",
+      "Save ideas for a batch (the burst). Each idea = insight + visual idea + headline + funnel stage (format: tof, mof or bof). Read docs/creative-playbook.md first. Set picked true on the critic's 3: 1 tof, 1 mof, 1 bof. Returns the idea ids (use them as render_submit's idea).",
     inputSchema: {
       type: "object",
       properties: {

@@ -204,11 +204,10 @@ describe("batch flow", () => {
     await expect(batch.picksSave(env, b.id, [{ key: keys[0] }])).rejects.toThrow("not a finished draft");
   });
 
-  it("allows 2 tof, 1 mof and 1 bof picks per batch, on save and on update", async () => {
+  it("allows 1 pick per stage per batch, on save and on update", async () => {
     const { env } = makeEnv();
     const { b, ideas } = await seed(env); // seed: one tof picked, one bof not picked
     const pick = (format: "tof" | "mof" | "bof") => batch.ideasSave(env, b.id, [{ format, insight: "y", visual: "y", headline: "y", picked: true }]);
-    await pick("tof");
     await expect(pick("tof")).rejects.toThrow("Pick limit");
     await pick("mof");
     await expect(pick("mof")).rejects.toThrow("Pick limit");

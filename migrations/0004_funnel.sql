@@ -1,5 +1,5 @@
 -- Formats become funnel stages (owner, 2026-11-06): tof, mof, bof. Old batches keep their old format names.
--- Picks per batch: 2 tof, 1 mof, 1 bof (4 ads a week). Old formats: 1 each, as before.
+-- Picks per batch: 1 tof, 1 mof, 1 bof (3 ads per batch, owner 07-11-2026). Old formats: 1 each, as before.
 -- SQLite cannot change a CHECK in place, so the table is rebuilt (D1 pattern: defer foreign keys).
 PRAGMA defer_foreign_keys = on;
 
@@ -28,16 +28,16 @@ CREATE INDEX ideas_batch ON ideas(batch_id);
 
 CREATE TRIGGER ideas_pick_limit_insert BEFORE INSERT ON ideas
 WHEN NEW.picked = 1 AND (SELECT COUNT(*) FROM ideas WHERE batch_id = NEW.batch_id AND format = NEW.format AND picked = 1)
-  >= (CASE NEW.format WHEN 'tof' THEN 2 ELSE 1 END)
+  >= 1
 BEGIN
-  SELECT RAISE(ABORT, 'Pick limit: 2 tof, 1 mof and 1 bof per batch.');
+  SELECT RAISE(ABORT, 'Pick limit: 1 idea per stage per batch.');
 END;
 
 CREATE TRIGGER ideas_pick_limit_update BEFORE UPDATE OF picked, format ON ideas
 WHEN NEW.picked = 1 AND (SELECT COUNT(*) FROM ideas WHERE batch_id = NEW.batch_id AND format = NEW.format AND picked = 1 AND id != NEW.id)
-  >= (CASE NEW.format WHEN 'tof' THEN 2 ELSE 1 END)
+  >= 1
 BEGIN
-  SELECT RAISE(ABORT, 'Pick limit: 2 tof, 1 mof and 1 bof per batch.');
+  SELECT RAISE(ABORT, 'Pick limit: 1 idea per stage per batch.');
 END;
 
 PRAGMA defer_foreign_keys = off;

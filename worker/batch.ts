@@ -2,7 +2,7 @@ import { brandBySlug, latestKit } from "./brand";
 import type { Env } from "./env";
 import * as fal from "./fal";
 
-/** Funnel stages (owner, 2026-11-06). Picks per batch: 2 tof, 1 mof, 1 bof (a database trigger enforces it). */
+/** Funnel stages (owner, 2026-11-06). Picks per batch: 1 per stage (a database trigger enforces it). */
 export const FORMATS = ["tof", "mof", "bof"] as const;
 export const STATUSES = ["research", "ideas", "drafts", "board", "finals", "done"] as const;
 const MAX_BATCH_RENDERS = fal.MAX_BATCH_RENDERS;

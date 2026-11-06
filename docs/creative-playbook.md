@@ -31,7 +31,7 @@ Then apply the owner gate in `taste-seed.md` §2 (Singapore truth, no ethnicity,
 
 ## 3. Funnel stages
 
-Four ads a week, as the site sells: 2 tof, 1 mof, 1 bof. The database enforces these pick counts.
+Three ads per batch: 1 tof, 1 mof, 1 bof (owner, 07-11-2026). The database enforces it. The owner runs batches until one ad is top tier, so judge each final as if it is the only ad the client sees.
 
 | Stage | Job | What to lead with | Never |
 |---|---|---|---|
@@ -50,7 +50,7 @@ Four ads a week, as the site sells: 2 tof, 1 mof, 1 bof. The database enforces t
 1. Research: the product page facts, buyer words (Reddit, reviews), and the Ad Library through Apify (the oldest active statics in the category; record how long each has run). Read the angle, never the look.
 2. Burst: at least 8 ideas per stage before you pick. Ideas cost nothing; drafts cost money.
 3. Kill: apply §2. Most ideas must die here. If fewer than the needed picks survive, write more ideas. Do not lower the bar.
-4. Mix: at most 2 of the 4 picks in the beige studio look; at least 1 native-looking ad.
+4. Mix: at least 1 of the 3 picks in a native look (not the beige studio look).
 5. Draft: 3 `low` drafts per picked idea, with the packshot as the reference.
 6. Pick (D2, Claude): judge each draft against §2 first, craft second. Pick one per idea with `picks_save`, then `final_render`, then `compose_final`.
 7. When a final fails §2, say so in the report. Do not send it.
