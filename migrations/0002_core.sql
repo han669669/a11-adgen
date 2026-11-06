@@ -73,18 +73,22 @@ CREATE TABLE ideas (
   final_prompt TEXT,
   final_refs TEXT NOT NULL DEFAULT '[]', -- JSON array of extra reference URLs for the final (texture photo)
   created_at TEXT NOT NULL,
-  UNIQUE (batch_id, n)
+  UNIQUE (batch_id, n),
+  UNIQUE (id, batch_id)            -- target of the composite keys below
 );
 CREATE INDEX ideas_batch ON ideas(batch_id);
+-- The critic picks one idea per format (Hook, Anatomy, Us vs Them, Offer).
+CREATE UNIQUE INDEX ideas_one_pick_per_format ON ideas(batch_id, format) WHERE picked = 1;
 
 -- The critic's rank of each draft image (1 = best, pre-selected on the board).
 CREATE TABLE draft_ranks (
   render_key TEXT PRIMARY KEY,
   batch_id TEXT NOT NULL REFERENCES batches(id),
-  idea_id TEXT NOT NULL REFERENCES ideas(id),
+  idea_id TEXT NOT NULL,
   rank INTEGER NOT NULL,
   reason TEXT,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (idea_id, batch_id) REFERENCES ideas(id, batch_id)
 );
 CREATE INDEX draft_ranks_batch ON draft_ranks(batch_id);
 
@@ -92,10 +96,11 @@ CREATE INDEX draft_ranks_batch ON draft_ranks(batch_id);
 CREATE TABLE picks (
   render_key TEXT PRIMARY KEY,
   batch_id TEXT NOT NULL REFERENCES batches(id),
-  idea_id TEXT NOT NULL REFERENCES ideas(id),
+  idea_id TEXT NOT NULL,
   note TEXT,
-  final_render_id TEXT,
-  created_at TEXT NOT NULL
+  final_render_id TEXT,            -- 'pending:<uuid>' while the paid submit runs (claim), then the render id
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (idea_id, batch_id) REFERENCES ideas(id, batch_id)
 );
 CREATE INDEX picks_batch ON picks(batch_id);
 CREATE INDEX renders_idea ON renders(idea);

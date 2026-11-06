@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 /** A small D1 stand-in on a real SQLite engine, so the Worker's SQL runs for real in tests. */
 export function fakeD1(): D1Database & { raw: DatabaseSync } {
   const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON"); // D1 enforces foreign keys
   const dir = new URL("../../migrations/", import.meta.url);
   for (const f of readdirSync(dir).filter((n) => n.endsWith(".sql")).sort()) db.exec(readFileSync(new URL(f, dir), "utf8"));
   const stmt = (sql: string, args: unknown[] = []) => ({

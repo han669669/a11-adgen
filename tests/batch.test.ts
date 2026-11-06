@@ -10,19 +10,33 @@ import { fakeD1 } from "./helpers/d1";
 
 afterEach(() => vi.unstubAllGlobals());
 
-const img = (url: string, type = "image/png") => ({ url, ok: true, status: 200, headers: new Headers({ "content-type": type }), body: "bytes", arrayBuffer: async () => new ArrayBuffer(4) });
+const img = (url: string, type = "image/png", size = 4, headers: Record<string, string> = {}) => ({
+  url,
+  ok: true,
+  status: 200,
+  headers: new Headers({ "content-type": type, ...headers }),
+  body: new Response(new Uint8Array(size)).body,
+});
 
 function makeEnv() {
   const saved = new Map<string, unknown>();
+  const transforms: unknown[] = [];
   const IMAGES = {
     input: () => {
-      const self = { transform: () => self, output: async () => ({ response: () => new Response("png") }) };
+      const self = {
+        transform: (t: unknown) => (transforms.push(t), self),
+        output: async () => ({ response: () => new Response("png") }),
+      };
       return self;
     },
   };
-  const MEDIA = { put: async (k: string, v: unknown) => void saved.set(k, v), get: async () => null };
+  const MEDIA = {
+    put: async (k: string, v: unknown) => void saved.set(k, v),
+    get: async () => null,
+    delete: async (k: string) => void saved.delete(k),
+  };
   const env = { DB: fakeD1(), MEDIA, IMAGES, SPEND_CAP_USD: "5.00", PUBLIC_BASE_URL: "https://w", FAL_KEY: "k" } as unknown as Env;
-  return { env, saved, raw: (env.DB as unknown as { raw: DatabaseSync }).raw };
+  return { env, saved, transforms, raw: (env.DB as unknown as { raw: DatabaseSync }).raw };
 }
 
 const kit = {
@@ -57,16 +71,19 @@ function addDraft(raw: DatabaseSync, batchId: string, ideaId: string, renderId: 
 
 describe("brand kit", () => {
   it("stores a trimmed logo and copies refs, with a new version per save", async () => {
-    const { env, saved } = makeEnv();
+    const { env, saved, transforms } = makeEnv();
     vi.stubGlobal("fetch", async (u: string) => img(u, u.endsWith(".jpg") ? "image/jpeg" : "image/png"));
     const v1 = await brandSave(env, { slug: "wongi", name: "WonGi", kit });
     const v2 = await brandSave(env, { slug: "wongi", name: "WonGi", kit, note: "new voice" });
     expect([v1.version, v2.version]).toEqual([1, 2]);
-    expect(v1.kit.logo.key).toMatch(/^brands\/[0-9a-f-]{36}\/v1-logo\.png$/);
+    expect(v1.kit.logo.key).toMatch(/^brands\/[0-9a-f-]{36}\/logo\.png$/);
+    expect(v2.kit.logo.key).not.toBe(v1.kit.logo.key);
+    expect(transforms).toEqual([{ trim: "border" }, { trim: "border" }]);
     expect(v1.kit.refs[0]!).toMatchObject({ role: "texture", sourceUrl: kit.refs[0]!.url });
-    expect(v1.kit.refs[0]!.key).toMatch(/v1-ref1\.jpg$/);
+    expect(v1.kit.refs[0]!.key).toMatch(/\/ref1\.jpg$/);
     expect(v1.kit.placement).toEqual({ logoWidthPct: 28, logoTopPct: 3 });
     expect(saved.size).toBe(4);
+    expect(v1.brandId).toBe(v2.brandId);
     expect((await brandGet(env, "wongi")).kit?.version).toBe(2);
     expect((await brandGet(env, "wongi", 1)).kit?.version).toBe(1);
   });
@@ -74,6 +91,28 @@ describe("brand kit", () => {
     const { env } = makeEnv();
     vi.stubGlobal("fetch", async (u: string) => img(u, "image/svg+xml"));
     await expect(brandSave(env, { slug: "wongi", name: "WonGi", kit })).rejects.toThrow("not SVG");
+  });
+  it("refuses an SVG reference and stores nothing", async () => {
+    const { env, saved, raw } = makeEnv();
+    vi.stubGlobal("fetch", async (u: string) => img(u, u.endsWith(".jpg") ? "image/SVG+xml" : "image/png"));
+    await expect(brandSave(env, { slug: "wongi", name: "WonGi", kit })).rejects.toThrow("not SVG");
+    expect(saved.size).toBe(0);
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM brands").get()).toEqual({ n: 0 });
+  });
+  it("refuses an image over the size limit, also with no Content-Length", async () => {
+    const { env } = makeEnv();
+    vi.stubGlobal("fetch", async (u: string) => img(u, "image/png", 9_000_000));
+    await expect(brandSave(env, { slug: "wongi", name: "WonGi", kit })).rejects.toThrow("larger than");
+    vi.stubGlobal("fetch", async (u: string) => img(u, "image/png", 4, { "content-length": "9000000" }));
+    await expect(brandSave(env, { slug: "wongi", name: "WonGi", kit })).rejects.toThrow("larger than");
+  });
+  it("deletes the stored files when the database write fails", async () => {
+    const { env, saved, raw } = makeEnv();
+    vi.stubGlobal("fetch", async (u: string) => img(u, u.endsWith(".jpg") ? "image/jpeg" : "image/png"));
+    raw.exec("CREATE TRIGGER no_kits BEFORE INSERT ON brand_kits BEGIN SELECT RAISE(ABORT, 'db down'); END");
+    await expect(brandSave(env, { slug: "wongi", name: "WonGi", kit })).rejects.toThrow("db down");
+    expect(saved.size).toBe(0);
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM brands").get()).toEqual({ n: 0 });
   });
   it("refuses a batch for a brand with no kit", async () => {
     const { env, raw } = makeEnv();
@@ -106,7 +145,7 @@ describe("batch flow", () => {
     expect(hook.drafts.map((d) => d.key)).toEqual([keys[1], keys[2], keys[0]]);
     expect(hook.drafts[0]!).toMatchObject({ rank: 1, picked: true, reason: "clean jar" });
     expect(got.picks).toEqual([{ key: keys[1], ideaId: ideas[0]!.id, note: "yes", finalRenderId: null }]);
-    expect(got.kit?.logo.key).toMatch(/v1-logo\.png$/);
+    expect(got.kit?.logo.key).toMatch(/\/logo\.png$/);
   });
 
   it("refuses to rank or pick a key that is not a finished draft of the batch", async () => {
@@ -147,6 +186,48 @@ describe("batch flow", () => {
     expect((await batch.batchGet(env, b.id)).picks[0]!.finalRenderId).toBe(r.id);
   });
 
+  it("ignores a draft whose idea belongs to another batch", async () => {
+    const { env, raw } = makeEnv();
+    const { b, subject } = await seed(env);
+    const other = await batch.batchCreate(env, { brandSlug: "wongi", subjectId: subject.id, label: "W47" });
+    const [foreign] = await batch.ideasSave(env, other.id, [{ format: "hook", insight: "x", visual: "x", headline: "x" }]);
+    const keys = addDraft(raw, b.id, foreign!.id, "77777777-7777-7777-7777-777777777777");
+    await expect(batch.picksSave(env, b.id, [{ key: keys[0] }])).rejects.toThrow("not a finished draft");
+  });
+
+  it("allows only one critic pick per format in a batch", async () => {
+    const { env } = makeEnv();
+    const { b } = await seed(env);
+    await expect(batch.ideasSave(env, b.id, [{ format: "hook", insight: "y", visual: "y", headline: "y", picked: true }])).rejects.toThrow(/UNIQUE/);
+  });
+
+  it("starts only one final when Render is tapped twice at once", async () => {
+    const { env, raw } = makeEnv();
+    const { b, ideas } = await seed(env);
+    const keys = addDraft(raw, b.id, ideas[0]!.id, "88888888-8888-8888-8888-888888888888");
+    await batch.picksSave(env, b.id, [{ key: keys[0] }]);
+    await batch.ideasUpdate(env, [{ id: ideas[0]!.id, finalPrompt: "C".repeat(50) }]);
+    let submits = 0;
+    vi.stubGlobal("fetch", async () => {
+      submits++;
+      return new Response(JSON.stringify({ request_id: "r", status_url: "https://q/s", response_url: "https://q/r" }));
+    });
+    const out = await Promise.all([batch.finalRender(env, b.id, keys[0]), batch.finalRender(env, b.id, keys[0])]);
+    expect(submits).toBe(1);
+    expect(out.filter((o) => o.status === "already started")).toHaveLength(1);
+  });
+
+  it("frees the pick when fal refuses the final, so Render can be tapped again", async () => {
+    const { env, raw } = makeEnv();
+    const { b, ideas } = await seed(env);
+    const keys = addDraft(raw, b.id, ideas[0]!.id, "99999999-9999-9999-9999-999999999999");
+    await batch.picksSave(env, b.id, [{ key: keys[0] }]);
+    await batch.ideasUpdate(env, [{ id: ideas[0]!.id, finalPrompt: "D".repeat(50) }]);
+    vi.stubGlobal("fetch", async () => new Response("down", { status: 500 }));
+    await expect(batch.finalRender(env, b.id, keys[0])).rejects.toThrow("fal submit failed");
+    expect(raw.prepare("SELECT final_render_id FROM picks").get()).toEqual({ final_render_id: null });
+  });
+
   it("reports an unknown idea id on update", async () => {
     const { env } = makeEnv();
     await expect(batch.ideasUpdate(env, [{ id: "55555555-5555-5555-5555-555555555555", picked: true }])).rejects.toThrow("No idea");
@@ -174,9 +255,46 @@ describe("nested tool input", () => {
       "Unknown argument: ideas[0].colour.",
     );
   });
+  it("refuses null for a nested object", () => {
+    expect(() => validate(schema, { batchId: "11111111-1111-1111-1111-111111111111", ideas: [{ ...idea, copy: null }] })).toThrow(
+      "ideas[0].copy must be an object.",
+    );
+  });
+  it("needs a source URL for every insight", () => {
+    const s2 = TOOLS.find((t) => t.name === "batch_update")!.inputSchema;
+    expect(() => validate(s2, { id: "11111111-1111-1111-1111-111111111111", insights: [{ truth: "a buyer truth" }] })).toThrow(
+      "insights[0].sourceUrl is required.",
+    );
+  });
   it("refuses a wrong nested type", () => {
     expect(() => validate(schema, { batchId: "11111111-1111-1111-1111-111111111111", ideas: [{ ...idea, picked: "yes" }] })).toThrow(
       "ideas[0].picked must be true or false.",
     );
+  });
+});
+
+describe("compose_final with brandSlug", () => {
+  it("uses the kit version the batch was made with, not a later one", async () => {
+    const { env, raw } = makeEnv();
+    const { b, ideas } = await seed(env);
+    const v1Logo = (await brandGet(env, "wongi")).kit!.kit.logo.key;
+    await brandSave(env, { slug: "wongi", name: "WonGi", kit, note: "v2" });
+    const renderId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    raw
+      .prepare(
+        `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, image_keys, usd_est, created_at, updated_at)
+         VALUES (?, ?, ?, 'final', 'done', 'p', '[]', 1536, 1920, 'high', 1, ?, 0.06, 'now', 'now')`,
+      )
+      .run(renderId, b.id, ideas[0]!.id, JSON.stringify([`renders/${renderId}/1.jpg`]));
+    const asked: string[] = [];
+    (env.MEDIA as unknown as { get: (k: string) => Promise<unknown> }).get = async (k: string) => (asked.push(k), { body: k });
+    (env.IMAGES as unknown as { input: () => unknown }).input = () => {
+      const self = { transform: () => self, draw: () => self, output: async () => ({ response: () => new Response("jpg") }) };
+      return self;
+    };
+    const tool = TOOLS.find((t) => t.name === "compose_final")!;
+    const res = await tool.run(env, validate(tool.inputSchema, { key: `renders/${renderId}/1.jpg`, brandSlug: "wongi" }));
+    expect(res.isError).toBeUndefined();
+    expect(asked).toContain(v1Logo);
   });
 });

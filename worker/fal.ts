@@ -1,6 +1,9 @@
 import type { Env } from "./env";
 import { PRICE, reserve, settle } from "./spend";
 
+/** A batch needs about 20 renders; submit refuses more than this, so batch_get never cuts the list. */
+export const MAX_BATCH_RENDERS = 150;
+
 export const FAL_MODEL = "openai/gpt-image-2.5/sunburst/edit";
 const QUEUE = "https://queue.fal.run";
 
@@ -40,6 +43,8 @@ export async function submit(env: Env, input: SubmitInput) {
   const id = crypto.randomUUID();
   const usd = estimate(input.kind, input.numImages, input.referenceUrls.length);
   const prompt = `${input.prompt.trim()}\n\n${RENDER_SUFFIX}`;
+  const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM renders WHERE batch = ?").bind(input.batch).first<{ n: number }>();
+  if ((count?.n ?? 0) >= MAX_BATCH_RENDERS) throw new Error(`Batch ${input.batch} has ${MAX_BATCH_RENDERS} renders, the limit. Start a new batch.`);
   const spendId = await reserve(env, "fal", input.kind, id, usd);
   const now = new Date().toISOString();
   let accepted = false; // once fal accepts, the render is billed: never release its reservation

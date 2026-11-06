@@ -1,6 +1,6 @@
 import type { Env } from "./env";
 import { mediaUrl } from "./fal";
-import { extFor, fetchHttpsImage } from "./images";
+import { contentType, extFor, fetchHttpsImage, readCapped } from "./images";
 
 export const SLUG = "^[a-z0-9][a-z0-9-]{1,40}$";
 
@@ -61,38 +61,35 @@ export async function latestKit(env: Env, brandId: string, version?: number) {
 
 /**
  * Save a brand (created on first save) and a new kit version.
- * The logo is trimmed (transparent border removed) and stored in R2, so placement numbers apply to the visible mark.
- * Reference photos are copied to R2, so a later site change does not break old batches.
+ * Order: fetch and check every file first; store them in R2 under a new kit id; then write the brand and the kit row
+ * in one D1 transaction, with the version taken inside it (so two saves cannot get the same version).
+ * When the D1 write fails, the stored files are deleted, so a failed save leaves nothing behind.
+ * The logo is trimmed (transparent border removed), so placement numbers apply to the visible mark.
  */
 export async function brandSave(env: Env, input: { slug: string; name: string; siteUrl?: string; kit: KitInput; note?: string }) {
-  const now = new Date().toISOString();
-  await env.DB.prepare(
-    `INSERT INTO brands (id, slug, name, site_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (slug) DO UPDATE SET name = excluded.name, site_url = COALESCE(excluded.site_url, brands.site_url), updated_at = excluded.updated_at`,
-  )
-    .bind(crypto.randomUUID(), input.slug, input.name, input.siteUrl ?? null, now, now)
-    .run();
-  const brand = await brandBySlug(env, input.slug);
-  const prev = await latestKit(env, brand.id);
-  const version = (prev?.version ?? 0) + 1;
-  const base = `brands/${brand.id}/v${version}`;
-
   const logoRes = await fetchHttpsImage(input.kit.logoUrl, "Logo");
-  // Cloudflare Images does not draw SVG files into a picture, so the kit needs a raster logo.
-  if ((logoRes.headers.get("content-type") ?? "").includes("svg")) throw new Error("Logo must be a PNG or WebP file, not SVG.");
-  const trimmed = await env.IMAGES.input(logoRes.body!).transform({ trim: "border" }).output({ format: "image/png" });
-  const logoKey = `${base}-logo.png`;
-  await env.MEDIA.put(logoKey, await trimmed.response().arrayBuffer(), { httpMetadata: { contentType: "image/png" } });
-
-  const refs: Kit["refs"] = [];
+  // Cloudflare Images does not draw SVG files into a picture, so the kit needs raster files.
+  if (contentType(logoRes).includes("svg")) throw new Error("Logo must be a PNG or WebP file, not SVG.");
+  const logoBytes = await readCapped(logoRes, "Logo");
+  const refFiles: { bytes: Uint8Array; type: string; ref: KitRefInput }[] = [];
   for (const [i, ref] of (input.kit.refs ?? []).entries()) {
     const res = await fetchHttpsImage(ref.url, `Reference ${i + 1}`);
-    const type = res.headers.get("content-type") ?? "image/jpeg";
-    const key = `${base}-ref${i + 1}.${extFor(type)}`;
-    await env.MEDIA.put(key, await res.arrayBuffer(), { httpMetadata: { contentType: type } });
-    refs.push({ key, url: mediaUrl(env, key), sourceUrl: ref.url, label: ref.label, role: ref.role });
+    const type = contentType(res);
+    if (type.includes("svg")) throw new Error(`Reference ${i + 1} must be a PNG, JPEG or WebP file, not SVG.`);
+    refFiles.push({ bytes: await readCapped(res, `Reference ${i + 1}`), type, ref });
   }
+  const trimmed = await env.IMAGES.input(new Blob([logoBytes]).stream()).transform({ trim: "border" }).output({ format: "image/png" });
+  const trimmedBytes = await trimmed.response().arrayBuffer();
 
+  const kitId = crypto.randomUUID();
+  const base = `brands/${kitId}`;
+  const logoKey = `${base}/logo.png`;
+  const puts: { key: string; bytes: ArrayBuffer | Uint8Array; type: string }[] = [{ key: logoKey, bytes: trimmedBytes, type: "image/png" }];
+  const refs: Kit["refs"] = refFiles.map((f, i) => {
+    const key = `${base}/ref${i + 1}.${extFor(f.type)}`;
+    puts.push({ key, bytes: f.bytes, type: f.type });
+    return { key, url: mediaUrl(env, key), sourceUrl: f.ref.url, label: f.ref.label, role: f.ref.role };
+  });
   const kit: Kit = {
     logo: { key: logoKey, url: mediaUrl(env, logoKey), sourceUrl: input.kit.logoUrl },
     palette: input.kit.palette,
@@ -103,10 +100,27 @@ export async function brandSave(env: Env, input: { slug: string; name: string; s
     placement: { logoWidthPct: input.kit.logoWidthPct ?? 28, logoTopPct: input.kit.logoTopPct ?? 3 },
     notes: input.kit.notes ?? "",
   };
-  await env.DB.prepare("INSERT INTO brand_kits (id, brand_id, version, kit, note, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-    .bind(crypto.randomUUID(), brand.id, version, JSON.stringify(kit), input.note ?? null, now)
-    .run();
-  return { brandId: brand.id, slug: brand.slug, version, kit };
+
+  for (const f of puts) await env.MEDIA.put(f.key, f.bytes, { httpMetadata: { contentType: f.type } });
+  const now = new Date().toISOString();
+  try {
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO brands (id, slug, name, site_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (slug) DO UPDATE SET name = excluded.name, site_url = COALESCE(excluded.site_url, brands.site_url), updated_at = excluded.updated_at`,
+      ).bind(crypto.randomUUID(), input.slug, input.name, input.siteUrl ?? null, now, now),
+      env.DB.prepare(
+        `INSERT INTO brand_kits (id, brand_id, version, kit, note, created_at)
+         SELECT ?, b.id, (SELECT COALESCE(MAX(k.version), 0) + 1 FROM brand_kits k WHERE k.brand_id = b.id), ?, ?, ?
+         FROM brands b WHERE b.slug = ?`,
+      ).bind(kitId, JSON.stringify(kit), input.note ?? null, now, input.slug),
+    ]);
+  } catch (e) {
+    await Promise.allSettled(puts.map((f) => env.MEDIA.delete(f.key)));
+    throw e;
+  }
+  const row = await env.DB.prepare("SELECT k.brand_id, k.version FROM brand_kits k WHERE k.id = ?").bind(kitId).first<{ brand_id: string; version: number }>();
+  return { brandId: row!.brand_id, slug: input.slug, version: row!.version, kit };
 }
 
 export async function brandGet(env: Env, slug: string, version?: number) {

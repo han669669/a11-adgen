@@ -71,8 +71,9 @@ function checkProp(name: string, p: Prop, v: unknown): unknown {
 }
 
 function checkObject(name: string, schema: ObjectSchema, args: unknown): Record<string, unknown> {
+  if (args === null) throw new InputError(`${name || "Arguments"} must be an object.`);
   const input = (args ?? {}) as Record<string, unknown>;
-  if (typeof input !== "object" || Array.isArray(input)) throw new InputError(`${name} must be an object.`);
+  if (typeof input !== "object" || Array.isArray(input)) throw new InputError(`${name || "Arguments"} must be an object.`);
   const prefix = name ? `${name}.` : "";
   for (const key of Object.keys(input)) {
     if (!Object.hasOwn(schema.properties, key)) throw new InputError(`Unknown argument: ${prefix}${key}.`);

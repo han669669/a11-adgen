@@ -69,7 +69,7 @@ export async function composeFinal(env: Env, input: ComposeInput) {
     const out = await img.output({ format: "image/jpeg", quality: 92 });
     const bytes = await out.response().arrayBuffer();
     // A new key per compose, so an approved image is never replaced.
-    const outKey = `renders/${id}/${n}-c${Date.now()}.jpg`;
+    const outKey = `renders/${id}/${n}-c${Date.now()}${crypto.getRandomValues(new Uint32Array(1))[0]}.jpg`;
     await env.MEDIA.put(outKey, bytes, { httpMetadata: { contentType: "image/jpeg" } });
     await settle(env, spendId, true);
     return { key: outKey, url: mediaUrl(env, outKey), logoWidth, top, grain: input.grain };

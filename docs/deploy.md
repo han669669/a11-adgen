@@ -34,6 +34,18 @@ On 2026-11-07 a 24 KB bundle copied by hand into a connector call had one wrong 
 | `a11adgen` | Live. Deploys only `main`. | `FAL_KEY`, `EXA_API_KEY` |
 | `a11adgen-preview` | Tests a branch before its PR merges. Since 2026-11-07 it uses its own D1 `a11adgen-preview-db` (`2c28c64f-f8c0-46f9-9e2d-7ca70d2a0f70`) and R2 `a11adgen-preview-assets`, both APAC. | none (no paid calls from it) |
 
+### Preview deploy
+
+Deploy a branch to `a11adgen-preview` with the same steps, but with these bindings (never the live ones):
+
+| Binding | Preview value |
+|---|---|
+| `DB` | D1 `a11adgen-preview-db` (`2c28c64f-f8c0-46f9-9e2d-7ca70d2a0f70`) |
+| `MEDIA` | R2 `a11adgen-preview-assets` |
+| `PUBLIC_BASE_URL` | `https://a11adgen-preview.gamingcomputing.workers.dev` |
+
+Stage preview bundles and SQL through `a11adgen-preview` (they land in `a11adgen-preview-assets/deploy/`), and read them from that bucket in the connector.
+
 ### Preview rules
 
 The preview has its own D1 and R2 (a branch with a schema change needed them first). It has no secrets, so it cannot call fal or Exa. Rules:
