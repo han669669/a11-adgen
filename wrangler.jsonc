@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "a11adgen",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "a11adgen-db",
+      "database_id": "79da5273-d683-4135-89f4-a1296ff4f34e",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "a11adgen-assets" }],
+  "vars": {
+    "SPEND_CAP_USD": "1.00",
+    "PUBLIC_BASE_URL": "https://a11adgen.gamingcomputing.workers.dev"
+  }
+  // Secrets (dashboard → Variables and Secrets): FAL_KEY, EXA_API_KEY. MCP_TOKEN_SHA256 holds only a hash.
+}
