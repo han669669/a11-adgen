@@ -17,7 +17,7 @@ Claude Code is the brain. Cloudflare is the hands. The owner touches one button 
 | **API + web app** (Worker `a11adgen`, static assets) | Brand kits, products, the batch board, the one human step, settings, spend. |
 | **Client portal** (token link, no login) | View, comment, download the pack, upload results. |
 | **D1** `a11adgen-db` | Brands, kit versions, products, facts, research, ideas, drafts, picks, canon, swipe file, results, spend. |
-| **R2** `a11adgen-media` | Images, packs, client uploads, the v1 export. |
+| **R2** `a11adgen-assets` | Images, packs, client uploads, the v1 export. |
 | **Workflows** | fal render jobs with retries; a step waits for the fal result. |
 | **Browser Rendering** | Brand site screenshot, header HTML, logo files. |
 | **Cron Triggers** | Weekly client reminder for results; canon health check. |

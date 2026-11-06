@@ -9,11 +9,11 @@
     {
       "binding": "DB",
       "database_name": "a11adgen-db",
-      "database_id": "e594c5f0-c260-47da-8cca-5f7cd7c3dc2d",
+      "database_id": "79da5273-d683-4135-89f4-a1296ff4f34e",
       "migrations_dir": "migrations"
     }
   ],
-  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "a11adgen-media" }],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "a11adgen-assets" }],
   "vars": {
     "SPEND_CAP_USD": "1.00",
     "PUBLIC_BASE_URL": "https://a11adgen.gamingcomputing.workers.dev"
