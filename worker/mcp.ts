@@ -117,7 +117,7 @@ export const TOOLS: Tool[] = [
       type: "object",
       properties: {
         key: { type: "string", pattern: "^renders/[0-9a-f-]{36}/\\d+\\.jpg$" },
-        logoUrl: { type: "string", format: "uri", description: "HTTPS URL of the brand's real logo file (PNG or SVG, transparent). Prefer a trimmed file; the tool also trims a transparent border before it sizes the logo." },
+        logoUrl: { type: "string", format: "uri", pattern: "^https://", description: "HTTPS URL of the brand's real logo file (PNG or SVG, transparent). Prefer a trimmed file; the tool also trims a transparent border before it sizes the logo." },
         logoWidthPct: { type: "integer", minimum: 10, maximum: 60, default: 34, description: "Logo width, percent of the picture width" },
         logoTopPct: { type: "integer", minimum: 2, maximum: 30, default: 5, description: "Logo top edge, percent of the picture height" },
         grain: { type: "string", enum: ["on", "off"], default: "on" },
