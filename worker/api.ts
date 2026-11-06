@@ -22,6 +22,29 @@ async function body(request: Request): Promise<Record<string, any>> {
   }
 }
 
+/**
+ * Claim the compose of one final, so two refreshes at once draw the logo only once. A claim older than
+ * 2 minutes is stale (the Worker stopped mid-compose), so a later refresh takes it over.
+ * Returns the claim value, or null when another refresh holds a live claim or the compose is settled.
+ */
+export async function claimCompose(env: Env, id: string, now = new Date()): Promise<string | null> {
+  const stale = new Date(now.getTime() - 120_000).toISOString();
+  const claim = `pending:${now.toISOString()}:${crypto.randomUUID()}`;
+  const res = await env.DB.prepare(
+    `UPDATE renders SET composed_key = ? WHERE id = ?
+     AND (composed_key IS NULL OR (composed_key LIKE 'pending:%' AND composed_key < ?))`,
+  )
+    .bind(claim, id, `pending:${stale}`)
+    .run();
+  return res.meta.changes === 1 ? claim : null;
+}
+
+/** Write the compose result only while this claim still holds, so a superseded compose cannot overwrite a newer one. */
+export async function settleCompose(env: Env, id: string, claim: string, value: string): Promise<boolean> {
+  const res = await env.DB.prepare("UPDATE renders SET composed_key = ? WHERE id = ? AND composed_key = ?").bind(value, id, claim).run();
+  return res.meta.changes === 1;
+}
+
 /** Board check of one render: poll fal; when a final is done, draw the kit's real logo once (D2: no extra step). */
 async function refresh(env: Env, id: string) {
   const status = await fal.check(env, id);
@@ -36,17 +59,8 @@ async function refresh(env: Env, id: string) {
   if (row.composed_key?.startsWith("renders/")) return { ...status, composed: fal.mediaUrl(env, row.composed_key) };
   const kit = await latestKit(env, row.brand_id, row.kit_version);
   if (!kit) return status;
-  // Claim the compose first, so two refreshes at once draw the logo only once. A claim older than
-  // 2 minutes is stale (the Worker stopped mid-compose), so a later refresh takes it over.
-  const now = new Date();
-  const stale = new Date(now.getTime() - 120_000).toISOString();
-  const claimed = await env.DB.prepare(
-    `UPDATE renders SET composed_key = ? WHERE id = ?
-     AND (composed_key IS NULL OR (composed_key LIKE 'pending:%' AND composed_key < ?))`,
-  )
-    .bind(`pending:${now.toISOString()}`, id, `pending:${stale}`)
-    .run();
-  if (claimed.meta.changes !== 1) return { ...status, composed: null };
+  const claim = await claimCompose(env, id);
+  if (!claim) return { ...status, composed: null };
   try {
     const out = await composeFinal(env, {
       key: status.images[0]!.key,
@@ -56,13 +70,14 @@ async function refresh(env: Env, id: string) {
       grain: "on",
       grainPct: 18,
     });
-    await env.DB.prepare("UPDATE renders SET composed_key = ? WHERE id = ?").bind(out.key, id).run();
+    // A newer claim took over (this compose ran past the stale limit): keep its result, not ours.
+    if (!(await settleCompose(env, id, claim, out.key))) return { ...status, composed: null };
     return { ...status, composed: out.url };
   } catch (e) {
     // Record the failure, so the board stops polling and shows it. compose_final (MCP) on this render
     // writes its result here, which clears the error.
     const msg = (e instanceof Error ? e.message : String(e)).slice(0, 300);
-    await env.DB.prepare("UPDATE renders SET composed_key = ? WHERE id = ?").bind(`error:${msg}`, id).run();
+    if (!(await settleCompose(env, id, claim, `error:${msg}`))) return { ...status, composed: null };
     return { ...status, composed: null, composeError: msg };
   }
 }
