@@ -48,7 +48,7 @@ Lesson 2 is a rule for the pipeline: **a reference image carries its state.** Wh
 ## 4. What Phase 0 proved
 
 - Claude Code + a hand-written MCP server on the Workers Free plan works end to end.
-- fal `edit` with references keeps the real label, characters and logo at low and high quality.
+- fal `edit` with references keeps the pack label and characters close to the real photo. It does **not** give an exact logo or real-looking food: the owner marked the logo as not matching the real wordmark and the kernels as AI food (`docs/marks.md`, 2026-11-07). The logo must come from the real file in code.
 - Low drafts are fast (about 25 s for 3) and cheap, so 3 drafts per idea is affordable.
 - The critic step catches real defects that a person would reject (a contradicting picture, a doubled object).
 

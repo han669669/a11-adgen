@@ -1,30 +1,10 @@
-import { readFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import type { Env } from "../worker/env";
 import { BudgetError, reserve, settle, totals } from "../worker/spend";
+import { fakeD1 } from "./helpers/d1";
 
-/** A small D1 stand-in on a real SQLite engine, so the spend SQL (strftime, INSERT ... SELECT) runs for real. */
-function fakeD1(): D1Database {
-  const db = new DatabaseSync(":memory:");
-  db.exec(readFileSync(new URL("../migrations/0001_init.sql", import.meta.url), "utf8"));
-  const stmt = (sql: string, args: unknown[] = []) => ({
-    bind: (...a: unknown[]) => stmt(sql, a),
-    async run() {
-      const r = db.prepare(sql).run(...(args as never[]));
-      return { meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } };
-    },
-    async first() {
-      return db.prepare(sql).get(...(args as never[])) ?? null;
-    },
-    async all() {
-      return { results: db.prepare(sql).all(...(args as never[])) };
-    },
-  });
-  return { prepare: (sql: string) => stmt(sql), raw: db } as unknown as D1Database;
-}
-
-const envWith = (cap: string) => ({ DB: fakeD1(), SPEND_CAP_USD: cap }) as Env;
+const envWith = (cap: string) => ({ DB: fakeD1(), SPEND_CAP_USD: cap }) as unknown as Env;
 const raw = (env: Env) => (env.DB as unknown as { raw: DatabaseSync }).raw;
 
 describe("spend cap", () => {
