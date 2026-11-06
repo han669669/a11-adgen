@@ -1,7 +1,10 @@
 import type { Env } from "./env";
 import { handleMcp } from "./mcp";
 
-const MEDIA_KEY = /^renders\/[0-9a-f-]{36}\/\d+\.jpg$/;
+/** A Worker bundle on the Free plan is at most 3 MB. */
+const STAGE_MAX_BYTES = 3_000_000;
+
+const MEDIA_KEY = /^renders\/[0-9a-f-]{36}\/\d+(-c)?\.jpg$/;
 
 async function sha256Hex(s: string): Promise<string> {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
@@ -31,6 +34,22 @@ export default {
     if (url.pathname === "/mcp") {
       if (!(await tokenOk(request, env.MCP_TOKEN_SHA256))) return new Response("Unauthorized", { status: 401 });
       return handleMcp(request, env);
+    }
+
+    // Deploy staging: put a built bundle into R2 (deploy/<name>), so the Cloudflare connector can deploy it from there.
+    if (url.pathname.startsWith("/admin/stage/") && request.method === "PUT") {
+      if (!(await tokenOk(request, env.MCP_TOKEN_SHA256))) return new Response("Unauthorized", { status: 401 });
+      const name = url.pathname.slice("/admin/stage/".length);
+      if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(name)) return new Response("Bad name", { status: 400 });
+      // Check the declared size before reading the body, so an oversized upload is never buffered.
+      const declared = request.headers.get("content-length");
+      if (declared === null) return new Response("Content-Length required", { status: 411 });
+      if (Number(declared) > STAGE_MAX_BYTES) return new Response("Too large", { status: 413 });
+      const body = await request.arrayBuffer();
+      if (body.byteLength === 0) return new Response("Empty body", { status: 400 });
+      if (body.byteLength > STAGE_MAX_BYTES) return new Response("Too large", { status: 413 });
+      await env.MEDIA.put(`deploy/${name}`, body, { httpMetadata: { contentType: "application/javascript" } });
+      return Response.json({ key: `deploy/${name}`, bytes: body.byteLength });
     }
 
     // Media: unguessable keys (random UUIDs). fal reads chosen drafts from here as references.

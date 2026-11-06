@@ -15,6 +15,7 @@
     }
   ],
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "a11adgen-assets" }],
+  "images": { "binding": "IMAGES" },
   "vars": {
     "SPEND_CAP_USD": "1.00",
     "PUBLIC_BASE_URL": "https://a11adgen.gamingcomputing.workers.dev"
