@@ -47,7 +47,7 @@ The business: a11studio.pro sells 16 static ads per month (4 per week) for S$2,8
 | D4 | Private repo `han669669/a11-adgen`. | |
 | D5 | Port v1 data (marks, notes, Used ads) when it serves the goals. | Seeds the taste canon, the swipe file and the gold test set. |
 | D6 | Use the Cloudflare `workers.dev` subdomain. | `a11adgen.gamingcomputing.workers.dev`. The account subdomain is `gamingcomputing`. A bare `a11-adgen.workers.dev` is not possible. Owner chose the Worker name `a11adgen` (2026-11-06). Do not change the account subdomain: 3 other Workers use it. |
-| D7 | Secret keys: the owner gives them when you ask. | Ask only at the step that needs the key. Never ask him to paste a key in chat. See section 9. |
+| D7 | Secret keys: the owner gives them when you ask. | Ask only at the step that needs the key. Never ask him to paste a key in chat. See section 11. |
 
 ---
 
@@ -80,7 +80,7 @@ The account is on the Workers Free plan. Design for these limits (read 2026-11-0
 
 ## 7. Deploy
 
-There is no Cloudflare API token in the session (owner decision: use the Cloudflare connector). To deploy: build with `npx wrangler deploy --dry-run --minify --outdir .wrangler/dry`, then upload `.wrangler/dry/index.js` with the connector (`PUT /accounts/{id}/workers/scripts/a11adgen`, multipart, the bindings from `wrangler.jsonc`, `keep_bindings: ["secret_text"]` so the owner's secrets stay). D1 migrations run through the connector's D1 query API, and each one is recorded in `d1_migrations`. Keep the bundle small enough to upload this way (Phase 0: 14 KB).
+There is no Cloudflare API token in the session (owner decision: use the Cloudflare connector). To deploy: build with `npx wrangler deploy --dry-run --minify --outdir .wrangler/dry`, then upload `.wrangler/dry/index.js` with the connector (`PUT /accounts/{id}/workers/scripts/a11adgen`, multipart, the bindings from `wrangler.jsonc` plus `MCP_TOKEN_SHA256` as a `plain_text` binding (it is not in `wrangler.jsonc`), `keep_bindings: ["secret_text"]` so the owner's secrets stay). D1 migrations run through the connector's D1 query API, and each one is recorded in `d1_migrations`. Keep the bundle small enough to upload this way (Phase 0: 14 KB).
 
 Phase 0 auth: `/mcp` needs a bearer token. The Worker keeps only its SHA-256 (`MCP_TOKEN_SHA256`, a plain var). The token itself is not in the repo.
 

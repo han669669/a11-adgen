@@ -27,6 +27,11 @@ describe("mcp handler", () => {
     expect(j.result.isError).toBe(true);
     expect(j.result.content[0].text).toMatch(/Bad input/);
   });
+  it("never answers or runs a tool for a notification", async () => {
+    // No id: a paid tool must not run. env has no DB, so running it would throw.
+    const r = await post({ jsonrpc: "2.0", method: "tools/call", params: { name: "spend_get", arguments: {} } });
+    expect(r.status).toBe(202);
+  });
   it("refuses GET", async () => {
     const r = await handleMcp(new Request("https://x/mcp"), env);
     expect(r.status).toBe(405);
@@ -40,4 +45,5 @@ describe("validate", () => {
   it("rejects an unknown kind", () => expect(() => validate(schema, { ...ok, kind: "huge" })).toThrow());
   it("rejects a non-URL reference", () => expect(() => validate(schema, { ...ok, referenceUrls: ["file:///etc/passwd"] })).toThrow());
   it("rejects unknown arguments", () => expect(() => validate(schema, { ...ok, extra: 1 })).toThrow());
+  it("rejects inherited names as arguments", () => expect(() => validate(schema, { ...ok, toString: "x" })).toThrow());
 });

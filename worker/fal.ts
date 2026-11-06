@@ -42,6 +42,7 @@ export async function submit(env: Env, input: SubmitInput) {
   const prompt = `${input.prompt.trim()}\n\n${RENDER_SUFFIX}`;
   const spendId = await reserve(env, "fal", input.kind, id, usd);
   const now = new Date().toISOString();
+  let accepted = false; // once fal accepts, the render is billed: never release its reservation
   try {
     const res = await fetch(`${QUEUE}/${FAL_MODEL}`, {
       method: "POST",
@@ -55,9 +56,12 @@ export async function submit(env: Env, input: SubmitInput) {
         output_format: "jpeg",
         output_compression: 90,
       }),
+      signal: AbortSignal.timeout(25_000),
     });
     if (!res.ok) throw new Error(`fal submit failed: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
     const q = (await res.json()) as { request_id: string; status_url: string; response_url: string };
+    accepted = true;
+    await settle(env, spendId, true);
     await env.DB.prepare(
       `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images,
         fal_request_id, status_url, response_url, usd_est, created_at, updated_at)
@@ -67,10 +71,9 @@ export async function submit(env: Env, input: SubmitInput) {
         size.width, size.height, size.quality, input.numImages,
         q.request_id, q.status_url, q.response_url, usd, now, now)
       .run();
-    await settle(env, spendId, true);
     return { id, usdEstimate: usd, status: "queued" as const };
   } catch (e) {
-    await settle(env, spendId, false);
+    if (!accepted) await settle(env, spendId, false);
     throw e;
   }
 }
@@ -94,22 +97,25 @@ export async function check(env: Env, id: string) {
   if (!row) throw new Error(`No render with id ${id}.`);
   if (row.status !== "queued") return view(env, row);
 
-  const st = await fetch(row.status_url, { headers: auth(env) });
-  if (!st.ok && st.status !== 202) throw new Error(`fal status failed: HTTP ${st.status}`);
+  // Network errors and HTTP 5xx/429 are transient: the row stays queued and the next poll tries again.
+  const st = await fetch(row.status_url, { headers: auth(env), signal: AbortSignal.timeout(15_000) });
+  if (!st.ok && st.status !== 202) {
+    if (transient(st.status)) return { id, status: "queued", note: `fal status HTTP ${st.status}; poll again.` };
+    return fail(env, row, `fal status failed: HTTP ${st.status} ${(await st.text()).slice(0, 300)}`);
+  }
   const s = (await st.json()) as { status: string };
   if (s.status !== "COMPLETED") return { id, status: "queued", falStatus: s.status };
 
-  const out = await fetch(row.response_url, { headers: auth(env) });
-  const now = new Date().toISOString();
+  const out = await fetch(row.response_url, { headers: auth(env), signal: AbortSignal.timeout(15_000) });
   if (!out.ok) {
-    const err = `fal result failed: HTTP ${out.status} ${(await out.text()).slice(0, 300)}`;
-    await env.DB.prepare("UPDATE renders SET status = 'failed', error = ?, updated_at = ? WHERE id = ?").bind(err, now, id).run();
-    return view(env, { ...row, status: "failed", error: err });
+    if (transient(out.status)) return { id, status: "queued", note: `fal result HTTP ${out.status}; poll again.` };
+    return fail(env, row, `fal result failed: HTTP ${out.status} ${(await out.text()).slice(0, 300)}`);
   }
   const data = (await out.json()) as { images?: { url: string; content_type?: string }[] };
+  const images = data.images ?? [];
   const keys: string[] = [];
-  for (const [i, img] of (data.images ?? []).entries()) {
-    const file = await fetch(img.url);
+  for (const [i, img] of images.entries()) {
+    const file = await fetch(img.url, { signal: AbortSignal.timeout(15_000) });
     if (!file.ok) continue;
     const key = `renders/${id}/${i + 1}.jpg`;
     await env.MEDIA.put(key, await file.arrayBuffer(), {
@@ -118,10 +124,22 @@ export async function check(env: Env, id: string) {
     keys.push(key);
   }
   const status = keys.length ? "done" : "failed";
+  const error = keys.length === images.length ? null : `saved ${keys.length} of ${images.length} images`;
   await env.DB.prepare("UPDATE renders SET status = ?, image_keys = ?, error = ?, updated_at = ? WHERE id = ?")
-    .bind(status, JSON.stringify(keys), keys.length ? null : "fal returned no images", now, id)
+    .bind(status, JSON.stringify(keys), error, new Date().toISOString(), id)
     .run();
-  return view(env, { ...row, status, image_keys: JSON.stringify(keys) });
+  return view(env, { ...row, status, error, image_keys: JSON.stringify(keys) });
+}
+
+export function transient(httpStatus: number): boolean {
+  return httpStatus === 429 || httpStatus >= 500;
+}
+
+async function fail(env: Env, row: RenderRow, error: string) {
+  await env.DB.prepare("UPDATE renders SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
+    .bind(error, new Date().toISOString(), row.id)
+    .run();
+  return view(env, { ...row, status: "failed", error });
 }
 
 function view(env: Env, row: RenderRow) {

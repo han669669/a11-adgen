@@ -9,6 +9,7 @@ async function exaPost(env: Env, path: string, body: unknown): Promise<any> {
     method: "POST",
     headers: { "x-api-key": env.EXA_API_KEY, "content-type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(25_000),
   });
   if (!res.ok) throw new Error(`Exa ${path} failed: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
   return res.json();

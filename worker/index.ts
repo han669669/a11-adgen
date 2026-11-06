@@ -13,8 +13,15 @@ async function tokenOk(request: Request, expectedHash: string | undefined): Prom
   if (!expectedHash || expectedHash.length !== 64) return false;
   const got = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
   if (!got) return false;
-  const enc = new TextEncoder();
-  return crypto.subtle.timingSafeEqual(enc.encode(await sha256Hex(got)), enc.encode(expectedHash.toLowerCase()));
+  return sameHex(await sha256Hex(got), expectedHash.toLowerCase());
+}
+
+/** Constant-time compare of two equal-length hex strings (works in Workers and in Node tests). */
+function sameHex(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
 export default {

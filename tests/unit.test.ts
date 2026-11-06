@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { toBase64 } from "../worker/b64";
-import { SIZES, estimate } from "../worker/fal";
+import { SIZES, estimate, transient } from "../worker/fal";
 
 describe("4:5 sizes", () => {
   it("are 4:5 and multiples of 16", () => {
@@ -28,5 +28,14 @@ describe("toBase64", () => {
   it("matches Buffer for a large body", () => {
     const bytes = new Uint8Array(200_000).map((_, i) => (i * 31) % 256);
     expect(toBase64(bytes.buffer)).toBe(Buffer.from(bytes).toString("base64"));
+  });
+});
+
+describe("transient", () => {
+  it("retries 429 and 5xx, not 4xx", () => {
+    expect(transient(429)).toBe(true);
+    expect(transient(503)).toBe(true);
+    expect(transient(400)).toBe(false);
+    expect(transient(404)).toBe(false);
   });
 });

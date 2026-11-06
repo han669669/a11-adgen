@@ -40,7 +40,7 @@ export function validate(schema: ObjectSchema, args: unknown): Record<string, un
   const input = (args ?? {}) as Record<string, unknown>;
   if (typeof input !== "object" || Array.isArray(input)) throw new InputError("Arguments must be an object.");
   for (const key of Object.keys(input)) {
-    if (!(key in schema.properties)) throw new InputError(`Unknown argument: ${key}.`);
+    if (!Object.hasOwn(schema.properties, key)) throw new InputError(`Unknown argument: ${key}.`);
   }
   const out: Record<string, unknown> = {};
   for (const [name, p] of Object.entries(schema.properties)) {
