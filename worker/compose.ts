@@ -31,12 +31,18 @@ export async function composeFinal(env: Env, input: ComposeInput) {
   const m = RENDER_KEY.exec(input.key);
   if (!m) throw new Error("key must be a render image key (renders/<id>/<n>.jpg).");
   const [, id, n] = m;
-  const row = await env.DB.prepare("SELECT width, height FROM renders WHERE id = ?").bind(id).first<{ width: number; height: number }>();
+  const row = await env.DB.prepare("SELECT width, height, kind, status FROM renders WHERE id = ?")
+    .bind(id)
+    .first<{ width: number; height: number; kind: string; status: string }>();
   if (!row) throw new Error(`No render with id ${id}.`);
+  if (row.kind !== "final" || row.status !== "done") throw new Error(`Render ${id} is not a completed final (${row.kind}, ${row.status}).`);
   const base = await env.MEDIA.get(input.key);
   if (!base) throw new Error(`No image at ${input.key}.`);
 
+  // HTTPS only, also after redirects (brand CDNs often redirect), so nobody on the path can swap the logo.
+  if (new URL(input.logoUrl).protocol !== "https:") throw new Error("Logo URL must use HTTPS.");
   const logo = await fetch(input.logoUrl, { headers: { "user-agent": "Mozilla/5.0 (a11adgen)" }, signal: AbortSignal.timeout(15_000) });
+  if (!logo.url.startsWith("https:")) throw new Error("Logo URL redirected to a non-HTTPS address.");
   const type = logo.headers.get("content-type") ?? "";
   if (!logo.ok || !type.startsWith("image/")) throw new Error(`Logo URL did not return an image (HTTP ${logo.status}, ${type || "no type"}).`);
 
@@ -50,7 +56,8 @@ export async function composeFinal(env: Env, input: ComposeInput) {
       if (!grain) throw new Error(`Grain tile missing at ${GRAIN_KEY}.`);
       img = img.draw(env.IMAGES.input(grain.body), { repeat: true, opacity: input.grainPct / 100 });
     }
-    img = img.draw(env.IMAGES.input(logo.body!).transform({ width: logoWidth }), { top });
+    // Trim the transparent border first, so width and top apply to the visible mark, not to the file's padding.
+    img = img.draw(env.IMAGES.input(logo.body!).transform({ trim: "border" }).transform({ width: logoWidth }), { top });
     const out = await img.output({ format: "image/jpeg", quality: 92 });
     const bytes = await out.response().arrayBuffer();
     const outKey = `renders/${id}/${n}-c.jpg`;

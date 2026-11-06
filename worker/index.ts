@@ -41,8 +41,13 @@ export default {
       if (!(await tokenOk(request, env.MCP_TOKEN_SHA256))) return new Response("Unauthorized", { status: 401 });
       const name = url.pathname.slice("/admin/stage/".length);
       if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(name)) return new Response("Bad name", { status: 400 });
+      // Check the declared size before reading the body, so an oversized upload is never buffered.
+      const declared = request.headers.get("content-length");
+      if (declared === null) return new Response("Content-Length required", { status: 411 });
+      if (Number(declared) > STAGE_MAX_BYTES) return new Response("Too large", { status: 413 });
       const body = await request.arrayBuffer();
-      if (body.byteLength === 0 || body.byteLength > STAGE_MAX_BYTES) return new Response("Bad size", { status: 413 });
+      if (body.byteLength === 0) return new Response("Empty body", { status: 400 });
+      if (body.byteLength > STAGE_MAX_BYTES) return new Response("Too large", { status: 413 });
       await env.MEDIA.put(`deploy/${name}`, body, { httpMetadata: { contentType: "application/javascript" } });
       return Response.json({ key: `deploy/${name}`, bytes: body.byteLength });
     }
