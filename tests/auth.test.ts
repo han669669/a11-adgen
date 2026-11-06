@@ -48,3 +48,22 @@ describe("/m/ media route", () => {
     expect(r.status).toBe(404);
   });
 });
+
+describe("/admin/stage", () => {
+  const put = async (auth: string | null, name: string, body = "export default {}") => {
+    const saved = new Map<string, ArrayBuffer>();
+    const e = { ...env, MEDIA: { put: async (k: string, v: ArrayBuffer) => void saved.set(k, v) } } as unknown as Env;
+    const r = await worker.fetch(
+      new Request(`https://x/admin/stage/${name}`, { method: "PUT", headers: auth ? { Authorization: auth } : {}, body }),
+      e,
+    );
+    return { r, saved };
+  };
+  it("refuses without the token", async () => expect((await put(null, "w.js")).r.status).toBe(401));
+  it("refuses a bad name", async () => expect((await put(`Bearer ${TOKEN}`, "..%2Fx")).r.status).toBe(400));
+  it("saves the bundle under deploy/", async () => {
+    const { r, saved } = await put(`Bearer ${TOKEN}`, "w.js");
+    expect(r.status).toBe(200);
+    expect([...saved.keys()]).toEqual(["deploy/w.js"]);
+  });
+});
