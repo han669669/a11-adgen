@@ -1,0 +1,157 @@
+# Blueprint
+
+The design of `a11-adgen`, version 2 (2026-11-06 SGT). It includes the owner's decisions D1 to D7 (`AGENTS.md` §4).
+
+---
+
+## 1. The idea in one line
+
+Claude Code is the brain. Cloudflare is the hands. The owner touches one button per batch.
+
+## 2. Parts
+
+| Part | Job |
+|---|---|
+| **Claude Code + a11 plugin** (owner's laptop, owner's Claude plan) | All thinking: fact sheet, research, insights, ideas, copy, art direction, critique, image checks. Claude sees images that MCP tools return. |
+| **MCP server** (Worker route `/mcp`, OAuth 2.1) | About 20 tools and 8 prompts. Each MCP prompt shows in Claude Code as a slash command. Prompts and the taste canon live on the server, so one update reaches every session. |
+| **API + web app** (Worker `a11adgen`, static assets) | Brand kits, products, the batch board, the one human step, settings, spend. |
+| **Client portal** (token link, no login) | View, comment, download the pack, upload results. |
+| **D1** `a11adgen-db` | Brands, kit versions, products, facts, research, ideas, drafts, picks, canon, swipe file, results, spend. |
+| **R2** `a11adgen-media` | Images, packs, client uploads, the v1 export. |
+| **Workflows** | fal render jobs with retries; a step waits for the fal result. |
+| **Browser Rendering** | Brand site screenshot, header HTML, logo files. |
+| **Cron Triggers** | Weekly client reminder for results; canon health check. |
+
+```mermaid
+flowchart LR
+  CC["Claude Code<br/>+ a11 plugin"] -- tools, prompts --> MCP["MCP server<br/>/mcp"]
+  MCP --> D1[("D1")] & R2[("R2")] & WF["Workflows"] & BR["Browser Rendering"] & EXA["Exa"]
+  WF --> FAL["fal.ai Sunburst"]
+  WEB["Web app"] --> API["API Worker"] --> D1 & R2
+  PORTAL["Client portal"] --> API
+```
+
+The MCP server never calls an LLM (D1). Claude Code does not support MCP sampling, so Claude drives and calls the tools.
+
+## 3. Pipeline
+
+Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid API.
+
+| # | Step | Who | What happens |
+|---|---|---|---|
+| 0 | Brand kit | CODE, CLAUDE | Browser Rendering reads the home page: screenshot, header HTML, logo files, colours, fonts. Claude writes voice, palette roles and "what this brand would never say". Kit is versioned. Claude checks that the logo reads the brand name. |
+| 1 | Subject | HAN (input only) | Product URL, or brand only (no product), or redesign (upload a live ad). This is input, not a decision step. |
+| 2 | Fact sheet | PAID Exa, CLAUDE | Exa `/contents` reads the page. Each fact keeps its source URL and exact quote: price, offer, pack size, proof. |
+| 3 | Research | PAID Exa, CLAUDE | Exa search: Reddit, HardwareZone, reviews, competitor pages, Singapore moments. Optional later: Meta Ad Library through Apify (long-running ads are likely winners). |
+| 4 | Insight sheet | CLAUDE | 8 to 12 buyer truths, each with its source. |
+| 5 | Idea burst | CLAUDE writer | 20 to 30 ideas. Each = insight + visual idea + headline + funnel job. With results: 30% new angles, 50% big changes on winners, 20% small changes. With no results: all new. |
+| 6 | Idea pick | CLAUDE critic | A separate critic subagent (fresh context) picks 4: one per format (Hook, Anatomy, Us vs Them, Offer), all different enough for Meta. Owner gate first (`docs/taste-seed.md` §2). No human. |
+| 7 | Drafts | PAID fal | 3 drafts per idea. `edit` endpoint, `quality: low`, 1024x1280, packshot and logo as references. |
+| 8 | Draft check | CLAUDE, CODE | Claude looks at each draft. Code compares the read text with the approved copy. One fix edit per idea when needed. The critic ranks the drafts. |
+| 9 | **Final pick** | **HAN** | The board shows each idea's drafts, ranked. The critic's top draft is pre-selected. The owner taps the ones to render at high, then "Render". This is the only human step (D2). Optional note per draft. |
+| 10 | Final | PAID fal | `edit`, `quality: high`, 1536x1920, with the chosen draft as a reference so the layout stays. Claude checks the final once. |
+| 11 | Pack | CODE, CLAUDE | Build the deliverable (§5). Publish the client link. |
+| 12 | Results | CLIENT, CLAUDE | The client uploads an Ads Manager screenshot or CSV in the portal (or sends it on WhatsApp; the owner drops it on the board). Claude reads CTR, CPC, spend per ad name. Baseline CTR comes from one screenshot at onboarding (D3). |
+| 13 | Learn | CLAUDE | `/a11:learn` reads new picks, notes and results. It changes the canon and the swipe file. It records each change with its evidence. The owner can undo any change on the board; no approval is needed (D2). |
+
+## 4. Learning and self-curation
+
+| Memory | Fed by | Used by | Curation |
+|---|---|---|---|
+| **Taste canon**: 20 to 40 rules in plain words | Owner final picks (picked = good, shown but not picked = weak bad), notes, results | Writer, critic, draft check (MCP resource) | Each rule keeps its evidence count and its hit rate on the owner's picks. No evidence in 60 days → retired. Max 40 rules. |
+| **Swipe file**: real ads + why they work | Owner picks, client winners, v1 Used ads | Writer, as examples (never copy words or objects) | Top 3 per brand and per format. |
+| **Results ledger**: one row per ad per report | Client screenshots and CSVs | Iteration mix (step 5), week report | Winner = above the client's baseline CTR with enough impressions. |
+
+**Gold set.** v1 marks and notes on about 200 ads (D5) become a frozen test set. Before a canon or prompt change ships, the critic re-ranks the gold set. Agreement with the owner's marks must not fall. It runs in Claude Code, so it costs no API money.
+
+**Signal check.** With one human step, the owner's pick is the main taste signal. The critic's pre-selection must not become a rubber stamp: log how often the owner changes it. A low change rate with good client results is the target. A low change rate with bad results means the board hides the bad drafts; then show more.
+
+## 5. Deliverable (weekly pack)
+
+| Item | Detail |
+|---|---|
+| 4 finals | 4:5, 1536x1920, JPEG and PNG |
+| Meta text | Primary text (first 125 characters show), headline (about 40 characters), description, CTA button; 2 variants each |
+| Ad names | Fixed format, for example `a11_W46_catfiddle_hook_c03_v1`. The client uses these names, so results map back with no manual work. |
+| Why each ad | One line: the buyer truth and its source |
+| Launch plan | One ad set, all 4 ads, 72 hours, the kill rule |
+| Fact check | Every claim and its source; HSA-safe note for health products |
+| Week report (from week 2) | CTR vs baseline per ad, winners kept, what next week tries |
+
+## 6. MCP surface
+
+| Group | Tools |
+|---|---|
+| Brand | `brand_extract`, `brand_get`, `brand_save_version` |
+| Subject | `product_read`, `facts_save`, `redesign_get` |
+| Research | `exa_search`, `exa_contents`, `adlibrary_fetch` (later; paid, asks first) |
+| Ideas | `ideas_save`, `ideas_pick_save` |
+| Images | `render_drafts`, `render_edit`, `render_final`, `image_get` (returns the image) |
+| Human step | `final_picks_get` (reads the owner's picks from the board) |
+| Memory | `canon_get`, `canon_update`, `swipe_search`, `picks_get`, `results_get` |
+| Ops | `batch_status`, `spend_get`, `pack_publish` |
+
+Prompts (slash commands): `/a11:brand`, `/a11:batch`, `/a11:redesign`, `/a11:final`, `/a11:results`, `/a11:learn`, `/a11:gold-test`. Each is resumable; state lives in D1.
+
+Plugin (in this repo, installed once): subagents `writer`, `critic`, `art-director`, plus the MCP config.
+
+Connect:
+
+```bash
+claude mcp add --transport http a11 https://a11adgen.gamingcomputing.workers.dev/mcp
+```
+
+## 7. Claude plan facts (checked 2026-11-06)
+
+| Point | Status |
+|---|---|
+| Official Claude Code, logged in with the owner's plan, with a custom MCP server | Normal use. The server never holds the Claude login. |
+| Third-party apps that reuse a subscription login | Not allowed (Anthropic, Feb 2026). Not used. |
+| Agent SDK and `claude -p` on a plan | A separate capped credit was set for 15 Jun 2026, then paused. Can change. Phase 0 uses interactive Claude Code only. |
+| Limits | 5-hour and weekly limits, shared with claude.ai. Usage per batch is not measured yet. |
+
+## 8. Hard checks in code (budget 15)
+
+1. Every price, number and offer in the copy matches the fact sheet text.
+2. Painted text equals the approved copy (vision read, then code compares).
+3. The logo reads the brand name.
+4. No CTA button painted in the image.
+5. Text inside the 4:5 frame with a margin.
+6. Headline 7 words or fewer.
+7. No price or saving on The Hook ad.
+8. Race, ethnicity and religion words blocked unless the owner allows them.
+9. Spend cap per batch and per month.
+10. Owner-only paid actions.
+
+## 9. Costs (estimates, not verified)
+
+| Item | Per batch of 4 finals |
+|---|---|
+| Exa (about 25 searches + contents) | about US$0.20 |
+| 12 low drafts with 2 references | about US$0.25 |
+| 4 fix edits | about US$0.08 |
+| 4 high finals at 1536x1920 with references | about US$0.40 |
+| **Total paid APIs** | **about US$0.9 to 1.1** |
+| Cloudflare | Workers Paid US$5 per month (plan not checked yet) |
+
+Phase 0 measures the real fal cost at 1536x1920 high and the Claude usage per batch.
+
+## 10. Build plan
+
+| Phase | Scope | Done when |
+|---|---|---|
+| 0. Spike | Worker `a11adgen` with `/mcp` (OAuth stub or allow-list token), tools `exa_search`, `render_drafts`, `image_get`, `render_final`. One product, one idea, 3 drafts, 1 final. | Claude Code makes one 4:5 final end to end. Cost, Claude usage and time recorded. |
+| 1. Core loop | Email + password auth with allow-list, full OAuth for MCP, D1 schema, brand kit, product / brand-only / redesign subjects, ideas, drafts, the final-pick board, finals. | One full batch of 4. Owner's pick recorded. |
+| 2. Learning | Canon, swipe file, `/a11:learn`, critic subagent, v1 export → gold set. | Gold-set agreement measured before and after one canon change. |
+| 3. Client side | Pack, client portal, ad names, results upload and read, baseline, week report. | One real client week: pack sent, results read back. |
+| 4. Growth (later) | Meta Ad Library research (Apify), Exa Websets prospect lists, 9:16 extension. | Owner asks for it. |
+
+## 11. Open points
+
+| Point | Status |
+|---|---|
+| `main` branch | Not created yet. Needs the owner's yes (`AGENTS.md` §7). |
+| Cloudflare plan (free or Workers Paid) | Not checked. D1 blocks queries past the free daily limit since 2026-09-01. |
+| Cloud session network access to fal.ai and Exa | Not checked. |
+| fal `edit` at high keeps the draft's layout | Not verified. Phase 0 tests it. |
+| Auth library on Workers (Better Auth with D1, or a small own implementation) | Decide in Phase 1. |
