@@ -95,9 +95,15 @@ export async function signup(env: Env, body: { email?: unknown; password?: unkno
   const exists = await env.DB.prepare("SELECT email FROM users WHERE email = ?").bind(email).first();
   if (exists) throw refused;
   await env.DB.prepare("DELETE FROM login_failures WHERE id = ?").bind(attemptId).run();
-  await env.DB.prepare("INSERT INTO users (email, pw_hash, created_at) VALUES (?, ?, ?)")
-    .bind(email, await hashPassword(body.password), new Date().toISOString())
-    .run();
+  try {
+    await env.DB.prepare("INSERT INTO users (email, pw_hash, created_at) VALUES (?, ?, ?)")
+      .bind(email, await hashPassword(body.password), new Date().toISOString())
+      .run();
+  } catch (e) {
+    // Two sign-ups for one email at once: the second one hits the primary key.
+    if (String((e as Error)?.message ?? e).includes("UNIQUE")) throw refused;
+    throw e;
+  }
   return newSession(env, email);
 }
 

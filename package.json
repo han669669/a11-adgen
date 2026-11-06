@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "dev:app": "vite",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit && tsc -p app --noEmit",
     "test": "vitest run",

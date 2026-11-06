@@ -104,6 +104,12 @@ describe("web app accounts", () => {
     expect((await call(env, "/api/signup", { body: signupBody })).status).toBe(403);
   });
 
+  it("gives two sign-ups at once for one email one account and one 403", async () => {
+    const { env } = makeEnv();
+    const [a, b] = await Promise.all([call(env, "/api/signup", { body: signupBody }), call(env, "/api/signup", { body: signupBody })]);
+    expect([a.status, b.status].sort()).toEqual([200, 403]);
+  });
+
   it("locks sign-in after 5 wrong passwords, also when they arrive at once", async () => {
     const { env } = makeEnv();
     await call(env, "/api/signup", { body: signupBody });

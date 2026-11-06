@@ -7,6 +7,8 @@ export class ApiError extends Error {
   }
 }
 
+export const SIGNED_OUT = "a11:signed-out";
+
 export async function api<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
   const res = await fetch(path, {
     method: init?.method ?? (init?.body ? "POST" : "GET"),
@@ -15,6 +17,8 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
     credentials: "same-origin",
   });
   const data = (await res.json().catch(() => ({}))) as { error?: string };
+  // The session expired or was revoked while the tab was open: App shows the sign-in form again.
+  if (res.status === 401 && path !== "/api/me" && path !== "/api/login") dispatchEvent(new Event(SIGNED_OUT));
   if (!res.ok) throw new ApiError(data.error ?? `HTTP ${res.status}`, res.status);
   return data as T;
 }

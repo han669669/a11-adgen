@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { api, type Spend } from "@/lib/api";
+import { api, SIGNED_OUT, type Spend } from "@/lib/api";
 import { Batches } from "@/views/Batches";
 import { Board } from "@/views/Board";
 import { SignIn } from "@/views/SignIn";
@@ -18,6 +18,7 @@ function useHash() {
 export function App() {
   const [me, setMe] = useState<string | null | undefined>(undefined);
   const [spend, setSpend] = useState<Spend | null>(null);
+  const [outError, setOutError] = useState<string | null>(null);
   const hash = useHash();
 
   const check = useCallback(() => {
@@ -28,8 +29,16 @@ export function App() {
   }, []);
   useEffect(check, [check]);
   useEffect(() => {
-    if (me) api<Spend>("/api/spend").then(setSpend, () => setSpend(null));
-  }, [me, hash]);
+    const out = () => setMe(null);
+    addEventListener(SIGNED_OUT, out);
+    return () => removeEventListener(SIGNED_OUT, out);
+  }, []);
+  const loadSpend = useCallback(() => {
+    api<Spend>("/api/spend").then(setSpend, () => setSpend(null));
+  }, []);
+  useEffect(() => {
+    if (me) loadSpend();
+  }, [me, hash, loadSpend]);
 
   if (me === undefined) return null;
   if (me === null) return <SignIn onDone={check} />;
@@ -51,15 +60,25 @@ export function App() {
             variant="ghost"
             size="compact"
             onClick={async () => {
-              await api("/api/logout", { body: {} });
-              setMe(null);
+              setOutError(null);
+              try {
+                await api("/api/logout", { body: {} });
+                setMe(null);
+              } catch (e) {
+                setOutError(`Sign-out failed: ${(e as Error).message}`);
+              }
             }}
           >
             Sign out
           </Button>
         </div>
       </nav>
-      {board ? <Board id={board[1]!} /> : <Batches />}
+      {outError && (
+        <p role="alert" className="mb-4 text-body text-red-700">
+          {outError}
+        </p>
+      )}
+      {board ? <Board key={board[1]} id={board[1]!} onSpend={loadSpend} /> : <Batches />}
     </div>
   );
 }

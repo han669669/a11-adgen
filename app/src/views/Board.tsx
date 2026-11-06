@@ -20,7 +20,7 @@ function initialPicks(batch: Batch): Map<string, string> {
   return out;
 }
 
-export function Board({ id }: { id: string }) {
+export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
   const [batch, setBatch] = useState<Batch | null>(null);
   const [picks, setPicks] = useState<Map<string, string>>(new Map());
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -55,9 +55,10 @@ export function Board({ id }: { id: string }) {
     const t = setTimeout(async () => {
       await Promise.allSettled(pending.map((f) => api(`/api/renders/${f.id}/refresh`, { body: {} })));
       await load(false);
+      onSpend();
     }, 8000);
     return () => clearTimeout(t);
-  }, [pending, load]);
+  }, [pending, load, onSpend]);
 
   if (loadError) return <p className="text-body text-red-700">{loadError}</p>;
   if (!batch) return <p className="text-body text-muted-foreground">Loading…</p>;
@@ -86,6 +87,7 @@ export function Board({ id }: { id: string }) {
       const failed = res.results.filter((r) => !r.ok);
       if (failed.length) setError(failed.map((f) => f.error).join(" "));
       await load(false);
+      onSpend();
     } catch (e) {
       setError((e as Error).message);
     } finally {
