@@ -140,4 +140,4 @@ To test from a cloud session, use the session's credential form (`request_creden
 
 ## 12. Existing Cloudflare resources (read 2026-11-06)
 
-Account `88581e9852ace13f81f9f45196911c85`. Workers: `a11-creator`, `job-scout-api`, `replicate-proxy`. D1: `a11-creator-db`. R2: `a11-creator-media`. These belong to other work. Do not change or delete them. New resources use the `a11adgen` prefix and the Asia Pacific location (Worker `a11adgen`, D1 `a11adgen-db` in APAC, R2 `a11adgen-assets` in APAC).
+Account `88581e9852ace13f81f9f45196911c85`. Workers: `a11-creator`, `job-scout-api`, `replicate-proxy`. D1: `a11-creator-db`. R2: `a11-creator-media`. These belong to other work. Do not change or delete them. New resources use the `a11adgen` prefix and the Asia Pacific location (Worker `a11adgen`, D1 `a11adgen-db` in APAC, R2 `a11adgen-assets` in APAC; preview: Worker `a11adgen-preview`, D1 `a11adgen-preview-db`, R2 `a11adgen-preview-assets`).

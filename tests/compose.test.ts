@@ -59,8 +59,9 @@ describe("compose_final success path", () => {
     const env = envWith("final", "done");
     const out = await composeFinal(env, input());
     const { saved, calls } = env as unknown as { saved: Map<string, unknown>; calls: unknown[][] };
-    expect(out).toMatchObject({ key: `renders/${ID}/1-c.jpg`, logoWidth: 522, top: 96, grain: "on" });
-    expect([...saved.keys()]).toEqual([`renders/${ID}/1-c.jpg`]);
+    expect(out).toMatchObject({ logoWidth: 522, top: 96, grain: "on" });
+    expect(out.key).toMatch(new RegExp(`^renders/${ID}/1-c\\d+\\.jpg$`));
+    expect([...saved.keys()]).toEqual([out.key]);
     expect(calls).toEqual([
       ["draw", "base", { repeat: true, opacity: 0.18 }],
       ["transform", "logo", { trim: "border" }],
