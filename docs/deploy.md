@@ -11,7 +11,9 @@ There is no Cloudflare API token in the session (owner decision). Deploys go thr
    - the bindings in `wrangler.jsonc`, plus `MCP_TOKEN_SHA256` as `plain_text` (it is not in `wrangler.jsonc`);
    - `keep_bindings: ["secret_text"]`, so the owner's `FAL_KEY` and `EXA_API_KEY` stay.
 4. Images binding: metadata `bindings` must include `{ "type": "images", "name": "IMAGES" }` (`compose_final` needs it).
-5. Smoke test: `spend_get` through `/mcp`, and one call of each changed tool.
+5. Web app: `npm run build:app`, then `PUT /admin/app/<path>` (same bearer token) for each file in `dist/app`, `index.html` last. The Worker serves the app from R2 `app/`. Old hashed files in `app/assets/` can stay; `index.html` points to the new ones.
+6. D1 migrations: run each new file in `migrations/` through the connector's D1 query API (stage the SQL with `/admin/stage`, check its SHA-256), then insert its name into `d1_migrations`.
+7. Smoke test: `spend_get` through `/mcp`, and one call of each changed tool.
 
 ## One-time assets
 
@@ -31,8 +33,8 @@ On 2026-11-07 a 24 KB bundle copied by hand into a connector call had one wrong 
 
 | Worker | Use | Secrets |
 |---|---|---|
-| `a11adgen` | Live. Deploys only `main`. | `FAL_KEY`, `EXA_API_KEY` |
-| `a11adgen-preview` | Tests a branch before its PR merges. Since 2026-11-07 it uses its own D1 `a11adgen-preview-db` (`2c28c64f-f8c0-46f9-9e2d-7ca70d2a0f70`) and R2 `a11adgen-preview-assets`, both APAC. | none (no paid calls from it) |
+| `a11adgen` | Live. Deploys only `main`. | `FAL_KEY`, `EXA_API_KEY`, `ALLOWED_EMAILS` (web app sign-in) |
+| `a11adgen-preview` | Tests a branch before its PR merges. Since 2026-11-07 it uses its own D1 `a11adgen-preview-db` (`2c28c64f-f8c0-46f9-9e2d-7ca70d2a0f70`) and R2 `a11adgen-preview-assets`, both APAC. | none (no paid calls from it); `ALLOWED_EMAILS` is a plain test address |
 
 ### Preview rules
 

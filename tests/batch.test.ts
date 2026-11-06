@@ -147,6 +147,15 @@ describe("batch flow", () => {
     expect((await batch.batchGet(env, b.id)).picks[0]!.finalRenderId).toBe(r.id);
   });
 
+  it("refuses status 'board' while a picked idea with drafts has no final prompt", async () => {
+    const { env, raw } = makeEnv();
+    const { b, ideas } = await seed(env);
+    addDraft(raw, b.id, ideas[0]!.id, "66666666-6666-6666-6666-666666666666");
+    await expect(batch.batchUpdate(env, { id: b.id, status: "board" })).rejects.toThrow("finalPrompt");
+    await batch.ideasUpdate(env, [{ id: ideas[0]!.id, finalPrompt: "B".repeat(50) }]);
+    await expect(batch.batchUpdate(env, { id: b.id, status: "board" })).resolves.toMatchObject({ updated: ["status"] });
+  });
+
   it("reports an unknown idea id on update", async () => {
     const { env } = makeEnv();
     await expect(batch.ideasUpdate(env, [{ id: "55555555-5555-5555-5555-555555555555", picked: true }])).rejects.toThrow("No idea");

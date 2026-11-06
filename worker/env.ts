@@ -12,4 +12,6 @@ export interface Env {
   /** Spend cap in US$ for all paid calls in one calendar month (UTC). */
   SPEND_CAP_USD: string;
   PUBLIC_BASE_URL: string;
+  /** Comma-separated emails that may sign up and sign in to the web app (Worker secret, set by the owner). */
+  ALLOWED_EMAILS?: string;
 }

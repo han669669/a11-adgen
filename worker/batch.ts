@@ -65,6 +65,16 @@ export async function batchCreate(env: Env, input: { brandSlug: string; subjectI
 }
 
 export async function batchUpdate(env: Env, input: { id: string; status?: string; insights?: unknown[]; notes?: string }) {
+  // The board is the owner's one step (D2): every picked idea with drafts must be ready to render when he sees it.
+  if (input.status === "board") {
+    const notReady = await env.DB.prepare(
+      `SELECT i.n FROM ideas i WHERE i.batch_id = ? AND i.picked = 1 AND i.final_prompt IS NULL
+       AND EXISTS (SELECT 1 FROM renders r WHERE r.batch = i.batch_id AND r.idea = i.id AND r.kind = 'draft')`,
+    ).bind(input.id).all<{ n: number }>();
+    if (notReady.results.length) {
+      throw new Error(`Set finalPrompt (ideas_update) for picked idea(s) ${notReady.results.map((r) => r.n).join(", ")} before status 'board'.`);
+    }
+  }
   const sets: string[] = [];
   const args: unknown[] = [];
   if (input.status) (sets.push("status = ?"), args.push(input.status));
@@ -213,7 +223,7 @@ export async function batchGet(env: Env, id: string) {
     env.DB.prepare("SELECT id, kind, title, url, data FROM subjects WHERE id = ?").bind(b.subject_id).first<Record<string, any>>(),
     env.DB.prepare("SELECT * FROM ideas WHERE batch_id = ? ORDER BY n LIMIT 60").bind(id).all<Record<string, any>>(),
     env.DB.prepare(
-      "SELECT id, idea, kind, status, image_keys, error, usd_est, created_at FROM renders WHERE batch = ? ORDER BY created_at LIMIT 200",
+      "SELECT id, idea, kind, status, image_keys, composed_key, error, usd_est, created_at FROM renders WHERE batch = ? ORDER BY created_at LIMIT 200",
     ).bind(id).all<Record<string, any>>(),
     env.DB.prepare("SELECT render_key, idea_id, rank, reason FROM draft_ranks WHERE batch_id = ? LIMIT 200").bind(id).all<Record<string, any>>(),
     env.DB.prepare("SELECT render_key, idea_id, note, final_render_id, created_at FROM picks WHERE batch_id = ? LIMIT 100").bind(id).all<Record<string, any>>(),
@@ -251,7 +261,13 @@ export async function batchGet(env: Env, id: string) {
         .sort((x, y) => (x.rank ?? 99) - (y.rank ?? 99)),
       finals: renders.results
         .filter((r) => r.idea === i.id && r.kind === "final")
-        .map((r) => ({ id: r.id, status: r.status, error: r.error, images: (r.image_keys ? (JSON.parse(r.image_keys) as string[]) : []).map(img) })),
+        .map((r) => ({
+          id: r.id,
+          status: r.status,
+          error: r.error,
+          images: (r.image_keys ? (JSON.parse(r.image_keys) as string[]) : []).map(img),
+          composed: r.composed_key ? img(r.composed_key) : null,
+        })),
     })),
     picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, finalRenderId: p.final_render_id })),
     drafting: renders.results.filter((r) => r.status === "queued").map((r) => r.id),
