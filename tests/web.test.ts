@@ -7,6 +7,7 @@ import { fakeD1 } from "./helpers/d1";
 
 const ORIGIN = "https://a11.example";
 const TOKEN = "stage-token-1234";
+const CODE = "set-up-code-5678";
 
 function makeEnv() {
   const files = new Map<string, { body: string; type: string }>();
@@ -25,6 +26,7 @@ function makeEnv() {
     SPEND_CAP_USD: "5.00",
     PUBLIC_BASE_URL: ORIGIN,
     MCP_TOKEN_SHA256: createHash("sha256").update(TOKEN).digest("hex"),
+    SIGNUP_CODE_SHA256: createHash("sha256").update(CODE).digest("hex"),
   } as unknown as Env;
   return { env, files };
 }
@@ -56,21 +58,32 @@ describe("passwords", () => {
 
 describe("web app accounts", () => {
   const good = { email: "owner@a11.example", password: "a long enough password" };
+  const signupBody = { ...good, code: CODE };
 
-  it("refuses an email that is not on the allow-list", async () => {
+  it("refuses an email that is not on the allow-list, with the same error as a wrong code", async () => {
     const { env } = makeEnv();
-    const r = await call(env, "/api/signup", { body: { email: "stranger@a11.example", password: good.password } });
-    expect(r.status).toBe(403);
+    const notListed = await call(env, "/api/signup", { body: { ...signupBody, email: "stranger@a11.example" } });
+    const wrongCode = await call(env, "/api/signup", { body: { ...signupBody, code: "guess" } });
+    expect(notListed.status).toBe(403);
+    expect(wrongCode.status).toBe(403);
+    expect(await notListed.json()).toEqual(await wrongCode.json());
+  });
+
+  it("refuses sign-up without the set-up code, or when no code is configured", async () => {
+    const { env } = makeEnv();
+    expect((await call(env, "/api/signup", { body: good })).status).toBe(403);
+    (env as { SIGNUP_CODE_SHA256?: string }).SIGNUP_CODE_SHA256 = undefined;
+    expect((await call(env, "/api/signup", { body: signupBody })).status).toBe(403);
   });
 
   it("refuses a short password", async () => {
     const { env } = makeEnv();
-    expect((await call(env, "/api/signup", { body: { ...good, password: "short" } })).status).toBe(400);
+    expect((await call(env, "/api/signup", { body: { ...signupBody, password: "short" } })).status).toBe(400);
   });
 
   it("signs up, reads /api/me with the cookie, and signs out", async () => {
     const { env } = makeEnv();
-    const r = await call(env, "/api/signup", { body: { ...good, email: "OWNER@a11.example" } });
+    const r = await call(env, "/api/signup", { body: { ...signupBody, email: "OWNER@a11.example" } });
     expect(r.status).toBe(200);
     expect(r.headers.get("set-cookie")).toMatch(/HttpOnly; Secure; SameSite=Lax/);
     const cookie = cookieOf(r);
@@ -81,20 +94,37 @@ describe("web app accounts", () => {
 
   it("refuses a second sign-up for the same email", async () => {
     const { env } = makeEnv();
-    await call(env, "/api/signup", { body: good });
-    expect((await call(env, "/api/signup", { body: good })).status).toBe(409);
+    await call(env, "/api/signup", { body: signupBody });
+    expect((await call(env, "/api/signup", { body: signupBody })).status).toBe(403);
   });
 
-  it("locks sign-in after 5 wrong passwords", async () => {
+  it("locks sign-in after 5 wrong passwords, also when they arrive at once", async () => {
     const { env } = makeEnv();
-    await call(env, "/api/signup", { body: good });
-    for (let i = 0; i < 5; i++) expect((await call(env, "/api/login", { body: { ...good, password: "wrong password!!" } })).status).toBe(401);
+    await call(env, "/api/signup", { body: signupBody });
+    const tries = await Promise.all(
+      Array.from({ length: 7 }, () => call(env, "/api/login", { body: { ...good, password: "wrong password!!" } })),
+    );
+    // At most 5 tries reach the password check; the rest are refused by the lock-out.
+    expect(tries.filter((r) => r.status === 401).length).toBeLessThanOrEqual(5);
+    expect(tries.filter((r) => r.status === 429).length).toBeGreaterThanOrEqual(2);
     expect((await call(env, "/api/login", { body: good })).status).toBe(429);
+  });
+
+  it("clears its own attempt on a good sign-in", async () => {
+    const { env } = makeEnv();
+    await call(env, "/api/signup", { body: signupBody });
+    for (let i = 0; i < 6; i++) expect((await call(env, "/api/login", { body: good })).status).toBe(200);
+  });
+
+  it("refuses an over-long password before hashing it", async () => {
+    const { env } = makeEnv();
+    await call(env, "/api/signup", { body: signupBody });
+    expect((await call(env, "/api/login", { body: { ...good, password: "x".repeat(201) } })).status).toBe(401);
   });
 
   it("drops access when the email leaves the allow-list", async () => {
     const { env } = makeEnv();
-    const cookie = cookieOf(await call(env, "/api/signup", { body: good }));
+    const cookie = cookieOf(await call(env, "/api/signup", { body: signupBody }));
     (env as { ALLOWED_EMAILS: string }).ALLOWED_EMAILS = "second@a11.example";
     expect((await call(env, "/api/me", { cookie })).status).toBe(401);
   });
@@ -145,5 +175,6 @@ describe("web app files", () => {
     expect(await page.text()).toBe("<html>app</html>");
     expect(page.headers.get("content-security-policy")).toMatch(/frame-ancestors 'none'/);
     expect((await call(env, "/assets/missing.js")).status).toBe(404);
+    expect((await call(env, "/index.html")).headers.get("content-security-policy")).toMatch(/frame-ancestors 'none'/);
   });
 });

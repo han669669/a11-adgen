@@ -31,19 +31,31 @@ async function refresh(env: Env, id: string) {
   )
     .bind(id)
     .first<{ composed_key: string | null; brand_id: string; kit_version: number }>();
-  if (!row || row.composed_key) return { ...status, composed: row?.composed_key ? fal.mediaUrl(env, row.composed_key) : null };
+  if (!row) return status;
+  if (row.composed_key?.startsWith("error:")) return { ...status, composed: null, composeError: row.composed_key.slice(6) };
+  if (row.composed_key) return { ...status, composed: row.composed_key.startsWith("renders/") ? fal.mediaUrl(env, row.composed_key) : null };
   const kit = await latestKit(env, row.brand_id, row.kit_version);
   if (!kit) return status;
-  const out = await composeFinal(env, {
-    key: status.images[0]!.key,
-    logoKey: kit.kit.logo.key,
-    logoWidthPct: kit.kit.placement.logoWidthPct,
-    logoTopPct: kit.kit.placement.logoTopPct,
-    grain: "on",
-    grainPct: 18,
-  });
-  await env.DB.prepare("UPDATE renders SET composed_key = ? WHERE id = ?").bind(out.key, id).run();
-  return { ...status, composed: out.url };
+  // Claim the compose first, so two refreshes at once draw the logo only once.
+  const claimed = await env.DB.prepare("UPDATE renders SET composed_key = 'pending' WHERE id = ? AND composed_key IS NULL").bind(id).run();
+  if (claimed.meta.changes !== 1) return { ...status, composed: null };
+  try {
+    const out = await composeFinal(env, {
+      key: status.images[0]!.key,
+      logoKey: kit.kit.logo.key,
+      logoWidthPct: kit.kit.placement.logoWidthPct,
+      logoTopPct: kit.kit.placement.logoTopPct,
+      grain: "on",
+      grainPct: 18,
+    });
+    await env.DB.prepare("UPDATE renders SET composed_key = ? WHERE id = ?").bind(out.key, id).run();
+    return { ...status, composed: out.url };
+  } catch (e) {
+    // Record the failure, so the board stops polling and shows it; Claude can re-run compose_final.
+    const msg = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+    await env.DB.prepare("UPDATE renders SET composed_key = ? WHERE id = ?").bind(`error:${msg}`, id).run();
+    return { ...status, composed: null, composeError: msg };
+  }
 }
 
 /** /api/* for the web app. Cookie sessions; state-changing calls must be same-origin JSON. */

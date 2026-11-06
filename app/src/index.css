@@ -30,6 +30,7 @@
   --primary: oklch(0.205 0 0);
   --primary-foreground: oklch(0.985 0 0);
   --radius: 0.75rem;
+  --accent: oklch(0.95 0 0); /* neutral fill; the gray solid Badge reads it */
 }
 
 @layer base {
@@ -183,4 +184,9 @@
 }
   html.transitioning *, html.transitioning *::before, html.transitioning *::after {
     transition: border-radius 180ms ease-in-out, background-color 180ms ease-in-out, color 180ms ease-in-out, border-color 180ms ease-in-out, fill 180ms ease-in-out, stroke 180ms ease-in-out !important;
+}
+
+/* Theme and shape changes animate every element (Fluid); people who ask for less motion get none. */
+@media (prefers-reduced-motion: reduce) {
+  html.transitioning *, html.transitioning *::before, html.transitioning *::after { transition: none !important; }
 }

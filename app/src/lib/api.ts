@@ -32,6 +32,7 @@ export interface Final {
   error: string | null;
   images: { key: string; url: string }[];
   composed: { key: string; url: string } | null;
+  composeError: string | null;
 }
 export interface Idea {
   id: string;

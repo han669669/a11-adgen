@@ -7,6 +7,7 @@ import { api, type Batch, type Final, type Idea } from "@/lib/api";
 
 const FORMAT: Record<Idea["format"], string> = { hook: "The Hook", anatomy: "The Anatomy", usvsthem: "Us vs Them", offer: "The Offer" };
 const FINAL_USD = 0.08;
+const MAX_RENDER = 8; // the render API takes 1 to 8 picks per tap
 
 /** The first choice: the owner's saved picks, else the critic's top draft for each picked idea (D2). */
 function initialPicks(batch: Batch): Map<string, string> {
@@ -32,7 +33,8 @@ export function Board({ id }: { id: string }) {
       setBatch(b);
       if (resetPicks) setPicks(initialPicks(b));
     } catch (e) {
-      setLoadError((e as Error).message);
+      // Only the first load replaces the page; a failed background refresh keeps the board.
+      if (resetPicks) setLoadError((e as Error).message);
     }
   }, [id]);
 
@@ -42,7 +44,10 @@ export function Board({ id }: { id: string }) {
 
   // Finals: poll each running final; a finished final gets the real logo drawn once (server side).
   const pending = useMemo(
-    () => (batch?.ideas ?? []).flatMap((i) => i.finals).filter((f) => f.status === "queued" || (f.status === "done" && !f.composed)),
+    () =>
+      (batch?.ideas ?? [])
+        .flatMap((i) => i.finals)
+        .filter((f) => f.status === "queued" || (f.status === "done" && !f.composed && !f.composeError)),
     [batch],
   );
   useEffect(() => {
@@ -66,7 +71,7 @@ export function Board({ id }: { id: string }) {
     setPicks((prev) => {
       const next = new Map(prev);
       if (next.has(key)) next.delete(key);
-      else next.set(key, "");
+      else if ([...next.keys()].filter((k) => !started.has(k)).length < MAX_RENDER) next.set(key, "");
       return next;
     });
   }
@@ -76,7 +81,7 @@ export function Board({ id }: { id: string }) {
     setError(null);
     try {
       const res = await api<{ results: { key: string; ok: boolean; error?: string }[] }>(`/api/batches/${id}/render`, {
-        body: { picks: [...picks].map(([key, note]) => ({ key, note: note || undefined })) },
+        body: { picks: toRender.map((key) => ({ key, note: picks.get(key) || undefined })) },
       });
       const failed = res.results.filter((r) => !r.ok);
       if (failed.length) setError(failed.map((f) => f.error).join(" "));
@@ -124,8 +129,8 @@ export function Board({ id }: { id: string }) {
                     >
                       <img src={d.url} alt={`Draft for ${idea.headline}`} loading="lazy" className="aspect-[4/5] w-full object-cover" />
                       <span className="absolute left-2 top-2 flex items-center gap-2">
-                        <span className="rounded-md bg-background/90 px-1.5 py-0.5">
-                          <Checkbox checked={on} tabIndex={-1} aria-hidden onCheckedChange={() => toggle(d.key)} />
+                        <span className="pointer-events-none rounded-md bg-background/90 px-1.5 py-0.5">
+                          <Checkbox checked={on} tabIndex={-1} aria-hidden />
                         </span>
                         {d.rank && <span className="rounded-md bg-background/90 px-1.5 py-0.5 text-caption font-medium">#{d.rank}</span>}
                       </span>
@@ -184,7 +189,15 @@ function Finals({ finals }: { finals: Final[] }) {
               </div>
             )}
             <figcaption className="text-caption text-muted-foreground">
-              {f.status === "failed" ? f.error : f.composed ? "Final with the real logo" : f.status === "done" ? "Adding the logo…" : "About 60 seconds"}
+              {f.status === "failed"
+                ? f.error
+                : f.composed
+                  ? "Final with the real logo"
+                  : f.composeError
+                    ? `Logo step failed: ${f.composeError}`
+                    : f.status === "done"
+                      ? "Adding the logo…"
+                      : "About 60 seconds"}
             </figcaption>
           </figure>
         );

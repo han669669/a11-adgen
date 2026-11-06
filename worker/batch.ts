@@ -70,7 +70,7 @@ export async function batchUpdate(env: Env, input: { id: string; status?: string
   if (input.status === "board") {
     const notReady = await env.DB.prepare(
       `SELECT i.n FROM ideas i WHERE i.batch_id = ? AND i.picked = 1 AND i.final_prompt IS NULL
-       AND EXISTS (SELECT 1 FROM renders r WHERE r.batch = i.batch_id AND r.idea = i.id AND r.kind = 'draft')`,
+       AND EXISTS (SELECT 1 FROM renders r WHERE r.batch = i.batch_id AND r.idea = i.id AND r.kind = 'draft' AND r.image_keys IS NOT NULL)`,
     ).bind(input.id).all<{ n: number }>();
     if (notReady.results.length) {
       throw new Error(`Set finalPrompt (ideas_update) for picked idea(s) ${notReady.results.map((r) => r.n).join(", ")} before status 'board'.`);
@@ -282,7 +282,8 @@ export async function batchGet(env: Env, id: string) {
           status: r.status,
           error: r.error,
           images: (r.image_keys ? (JSON.parse(r.image_keys) as string[]) : []).map(img),
-          composed: r.composed_key ? img(r.composed_key) : null,
+          composed: r.composed_key?.startsWith("renders/") ? img(r.composed_key) : null,
+          composeError: r.composed_key?.startsWith("error:") ? r.composed_key.slice(6) : null,
         })),
     })),
     picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, finalRenderId: p.final_render_id })),

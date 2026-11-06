@@ -237,6 +237,18 @@ describe("batch flow", () => {
     expect(raw.prepare("SELECT final_render_id FROM picks").get()).toEqual({ final_render_id: null });
   });
 
+  it("does not block 'board' on a draft render that has no images", async () => {
+    const { env, raw } = makeEnv();
+    const { b, ideas } = await seed(env);
+    raw
+      .prepare(
+        `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, usd_est, created_at, updated_at)
+         VALUES ('q1', ?, ?, 'draft', 'queued', 'p', '[]', 1024, 1280, 'low', 3, 0.02, 'now', 'now')`,
+      )
+      .run(b.id, ideas[0]!.id);
+    await expect(batch.batchUpdate(env, { id: b.id, status: "board" })).resolves.toMatchObject({ updated: ["status"] });
+  });
+
   it("reports an unknown idea id on update", async () => {
     const { env } = makeEnv();
     await expect(batch.ideasUpdate(env, [{ id: "55555555-5555-5555-5555-555555555555", picked: true }])).rejects.toThrow("No idea");

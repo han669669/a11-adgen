@@ -6,6 +6,7 @@ import type { Env } from "./env";
  */
 export const PBKDF2_ITERATIONS = 100_000; // the Workers maximum for PBKDF2
 export const MIN_PASSWORD = 12;
+export const MAX_PASSWORD = 200;
 const SESSION_DAYS = 30;
 const COOKIE = "a11s";
 const MAX_FAILURES = 5;
@@ -72,14 +73,25 @@ async function newSession(env: Env, email: string): Promise<string> {
   return `${COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86_400}`;
 }
 
-export async function signup(env: Env, body: { email?: unknown; password?: unknown }): Promise<string> {
+/**
+ * Sign-up needs an allow-listed email AND the one-time set-up code (only its SHA-256 is on the Worker,
+ * SIGNUP_CODE_SHA256). So knowing a listed address is not enough to take the account first.
+ * One error for every refusal, so the endpoint does not reveal who is on the list.
+ */
+export async function signup(env: Env, body: { email?: unknown; password?: unknown; code?: unknown }): Promise<string> {
   const email = cleanEmail(body.email);
-  if (!allowed(env, email)) throw new AuthError("This email is not on the allow-list.", 403);
-  if (typeof body.password !== "string" || body.password.length < MIN_PASSWORD || body.password.length > 200) {
-    throw new AuthError(`Use a password of ${MIN_PASSWORD} to 200 characters.`, 400);
+  if (typeof body.password !== "string" || body.password.length < MIN_PASSWORD || body.password.length > MAX_PASSWORD) {
+    throw new AuthError(`Use a password of ${MIN_PASSWORD} to ${MAX_PASSWORD} characters.`, 400);
   }
+  const refused = new AuthError("Sign-up refused. Check the email and the set-up code.", 403);
+  const want = (env.SIGNUP_CODE_SHA256 ?? "").toLowerCase();
+  if (want.length !== 64 || typeof body.code !== "string" || !body.code) throw refused;
+  const got = Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body.code.trim()))).toString("hex");
+  let diff = 0;
+  for (let i = 0; i < 64; i++) diff |= got.charCodeAt(i) ^ want.charCodeAt(i);
+  if (diff !== 0 || !allowed(env, email)) throw refused;
   const exists = await env.DB.prepare("SELECT email FROM users WHERE email = ?").bind(email).first();
-  if (exists) throw new AuthError("This account exists. Sign in instead.", 409);
+  if (exists) throw refused;
   await env.DB.prepare("INSERT INTO users (email, pw_hash, created_at) VALUES (?, ?, ?)")
     .bind(email, await hashPassword(body.password), new Date().toISOString())
     .run();
@@ -90,17 +102,23 @@ export async function login(env: Env, body: { email?: unknown; password?: unknow
   const email = cleanEmail(body.email);
   const bad = new AuthError("Wrong email or password.");
   if (!allowed(env, email)) throw bad;
+  if (typeof body.password !== "string" || body.password.length > MAX_PASSWORD) throw bad;
+  // Reserve the attempt first, then count it: parallel tries cannot all pass the limit before any is written.
+  const attempt = await env.DB.prepare("INSERT INTO login_failures (email, at) VALUES (?, ?)").bind(email, new Date().toISOString()).run();
+  const attemptId = attempt.meta.last_row_id;
   const fails = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM login_failures WHERE email = ? AND at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '${FAILURE_WINDOW}')`,
   )
     .bind(email)
     .first<{ n: number }>();
-  if ((fails?.n ?? 0) >= MAX_FAILURES) throw new AuthError("Too many tries. Wait 15 minutes.", 429);
+  if ((fails?.n ?? 0) > MAX_FAILURES) throw new AuthError("Too many tries. Wait 15 minutes.", 429);
   const user = await env.DB.prepare("SELECT pw_hash FROM users WHERE email = ?").bind(email).first<{ pw_hash: string }>();
-  if (!user || typeof body.password !== "string" || !(await verifyPassword(body.password, user.pw_hash))) {
-    await env.DB.prepare("INSERT INTO login_failures (email, at) VALUES (?, ?)").bind(email, new Date().toISOString()).run();
-    throw bad;
-  }
+  if (!user || !(await verifyPassword(body.password, user.pw_hash))) throw bad;
+  // Success: drop this attempt, old failures and expired sessions (keeps both tables small).
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM login_failures WHERE id = ? OR at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day')").bind(attemptId),
+    env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(new Date().toISOString()),
+  ]);
   return newSession(env, email);
 }
 

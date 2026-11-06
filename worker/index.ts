@@ -68,7 +68,7 @@ async function serveApp(env: Env, pathname: string): Promise<Response> {
       "content-type": obj.httpMetadata?.contentType ?? typeOf(isFile ? path : "index.html"),
       "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
       "x-content-type-options": "nosniff",
-      ...(isFile ? {} : { "content-security-policy": CSP }),
+      ...(isFile && !path.endsWith(".html") ? {} : { "content-security-policy": CSP }),
     },
   });
 }

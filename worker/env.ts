@@ -14,4 +14,6 @@ export interface Env {
   PUBLIC_BASE_URL: string;
   /** Comma-separated emails that may sign up and sign in to the web app (Worker secret, set by the owner). */
   ALLOWED_EMAILS?: string;
+  /** SHA-256 (hex) of the one-time web app set-up code. Sign-up is closed while it is not set. */
+  SIGNUP_CODE_SHA256?: string;
 }
