@@ -71,7 +71,10 @@ async function refresh(env: Env, id: string) {
       grainPct: 18,
     });
     // A newer claim took over (this compose ran past the stale limit): keep its result, not ours.
-    if (!(await settleCompose(env, id, claim, out.key))) return { ...status, composed: null };
+    if (!(await settleCompose(env, id, claim, out.key))) {
+      await env.MEDIA.delete(out.key); // nothing points to it
+      return { ...status, composed: null };
+    }
     return { ...status, composed: out.url };
   } catch (e) {
     // Record the failure, so the board stops polling and shows it. compose_final (MCP) on this render
