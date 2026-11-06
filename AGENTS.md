@@ -58,13 +58,33 @@ The business: a11studio.pro sells 16 static ads per month (4 per week) for S$2,8
 | Frontend | Vite + React + TypeScript SPA, Tailwind v4, shadcn/ui, Fluid Functionalism (`npx shadcn@latest registry add @fluid`, Radix flavour; needs Inter with the `opsz` axis) |
 | Auth | Email + password. Only allow-listed emails can sign up. |
 | Backend | Cloudflare only: Workers (API + static assets), D1, R2, Workflows, Browser Rendering, Cron Triggers, Images, Workers Logs. No Convex. |
-| MCP | Remote MCP server on Workers: `createMcpHandler` (Agents SDK) + `@cloudflare/workers-oauth-provider` v1 (OAuth 2.1). |
+| MCP | Remote MCP server on Workers, hand-written (`worker/mcp.ts`: stateless Streamable HTTP, JSON responses, tools only). No Agents SDK or MCP SDK: they made the bundle 1.2 MB. Phase 1 adds OAuth 2.1 (`@cloudflare/workers-oauth-provider`, if its size allows). |
 | Research | Exa (`/search`, `/contents`; Websets later for prospecting). |
 | Images | fal.ai `openai/gpt-image-2.5/sunburst/edit` and `/text-to-image`. Drafts `quality: low` at 1024x1280. Finals `quality: high` at 1536x1920. 4:5 only. |
 
 ---
 
-## 6. Rules for the code
+## 6. Cloudflare Free plan (owner, 2026-11-06)
+
+The account is on the Workers Free plan. Design for these limits (read 2026-11-06):
+
+| Limit | Free plan | Effect |
+|---|---|---|
+| CPU per request | 10 ms | No image work in the Worker. fal does all pixels. Keep the bundle small. Waiting on fetch does not count. |
+| Subrequests per request | 50 external, 1,000 to Cloudflare services | One tool call does few fetches. |
+| Requests per day | 100,000 | Enough. |
+| D1 | Daily row read and write limits; queries fail after them (since 2026-09-01) | Indexed, bounded queries. |
+| Browser Rendering | 10 minutes per day, 3 browsers | Brand kit reads only. |
+| Workflows | 10 ms CPU per step | Use for waits and retries, not compute. |
+| Cron Triggers | 5 per account | |
+
+## 7. Deploy
+
+There is no Cloudflare API token in the session (owner decision: use the Cloudflare connector). To deploy: build with `npx wrangler deploy --dry-run --minify --outdir .wrangler/dry`, then upload `.wrangler/dry/index.js` with the connector (`PUT /accounts/{id}/workers/scripts/a11adgen`, multipart, the bindings from `wrangler.jsonc`, `keep_bindings: ["secret_text"]` so the owner's secrets stay). D1 migrations run through the connector's D1 query API, and each one is recorded in `d1_migrations`. Keep the bundle small enough to upload this way (Phase 0: 14 KB).
+
+Phase 0 auth: `/mcp` needs a bearer token. The Worker keeps only its SHA-256 (`MCP_TOKEN_SHA256`, a plain var). The token itself is not in the repo.
+
+## 8. Rules for the code
 
 - **Rule budget.** v1 failed by adding a code rule after each bad batch (see `docs/v1-lessons.md`). Keep at most 15 hard checks in code. A hard check tests only true/false facts (a price matches the fact sheet, painted text equals the approved copy). Taste goes into the taste canon in plain words, never into regexes.
 - A new hard check needs a real failure as its test fixture and a line in `docs/decisions.md`.
@@ -77,17 +97,17 @@ The business: a11studio.pro sells 16 static ads per month (4 per week) for S$2,8
 
 ---
 
-## 7. Workflow
+## 9. Workflow
 
 1. Never push to `main` without the owner's explicit permission. Work on a branch: `feat/`, `fix/`, `docs/`, `chore/`, `ci/`.
 2. Open a PR (ready, not draft). Title: `type(scope): subject`, lowercase subject, 72 characters or fewer.
-3. Before you push, run the repo checks (to be defined in Phase 0: typecheck, tests, build). All must pass.
+3. Before you push, run `npm run check` (typecheck, tests, build). All must pass.
 4. Never merge or deploy to production without the owner's yes.
 5. Commits and PR bodies in STE.
 
 ---
 
-## 8. Ask the owner first
+## 10. Ask the owner first
 
 - Any spend: a paid render run, Exa beyond a smoke test, a paid Apify Actor. Give the estimate and a hard cap.
 - Creating Cloudflare resources that cost money, or a plan change.
@@ -98,13 +118,14 @@ Go ahead without asking: code, docs, branches, PRs, free local tests, read-only 
 
 ---
 
-## 9. Secrets
+## 11. Secrets
 
 | Secret | Where it lives | When to ask |
 |---|---|---|
 | `FAL_KEY` | Worker secret | Phase 0, first render |
 | `EXA_API_KEY` | Worker secret | Phase 0, first search |
 | `ALLOWED_EMAILS` | Worker secret | Phase 1, auth |
+| `MCP_TOKEN_SHA256` | Plain var (a hash, not a secret) | Phase 0; the agent makes the token |
 | `BETTER_AUTH_SECRET` (or the auth library's signing secret) | Worker secret | Phase 1; generate it, do not ask the owner |
 | `APIFY_TOKEN` | Worker secret | Only if the Meta Ad Library step is built |
 
@@ -117,6 +138,6 @@ To test from a cloud session, use the session's credential form (`request_creden
 
 ---
 
-## 10. Existing Cloudflare resources (read 2026-11-06)
+## 12. Existing Cloudflare resources (read 2026-11-06)
 
 Account `88581e9852ace13f81f9f45196911c85`. Workers: `a11-creator`, `job-scout-api`, `replicate-proxy`. D1: `a11-creator-db`. R2: `a11-creator-media`. These belong to other work. Do not change or delete them. New resources use the `a11adgen` prefix (Worker `a11adgen`, D1 `a11adgen-db`, R2 `a11adgen-media`).

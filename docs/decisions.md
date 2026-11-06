@@ -14,3 +14,6 @@ Each line: the decision, the date (SGT), who, why. Newest last. A later decision
 | 2026-11-06 | App URL `a11adgen.gamingcomputing.workers.dev` (account subdomain `gamingcomputing`, unchanged). | han (subdomain detail: agent) | Owner asked for the workers.dev subdomain; a bare `a11-adgen.workers.dev` is not possible. |
 | 2026-11-06 | Secrets: the owner sets them as Worker secrets when the agent asks, never in chat. | han | |
 | 2026-11-06 | Worker name `a11adgen` (no hyphen), so the URL is `a11adgen.gamingcomputing.workers.dev`. Other resources: D1 `a11adgen-db`, R2 `a11adgen-media`. Repo name stays `a11-adgen`. | han | Replaces the URL line above. |
+| 2026-11-06 | Stay on the Cloudflare Workers Free plan. | han | Design for its limits (`AGENTS.md` §6). |
+| 2026-11-06 | No Cloudflare API token; deploy through the Cloudflare connector. MCP server hand-written (14 KB) instead of the Agents SDK + MCP SDK (1.2 MB). | han (no token), agent (hand-written server) | The connector upload needs a small bundle; a small bundle also starts fast under the 10 ms CPU limit. |
+| 2026-11-06 | Phase 0 `/mcp` auth: bearer token, only its SHA-256 stored on the Worker. OAuth in Phase 1. | agent | The token never passes through a deploy call or the repo. |

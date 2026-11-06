@@ -1,0 +1,43 @@
+import type { Env } from "./env";
+import { handleMcp } from "./mcp";
+
+const MEDIA_KEY = /^renders\/[0-9a-f-]{36}\/\d+\.jpg$/;
+
+async function sha256Hex(s: string): Promise<string> {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Phase 0 auth: the bearer token's SHA-256 must match MCP_TOKEN_SHA256. */
+async function tokenOk(request: Request, expectedHash: string | undefined): Promise<boolean> {
+  if (!expectedHash || expectedHash.length !== 64) return false;
+  const got = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+  if (!got) return false;
+  const enc = new TextEncoder();
+  return crypto.subtle.timingSafeEqual(enc.encode(await sha256Hex(got)), enc.encode(expectedHash.toLowerCase()));
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    if (url.pathname === "/mcp") {
+      if (!(await tokenOk(request, env.MCP_TOKEN_SHA256))) return new Response("Unauthorized", { status: 401 });
+      return handleMcp(request, env);
+    }
+
+    // Media: unguessable keys (random UUIDs). fal reads chosen drafts from here as references.
+    if (url.pathname.startsWith("/m/") && request.method === "GET") {
+      const key = url.pathname.slice(3);
+      if (!MEDIA_KEY.test(key)) return new Response("Not found", { status: 404 });
+      const obj = await env.MEDIA.get(key);
+      if (!obj) return new Response("Not found", { status: 404 });
+      return new Response(obj.body, {
+        headers: { "content-type": obj.httpMetadata?.contentType ?? "image/jpeg", "cache-control": "private, max-age=3600" },
+      });
+    }
+
+    if (url.pathname === "/") return new Response("a11adgen: Phase 0 spike. The web app comes in Phase 1.\n");
+    return new Response("Not found", { status: 404 });
+  },
+} satisfies ExportedHandler<Env>;

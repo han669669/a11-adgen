@@ -132,7 +132,7 @@ claude mcp add --transport http a11 https://a11adgen.gamingcomputing.workers.dev
 | 4 fix edits | about US$0.08 |
 | 4 high finals at 1536x1920 with references | about US$0.40 |
 | **Total paid APIs** | **about US$0.9 to 1.1** |
-| Cloudflare | Workers Paid US$5 per month (plan not checked yet) |
+| Cloudflare | Free plan (US$0) |
 
 Phase 0 measures the real fal cost at 1536x1920 high and the Claude usage per batch.
 
@@ -150,8 +150,8 @@ Phase 0 measures the real fal cost at 1536x1920 high and the Claude usage per ba
 
 | Point | Status |
 |---|---|
-| `main` branch | Not created yet. Needs the owner's yes (`AGENTS.md` §7). |
-| Cloudflare plan (free or Workers Paid) | Not checked. D1 blocks queries past the free daily limit since 2026-09-01. |
-| Cloud session network access to fal.ai and Exa | Not checked. |
+| `main` branch | Created 2026-11-06 (owner yes). GitHub's default branch is still `docs/foundation`; the owner sets it to `main` in repo Settings. |
+| Cloudflare plan | Workers Free (owner, 2026-11-06). Limits in `AGENTS.md` §6. |
+| Cloud session network | Unrestricted. The Worker calls fal and Exa, not the session. |
 | fal `edit` at high keeps the draft's layout | Not verified. Phase 0 tests it. |
 | Auth library on Workers (Better Auth with D1, or a small own implementation) | Decide in Phase 1. |
