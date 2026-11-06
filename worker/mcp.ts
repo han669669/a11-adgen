@@ -265,7 +265,7 @@ export const TOOLS: Tool[] = [
   {
     name: "ideas_save",
     description:
-      "Save ideas for a batch (the burst). Each idea = insight + visual idea + headline + format. Set picked true on the critic's 4 (one per format). Returns the idea ids (use them as render_submit's idea).",
+      "Save ideas for a batch (the burst). Each idea = insight + visual idea + headline + funnel stage (format: tof, mof or bof). Read docs/creative-playbook.md first. Set picked true on the critic's 4: 2 tof, 1 mof, 1 bof. Returns the idea ids (use them as render_submit's idea).",
     inputSchema: {
       type: "object",
       properties: {
@@ -367,7 +367,7 @@ export const TOOLS: Tool[] = [
   {
     name: "picks_save",
     description:
-      "Record the OWNER's final picks (the drafts to render at high). Use only with the owner's own choice (the board, or his message). Replaces earlier picks that have no final yet.",
+      "Record the final picks (the drafts to render at high). Claude picks them (D2, owner 2026-11-06): the draft that best meets the bar in docs/creative-playbook.md, one per picked idea. The owner can also pick on the board. Replaces earlier picks that have no final yet.",
     inputSchema: {
       type: "object",
       properties: {
@@ -394,7 +394,7 @@ export const TOOLS: Tool[] = [
   {
     name: "final_render",
     description:
-      "Start the high final for one of the owner's picks. It uses the idea's finalPrompt, the picked draft as the first reference, then the idea's finalRefs. Paid (about US$0.08). Then poll render_status and run compose_final with brandSlug.",
+      "Start the high final for one pick. It uses the idea's finalPrompt, the picked draft as the first reference, then the idea's finalRefs. Paid (about US$0.08). Then poll render_status and run compose_final with brandSlug.",
     inputSchema: {
       type: "object",
       properties: {

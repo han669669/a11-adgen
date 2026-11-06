@@ -5,7 +5,16 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { api, type Batch, type Final, type Idea } from "@/lib/api";
 
-const FORMAT: Record<Idea["format"], string> = { hook: "The Hook", anatomy: "The Anatomy", usvsthem: "Us vs Them", offer: "The Offer" };
+const FORMAT: Record<Idea["format"], string> = {
+  tof: "Top of funnel",
+  mof: "Middle of funnel",
+  bof: "Bottom of funnel",
+  // Batches made before 2026-11-06.
+  hook: "The Hook",
+  anatomy: "The Anatomy",
+  usvsthem: "Us vs Them",
+  offer: "The Offer",
+};
 const FINAL_USD = 0.08;
 const MAX_RENDER = 8; // the render API takes 1 to 8 picks per tap
 

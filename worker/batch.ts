@@ -2,7 +2,8 @@ import { brandBySlug, latestKit } from "./brand";
 import type { Env } from "./env";
 import * as fal from "./fal";
 
-export const FORMATS = ["hook", "anatomy", "usvsthem", "offer"] as const;
+/** Funnel stages (owner, 2026-11-06). Picks per batch: 2 tof, 1 mof, 1 bof (a database trigger enforces it). */
+export const FORMATS = ["tof", "mof", "bof"] as const;
 export const STATUSES = ["research", "ideas", "drafts", "board", "finals", "done"] as const;
 const MAX_BATCH_RENDERS = fal.MAX_BATCH_RENDERS;
 
@@ -66,7 +67,7 @@ export async function batchCreate(env: Env, input: { brandSlug: string; subjectI
 }
 
 export async function batchUpdate(env: Env, input: { id: string; status?: string; insights?: unknown[]; notes?: string }) {
-  // The board is the owner's one step (D2): every picked idea with drafts must be ready to render when he sees it.
+  // Every picked idea with drafts must have its final prompt before the picks are made (D2: Claude picks the drafts).
   if (input.status === "board") {
     const notReady = await env.DB.prepare(
       `SELECT i.n FROM ideas i WHERE i.batch_id = ? AND i.picked = 1 AND i.final_prompt IS NULL

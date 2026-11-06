@@ -52,8 +52,8 @@ async function seed(env: Env) {
   const subject = await batch.subjectSave(env, { brandSlug: "wongi", kind: "product", title: "Pop Barley", url: "https://brand.example/p" });
   const b = await batch.batchCreate(env, { brandSlug: "wongi", subjectId: subject.id, label: "W46" });
   const ideas = await batch.ideasSave(env, b.id, [
-    { format: "hook", insight: "jar empties fast", visual: "empty jar", headline: "Somehow the jar is empty again.", picked: true },
-    { format: "offer", insight: "bundle", visual: "three jars", headline: "Three jars. One price." },
+    { format: "tof", insight: "jar empties fast", visual: "empty jar", headline: "Somehow the jar is empty again.", picked: true },
+    { format: "bof", insight: "bundle", visual: "three jars", headline: "Three jars. One price." },
   ]);
   return { subject, b, ideas };
 }
@@ -199,15 +199,22 @@ describe("batch flow", () => {
     const { env, raw } = makeEnv();
     const { b, subject } = await seed(env);
     const other = await batch.batchCreate(env, { brandSlug: "wongi", subjectId: subject.id, label: "W47" });
-    const [foreign] = await batch.ideasSave(env, other.id, [{ format: "hook", insight: "x", visual: "x", headline: "x" }]);
+    const [foreign] = await batch.ideasSave(env, other.id, [{ format: "tof", insight: "x", visual: "x", headline: "x" }]);
     const keys = addDraft(raw, b.id, foreign!.id, "77777777-7777-7777-7777-777777777777");
     await expect(batch.picksSave(env, b.id, [{ key: keys[0] }])).rejects.toThrow("not a finished draft");
   });
 
-  it("allows only one critic pick per format in a batch", async () => {
+  it("allows 2 tof, 1 mof and 1 bof picks per batch, on save and on update", async () => {
     const { env } = makeEnv();
-    const { b } = await seed(env);
-    await expect(batch.ideasSave(env, b.id, [{ format: "hook", insight: "y", visual: "y", headline: "y", picked: true }])).rejects.toThrow(/UNIQUE/);
+    const { b, ideas } = await seed(env); // seed: one tof picked, one bof not picked
+    const pick = (format: "tof" | "mof" | "bof") => batch.ideasSave(env, b.id, [{ format, insight: "y", visual: "y", headline: "y", picked: true }]);
+    await pick("tof");
+    await expect(pick("tof")).rejects.toThrow("Pick limit");
+    await pick("mof");
+    await expect(pick("mof")).rejects.toThrow("Pick limit");
+    await pick("bof");
+    await expect(batch.ideasUpdate(env, [{ id: ideas[1]!.id, picked: true }])).rejects.toThrow("Pick limit");
+    await batch.ideasUpdate(env, [{ id: ideas[0]!.id, picked: true }]); // already picked: no change in count
   });
 
   it("starts only one final when Render is tapped twice at once", async () => {
@@ -266,7 +273,7 @@ describe("monthly spend cap", () => {
 
 describe("nested tool input", () => {
   const schema = TOOLS.find((t) => t.name === "ideas_save")!.inputSchema;
-  const idea = { format: "hook", insight: "insight", visual: "visual", headline: "H" };
+  const idea = { format: "tof", insight: "insight", visual: "visual", headline: "H" };
   it("fills nested defaults and accepts a good list", () => {
     const out = validate(schema, { batchId: "11111111-1111-1111-1111-111111111111", ideas: [idea] }) as any;
     expect(out.ideas[0].picked).toBe(false);

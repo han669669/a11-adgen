@@ -12,6 +12,7 @@ This document uses ASD-STE100 Simplified Technical English with British spelling
 3. `docs/decisions.md`: every owner decision, with the date.
 4. `docs/v1-lessons.md`: what the old tool (`han669669/ai-ad-generator`) taught us.
 5. `docs/taste-seed.md`: the owner's taste, from his marks on v1. This seeds the taste canon.
+6. `docs/creative-playbook.md`: the bar for every ad (the option B test), the funnel stages and the batch process. Read it before you write ideas.
 
 The plan started in a Claude Code session on 2026-11-06 SGT. The plan page (private, owner only): https://claude.ai/artifact/9zyEqrUHpWa5xijAfU18K6. The files in `docs/` are the source of truth. When the page and the files disagree, the files win.
 
@@ -24,7 +25,7 @@ Every change must move one of these goals. Say which one in each PR.
 1. **Goal 1:** self-learning, self-curating, self-improving, always high-taste, thoughtful, creative, human-directed static ads for our target client (Singapore F&B and wellness brands that already run Meta ads).
 2. **Goal 2:** a static ad so good that a Singapore company that already runs paid campaigns pays real money for it. It fixes their creative fatigue, or it gets better results than their current ads. They run the winners and stop the losers.
 
-The business: a11studio.pro sells 16 static ads per month (4 per week) for S$2,800 (S$800 for the first 3 founding brands). The site promises a full refund when the first 4 ads do not beat the client's CTR in 72 hours. The four weekly formats on the site: The Hook (cold), The Anatomy (warm), Us vs Them (warm), The Offer (ready to buy).
+The business: a11studio.pro sells 16 static ads per month (4 per week) for S$2,800 (S$800 for the first 3 founding brands). The site promises a full refund when the first 4 ads do not beat the client's CTR in 72 hours. The site still names four weekly formats (The Hook, The Anatomy, Us vs Them, The Offer). Since 07-11-2026 the tool makes funnel stages instead: 2 top of funnel, 1 middle, 1 bottom each week (`docs/creative-playbook.md`). The site copy needs the owner's update.
 
 ---
 
@@ -42,7 +43,7 @@ The business: a11studio.pro sells 16 static ads per month (4 per week) for S$2,8
 | # | Decision | Effect |
 |---|---|---|
 | D1 | Claude Code is the only brain. No TheGrid, no other LLM API. | Every thinking step runs in Claude Code through the MCP server. The server never calls an LLM. When a plan limit stops a batch, the batch waits and resumes. |
-| D2 | Least human attention. The owner does not pick ideas or drafts. His only step: pick which drafts get the final `high` render. | Claude picks the ideas and ranks the drafts. The board pre-selects the critic's top draft per idea. One tap renders the selection. |
+| D2 | Least human attention. The owner does not pick ideas or drafts. Since 07-11-2026 he does not pick the finals either. | Claude picks the ideas, the drafts and the finals, against `docs/creative-playbook.md`. The board shows the batch; the owner can still pick there. |
 | D3 | No access to client Meta ad accounts (a11 does not manage their ads). | Results come from the client: an Ads Manager screenshot or CSV export. Claude reads it. The learning loop must work without results too. |
 | D4 | Private repo `han669669/a11-adgen`. | |
 | D5 | Port v1 data (marks, notes, Used ads) when it serves the goals. | Seeds the taste canon, the swipe file and the gold test set. |
