@@ -22,7 +22,10 @@ export class BudgetError extends Error {}
  */
 const STALE_RESERVATION = "-15 minutes";
 
-const COUNTED = `(status = 'spent' OR (status = 'reserved' AND at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '${STALE_RESERVATION}')))`;
+/** The cap is per calendar month (UTC): AGENTS.md §8 asks for a monthly cap. */
+const THIS_MONTH = `at >= strftime('%Y-%m-01T00:00:00.000Z', 'now')`;
+
+const COUNTED = `(${THIS_MONTH} AND (status = 'spent' OR (status = 'reserved' AND at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '${STALE_RESERVATION}'))))`;
 
 /**
  * Reserve an estimated spend. The cap check and the insert are one statement, so parallel calls cannot pass the cap.
@@ -66,5 +69,5 @@ export async function totals(env: Env) {
     `SELECT service, kind, COUNT(*) AS n, ROUND(SUM(usd_est), 4) AS usd FROM spend WHERE ${COUNTED} GROUP BY service, kind`,
   ).all<{ service: string; kind: string; n: number; usd: number }>();
   const total = rows.results.reduce((s, r) => s + r.usd, 0);
-  return { capUsd: Number(env.SPEND_CAP_USD), totalUsd: Number(total.toFixed(4)), byKind: rows.results };
+  return { month: new Date().toISOString().slice(0, 7), capUsd: Number(env.SPEND_CAP_USD), totalUsd: Number(total.toFixed(4)), byKind: rows.results };
 }

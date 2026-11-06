@@ -9,7 +9,7 @@ export interface Env {
   MCP_TOKEN_SHA256: string;
   FAL_KEY: string;
   EXA_API_KEY: string;
-  /** Total spend cap in US$ for all paid calls (Phase 0: all time). */
+  /** Spend cap in US$ for all paid calls in one calendar month (UTC). */
   SPEND_CAP_USD: string;
   PUBLIC_BASE_URL: string;
 }
