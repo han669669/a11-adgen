@@ -4,6 +4,7 @@ import * as fal from "./fal";
 
 export const FORMATS = ["hook", "anatomy", "usvsthem", "offer"] as const;
 export const STATUSES = ["research", "ideas", "drafts", "board", "finals", "done"] as const;
+const MAX_BATCH_RENDERS = fal.MAX_BATCH_RENDERS;
 
 const now = () => new Date().toISOString();
 
@@ -139,8 +140,10 @@ interface DraftRow {
 
 /** The batch's finished draft images, as key → idea id. */
 async function draftKeys(env: Env, batchId: string): Promise<Map<string, string>> {
+  // Only renders whose idea belongs to this same batch count (render_submit takes free-form ids).
   const rows = await env.DB.prepare(
-    "SELECT id, idea, image_keys FROM renders WHERE batch = ? AND kind = 'draft' AND image_keys IS NOT NULL LIMIT 200",
+    `SELECT r.id, r.idea, r.image_keys FROM renders r JOIN ideas i ON i.id = r.idea AND i.batch_id = r.batch
+     WHERE r.batch = ? AND r.kind = 'draft' AND r.image_keys IS NOT NULL LIMIT ${MAX_BATCH_RENDERS}`,
   ).bind(batchId).all<DraftRow>();
   const map = new Map<string, string>();
   for (const r of rows.results) for (const k of JSON.parse(r.image_keys!) as string[]) map.set(k, r.idea);
@@ -197,10 +200,23 @@ export async function finalRender(env: Env, batchId: string, key: string) {
   if (!pick) throw new Error(`${key} is not a pick of batch ${batchId}.`);
   if (pick.final_render_id) return { id: pick.final_render_id, status: "already started" };
   if (!pick.final_prompt) throw new Error(`Idea ${pick.idea_id} has no final prompt. Set it with ideas_update.`);
+  // Claim the pick before the paid call, so two taps (or a retry) cannot start two finals.
+  const claim = `pending:${crypto.randomUUID()}`;
+  const claimed = await env.DB.prepare("UPDATE picks SET final_render_id = ? WHERE render_key = ? AND final_render_id IS NULL")
+    .bind(claim, key)
+    .run();
+  if (claimed.meta.changes !== 1) return { id: null, status: "already started" };
   const refs = [fal.mediaUrl(env, key), ...(JSON.parse(pick.final_refs) as string[])];
-  const r = await fal.submit(env, { batch: batchId, idea: pick.idea_id, kind: "final", prompt: pick.final_prompt, referenceUrls: refs, numImages: 1 });
+  let r: Awaited<ReturnType<typeof fal.submit>>;
+  try {
+    r = await fal.submit(env, { batch: batchId, idea: pick.idea_id, kind: "final", prompt: pick.final_prompt, referenceUrls: refs, numImages: 1 });
+  } catch (e) {
+    // fal did not take the job: free the pick so the owner can tap Render again.
+    await env.DB.prepare("UPDATE picks SET final_render_id = NULL WHERE render_key = ? AND final_render_id = ?").bind(key, claim).run();
+    throw e;
+  }
   await env.DB.batch([
-    env.DB.prepare("UPDATE picks SET final_render_id = ? WHERE render_key = ?").bind(r.id, key),
+    env.DB.prepare("UPDATE picks SET final_render_id = ? WHERE render_key = ? AND final_render_id = ?").bind(r.id, key, claim),
     env.DB.prepare("UPDATE batches SET status = 'finals', updated_at = ? WHERE id = ? AND status IN ('drafts', 'board')").bind(now(), batchId),
   ]);
   return r;
@@ -223,7 +239,7 @@ export async function batchGet(env: Env, id: string) {
     env.DB.prepare("SELECT id, kind, title, url, data FROM subjects WHERE id = ?").bind(b.subject_id).first<Record<string, any>>(),
     env.DB.prepare("SELECT * FROM ideas WHERE batch_id = ? ORDER BY n LIMIT 60").bind(id).all<Record<string, any>>(),
     env.DB.prepare(
-      "SELECT id, idea, kind, status, image_keys, composed_key, error, usd_est, created_at FROM renders WHERE batch = ? ORDER BY created_at LIMIT 200",
+      `SELECT id, idea, kind, status, image_keys, composed_key, error, usd_est, created_at FROM renders WHERE batch = ? ORDER BY created_at LIMIT ${MAX_BATCH_RENDERS}`,
     ).bind(id).all<Record<string, any>>(),
     env.DB.prepare("SELECT render_key, idea_id, rank, reason FROM draft_ranks WHERE batch_id = ? LIMIT 200").bind(id).all<Record<string, any>>(),
     env.DB.prepare("SELECT render_key, idea_id, note, final_render_id, created_at FROM picks WHERE batch_id = ? LIMIT 100").bind(id).all<Record<string, any>>(),

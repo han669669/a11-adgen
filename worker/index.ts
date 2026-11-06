@@ -5,7 +5,7 @@ import { handleMcp } from "./mcp";
 /** A Worker bundle on the Free plan is at most 3 MB. */
 const STAGE_MAX_BYTES = 3_000_000;
 
-const MEDIA_KEY = /^(renders\/[0-9a-f-]{36}\/\d+(-c\d*)?\.jpg|brands\/[0-9a-f-]{36}\/v\d+-[a-z0-9]+\.(png|jpg|webp))$/;
+const MEDIA_KEY = /^(renders\/[0-9a-f-]{36}\/\d+(-c\d*)?\.jpg|brands\/[0-9a-f-]{36}\/(logo|ref\d)\.(png|jpg|webp))$/;
 
 async function sha256Hex(s: string): Promise<string> {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
