@@ -123,7 +123,8 @@ export async function check(env: Env, id: string) {
     });
     keys.push(key);
   }
-  const status = keys.length ? "done" : "failed";
+  // A short download is a failure (cubic, PR #1); the saved keys stay listed, so the images remain usable.
+  const status = keys.length > 0 && keys.length === images.length ? "done" : "failed";
   const error =
     images.length === 0 ? "fal returned no images" : keys.length === images.length ? null : `saved ${keys.length} of ${images.length} images`;
   await env.DB.prepare("UPDATE renders SET status = ?, image_keys = ?, error = ?, updated_at = ? WHERE id = ?")
