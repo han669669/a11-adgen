@@ -30,7 +30,7 @@ const COUNTED = `(status = 'spent' OR (status = 'reserved' AND at > strftime('%Y
  */
 export async function reserve(
   env: Env,
-  service: "fal" | "exa",
+  service: "fal" | "exa" | "images",
   kind: string,
   ref: string,
   usd: number,

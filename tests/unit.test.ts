@@ -39,3 +39,15 @@ describe("transient", () => {
     expect(transient(404)).toBe(false);
   });
 });
+
+import { placement, RENDER_KEY } from "../worker/compose";
+
+describe("compose placement", () => {
+  it("turns percentages into pixels", () => {
+    expect(placement(1536, 1920, 34, 5)).toEqual({ logoWidth: 522, top: 96 });
+  });
+  it("accepts only a raw render key, not a composed one", () => {
+    expect(RENDER_KEY.test("renders/0f7bce2f-3394-41fa-8298-0b2289f68f6c/1.jpg")).toBe(true);
+    expect(RENDER_KEY.test("renders/0f7bce2f-3394-41fa-8298-0b2289f68f6c/1-c.jpg")).toBe(false);
+  });
+});

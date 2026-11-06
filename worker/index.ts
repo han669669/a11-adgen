@@ -1,7 +1,7 @@
 import type { Env } from "./env";
 import { handleMcp } from "./mcp";
 
-const MEDIA_KEY = /^renders\/[0-9a-f-]{36}\/\d+\.jpg$/;
+const MEDIA_KEY = /^renders\/[0-9a-f-]{36}\/\d+(-c)?\.jpg$/;
 
 async function sha256Hex(s: string): Promise<string> {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));

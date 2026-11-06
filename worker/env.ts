@@ -1,6 +1,7 @@
 export interface Env {
   DB: D1Database;
   MEDIA: R2Bucket;
+  IMAGES: ImagesBinding;
   /**
    * SHA-256 (hex) of the Phase 0 bearer token for /mcp. Only the hash is stored on the Worker.
    * OAuth replaces this in Phase 1.
