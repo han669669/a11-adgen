@@ -218,6 +218,39 @@ export async function goldGet(env: Env, a: { limit?: number; offset?: number }) 
 }
 
 /** Compare the critic's use/pass answers with the owner's marks. Saves the run so before and after a change can be compared. */
+const r3 = (x: number) => Math.round(x * 1000) / 1000;
+
+interface RunRow {
+  note: string;
+  n: number;
+  agreed: number;
+  use_agreed: number | null;
+  use_truth: number | null;
+  at: string;
+}
+
+/**
+ * The numbers for one run. Most gold marks are "pass", so raw agreement alone flatters a judge who passes everything:
+ * baseline is the agreement of answering the owner's more common mark for every item, and balancedAccuracy is the mean of
+ * the share of his "use" marks found and the share of his "pass" marks found (0.5 = no better than a constant answer).
+ * A change must not lower balancedAccuracy. Runs saved before migration 0008 have no use counts, so they show agreement only.
+ */
+function runStats(r: RunRow) {
+  const out: Record<string, unknown> = { note: r.note, n: r.n, agreed: r.agreed, agreement: r3(r.agreed / r.n), at: r.at };
+  if (r.use_agreed !== null && r.use_truth !== null) {
+    const passTruth = r.n - r.use_truth;
+    const passAgreed = r.agreed - r.use_agreed;
+    const useRecall = r.use_truth ? r.use_agreed / r.use_truth : null;
+    const passRecall = passTruth ? passAgreed / passTruth : null;
+    out.baseline = r3(Math.max(r.use_truth, passTruth) / r.n);
+    out.useRecall = useRecall === null ? null : r3(useRecall);
+    out.passRecall = passRecall === null ? null : r3(passRecall);
+    out.balancedAccuracy = useRecall !== null && passRecall !== null ? r3((useRecall + passRecall) / 2) : null;
+  }
+  return out;
+}
+
+/** Compare the critic's use/pass answers with the owner's marks. Saves the run so before and after a change can be compared. */
 export async function goldScore(env: Env, a: { note: string; answers: { id: string; mark: "use" | "pass" }[] }) {
   const ids = a.answers.map((x) => x.id);
   if (new Set(ids).size !== ids.length) throw new InputError("Each gold item may be answered once.");
@@ -227,17 +260,18 @@ export async function goldScore(env: Env, a: { note: string; answers: { id: stri
   const unknown = ids.filter((id) => !truth.has(id));
   if (unknown.length) throw new InputError(`Not gold items: ${unknown.slice(0, 3).join(", ")}.`);
   const agreed = a.answers.filter((x) => truth.get(x.id) === x.mark).length;
-  const r = await env.DB.prepare("INSERT INTO gold_runs (note, n, agreed, at) VALUES (?, ?, ?, ?)").bind(a.note, a.answers.length, agreed, now()).run();
-  const previous = await env.DB.prepare("SELECT note, n, agreed, at FROM gold_runs WHERE id < ? ORDER BY id DESC LIMIT 1").bind(r.meta.last_row_id).first<{ note: string; n: number; agreed: number; at: string }>();
-  return {
-    n: a.answers.length,
-    agreed,
-    agreement: Math.round((agreed / a.answers.length) * 1000) / 1000,
-    previous: previous ? { note: previous.note, n: previous.n, agreement: Math.round((previous.agreed / previous.n) * 1000) / 1000, at: previous.at } : null,
-  };
+  const useAgreed = a.answers.filter((x) => x.mark === "use" && truth.get(x.id) === "use").length;
+  const useTruth = a.answers.filter((x) => truth.get(x.id) === "use").length;
+  const at = now();
+  const r = await env.DB.prepare("INSERT INTO gold_runs (note, n, agreed, use_agreed, use_truth, at) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(a.note, a.answers.length, agreed, useAgreed, useTruth, at).run();
+  const previous = await env.DB.prepare("SELECT note, n, agreed, use_agreed, use_truth, at FROM gold_runs WHERE id < ? ORDER BY id DESC LIMIT 1")
+    .bind(r.meta.last_row_id).first<RunRow>();
+  const { note: _n, at: _a, ...run } = runStats({ note: a.note, n: a.answers.length, agreed, use_agreed: useAgreed, use_truth: useTruth, at });
+  return { ...run, previous: previous ? runStats(previous) : null };
 }
 
 export async function goldRuns(env: Env) {
-  const rows = await env.DB.prepare("SELECT note, n, agreed, at FROM gold_runs ORDER BY id DESC LIMIT 20").all<{ note: string; n: number; agreed: number; at: string }>();
-  return { runs: rows.results.map((r) => ({ note: r.note, n: r.n, agreement: Math.round((r.agreed / r.n) * 1000) / 1000, at: r.at })) };
+  const rows = await env.DB.prepare("SELECT note, n, agreed, use_agreed, use_truth, at FROM gold_runs ORDER BY id DESC LIMIT 20").all<RunRow>();
+  return { runs: rows.results.map(runStats) };
 }
