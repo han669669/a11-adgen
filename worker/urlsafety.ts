@@ -20,8 +20,8 @@ export function isPublicHost(hostname: string): boolean {
   }
   if (h.includes(":")) {
     // IPv6 literal: anything that starts "::" (loopback, unspecified, IPv4-compatible and IPv4-mapped, as "::7f00:1"),
-    // unique-local (fc00::/7), link-local (fe80::/10), site-local (fec0::/10). No public address starts "::".
-    if (h.startsWith("::") || /^f[cd]/.test(h) || /^fe[89a-f]/.test(h)) return false;
+    // unique-local (fc00::/7), link-local (fe80::/10), site-local (fec0::/10), multicast (ff00::/8). No public address starts "::".
+    if (h.startsWith("::") || /^f[cd]/.test(h) || /^fe[89a-f]/.test(h) || /^ff/.test(h)) return false;
     return true;
   }
   return true;
