@@ -53,7 +53,7 @@ async function stage(request: Request, env: Env, name: string, pattern: RegExp, 
   const body = await request.arrayBuffer();
   if (body.byteLength === 0) return new Response("Empty body", { status: 400 });
   if (body.byteLength > STAGE_MAX_BYTES) return new Response("Too large", { status: 413 });
-  const contentType = prefix === "app/" || prefix === "refs/" ? typeOf(name) : "application/javascript";
+  const contentType = prefix === "app/" || prefix === "refs/" || prefix === "repairs/" ? typeOf(name) : "application/javascript";
   await env.MEDIA.put(`${prefix}${name}`, body, { httpMetadata: { contentType } });
   return Response.json({ key: `${prefix}${name}`, bytes: body.byteLength });
 }
@@ -100,6 +100,11 @@ export default {
     // read by fal through /m/refs/<name>.
     if (url.pathname.startsWith("/admin/ref/") && request.method === "PUT") {
       return stage(request, env, url.pathname.slice("/admin/ref/".length), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png)$/, "refs/");
+    }
+
+    // A repaired final made outside the Worker (scripts/box_print.py): saved to R2 repairs/<uuid>.jpg, then taken into the pack with final_attach.
+    if (url.pathname.startsWith("/admin/repair/") && request.method === "PUT") {
+      return stage(request, env, url.pathname.slice("/admin/repair/".length), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$/, "repairs/");
     }
 
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);

@@ -7,7 +7,7 @@ import type { Env } from "./env";
 import * as batch from "./batch";
 import * as canon from "./canon";
 import { brandBySlug, brandGet, brandList, brandSave, latestKit, SLUG } from "./brand";
-import { composeFinal } from "./compose";
+import { composeFinal, finalAttach } from "./compose";
 import { foodFix, regionFix } from "./food";
 import * as exa from "./exa";
 import { promptGet, promptList } from "./prompts";
@@ -727,6 +727,25 @@ export const TOOLS: Tool[] = [
         grainPct: a.grainPct,
       });
       // The newest compose is the one the board shows (this also clears a failed board compose).
+      await env.DB.prepare("UPDATE renders SET composed_key = ? WHERE id = ?").bind(out.key, String(a.key).split("/")[1]).run();
+      return text(out);
+    },
+  },
+  {
+    name: "final_attach",
+    description:
+      "Take a repaired picture into the pack path. Use it only after a script repaired a composed final outside the Worker (for example scripts/box_print.py, docs/creative-playbook.md 7.5): upload the JPEG with PUT /admin/repair/<uuid>.jpg, then pass its key here with the final's render key. The picture must be a JPEG of the same size as the final. It becomes the render's composed picture, so pack_publish uses it. It saves a new image key (…-cNNN.jpg); earlier composes stay. Do not run compose_final on it again: the logo and grain are already in. Free.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        key: { type: "string", pattern: "^renders/[0-9a-f-]{36}/\\d+\\.jpg$", description: "The final's render image key" },
+        upload: { type: "string", pattern: "^repairs/[0-9a-f-]{36}\\.jpg$", description: "The uploaded repaired picture" },
+      },
+      required: ["key", "upload"],
+      additionalProperties: false,
+    },
+    run: async (env, a) => {
+      const out = await finalAttach(env, { key: a.key, upload: a.upload });
       await env.DB.prepare("UPDATE renders SET composed_key = ? WHERE id = ?").bind(out.key, String(a.key).split("/")[1]).run();
       return text(out);
     },

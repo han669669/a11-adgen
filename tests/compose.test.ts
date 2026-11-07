@@ -1,8 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { claimCompose, settleCompose } from "../worker/api";
-import { composeFinal } from "../worker/compose";
+import { composeFinal, finalAttach, jpegSize } from "../worker/compose";
 import type { Env } from "../worker/env";
+import { TOOLS } from "../worker/mcp";
 import { fakeD1 } from "./helpers/d1";
 
 const ID = "11111111-2222-3333-4444-555555555555";
@@ -97,5 +98,64 @@ describe("board compose claim", () => {
     expect(await settleCompose(env, ID, old, "error:late failure")).toBe(false);
     expect(keyOf(env).k).toBe("renders/x/1-cnew.jpg");
     expect(await claimCompose(env, ID)).toBeNull();
+  });
+});
+
+// A JPEG header with only the frame size set: enough for jpegSize.
+const jpeg = (width: number, height: number) =>
+  new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, height >> 8, height & 255, width >> 8, width & 255, 0x03, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xff, 0xd9]);
+
+describe("jpegSize", () => {
+  it("reads the frame size", () => expect(jpegSize(jpeg(1536, 1920))).toEqual({ width: 1536, height: 1920 }));
+  it("skips a segment before the frame header", () => {
+    const seg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x06, 0, 0, 0, 0, ...jpeg(640, 800).slice(2)]);
+    expect(jpegSize(seg)).toEqual({ width: 640, height: 800 });
+  });
+  it("returns null for bytes that are not a JPEG", () => {
+    expect(jpegSize(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0, 0, 0, 0, 0]))).toBeNull();
+    expect(jpegSize(new Uint8Array([0xff, 0xd8]))).toBeNull();
+    expect(jpegSize(new Uint8Array([0xff, 0xd8, 0xff, 0xd9, 0, 0, 0, 0, 0, 0, 0, 0]))).toBeNull();
+  });
+});
+
+describe("final_attach", () => {
+  const UP = "0a1b2c3d-0000-4000-8000-0123456789ab";
+  const UPLOAD = `repairs/${UP}.jpg`;
+  function attachEnv(kind = "final", status = "done", files: Record<string, Uint8Array> = { [UPLOAD]: jpeg(1536, 1920) }) {
+    const env = envWith(kind, status) as unknown as { MEDIA: unknown; saved: Map<string, unknown> };
+    const saved = env.saved;
+    env.MEDIA = {
+      get: async (k: string) => (files[k] ? { arrayBuffer: async () => files[k]!.buffer.slice(files[k]!.byteOffset, files[k]!.byteOffset + files[k]!.byteLength) } : null),
+      put: async (k: string, v: unknown) => void saved.set(k, v),
+    };
+    return env as unknown as Env & { saved: Map<string, unknown> };
+  }
+  it("saves the picture under a new compose-shaped key and leaves the original", async () => {
+    const env = attachEnv();
+    const out = await finalAttach(env, { key: KEY, upload: UPLOAD });
+    expect(out.key).toMatch(new RegExp(`^renders/${ID}/1-c\\d+\\.jpg$`));
+    expect(out).toMatchObject({ width: 1536, height: 1920 });
+    expect([...env.saved.keys()]).toEqual([out.key]);
+  });
+  it("the tool makes the new key the render's composed picture, which pack_publish reads", async () => {
+    const env = attachEnv();
+    const tool = TOOLS.find((t) => t.name === "final_attach")!;
+    expect(tool.inputSchema.required).toEqual(["key", "upload"]);
+    const res = (await tool.run(env, { key: KEY, upload: UPLOAD })) as { content: { text: string }[] };
+    const { key } = JSON.parse(res.content[0]!.text);
+    const row = (env.DB as unknown as { raw: DatabaseSync }).raw.prepare("SELECT composed_key FROM renders WHERE id = ?").get(ID);
+    expect(row).toEqual({ composed_key: key });
+    expect(key).toMatch(/^renders\//);
+  });
+  it("refuses a draft, a final that is not done, a bad key and a bad upload key", async () => {
+    await expect(finalAttach(attachEnv("draft", "done"), { key: KEY, upload: UPLOAD })).rejects.toThrow("not a completed final");
+    await expect(finalAttach(attachEnv("final", "queued"), { key: KEY, upload: UPLOAD })).rejects.toThrow("not a completed final");
+    await expect(finalAttach(attachEnv(), { key: "x.jpg", upload: UPLOAD })).rejects.toThrow("render image key");
+    await expect(finalAttach(attachEnv(), { key: KEY, upload: `refs/${UP}.jpg` })).rejects.toThrow("repair key");
+  });
+  it("refuses a missing upload, a file that is not a JPEG and a picture of another size", async () => {
+    await expect(finalAttach(attachEnv("final", "done", {}), { key: KEY, upload: UPLOAD })).rejects.toThrow("No image at");
+    await expect(finalAttach(attachEnv("final", "done", { [UPLOAD]: new Uint8Array(40) }), { key: KEY, upload: UPLOAD })).rejects.toThrow("not a JPEG");
+    await expect(finalAttach(attachEnv("final", "done", { [UPLOAD]: jpeg(1024, 1280) }), { key: KEY, upload: UPLOAD })).rejects.toThrow("1024x1280, but the final is 1536x1920");
   });
 });
