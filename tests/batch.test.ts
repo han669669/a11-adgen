@@ -162,6 +162,52 @@ describe("batch flow", () => {
     expect(got.kit?.logo.key).toMatch(/\/logo\.png$/);
   });
 
+  it("compares the owner's pick with the blind rank and logs it for taste_log", async () => {
+    const { env, raw } = makeEnv();
+    const { b, ideas } = await seed(env);
+    const k1 = addDraft(raw, b.id, ideas[0]!.id, "55555555-5555-5555-5555-555555555555");
+    const k2 = addDraft(raw, b.id, ideas[1]!.id, "55555555-5555-5555-5555-666666666666");
+    await batch.draftsRank(env, b.id, [
+      { key: k1[0], rank: 1, reason: "clean jar" },
+      { key: k1[1], rank: 2 },
+      { key: k1[2], rank: 3 },
+      { key: k2[0], rank: 1 },
+      { key: k2[1], rank: 2, reason: "warm light" },
+      { key: k2[2], rank: 3 },
+    ]);
+    const res = await batch.picksSave(env, b.id, [
+      { key: k1[0], note: "this one" },
+      { key: k2[1], note: "warmer" },
+    ]);
+    expect(res.review).toEqual([
+      { key: k1[0], criticRank: 1, agreed: true },
+      { key: k2[1], criticRank: 2, agreed: false },
+    ]);
+    expect(res.tally).toEqual({ reviewed: 2, agreed: 1 });
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM picks WHERE by_owner = 1").get()).toEqual({ n: 2 });
+    const log = await batch.tasteLog(env);
+    expect(log.tally).toEqual({ reviewed: 2, agreed: 1 });
+    const second = log.picks.find((p) => p.chosen.key === k2[1])!;
+    expect(second).toMatchObject({ ownerSaid: "warmer", chosen: { criticRank: 2, criticReason: "warm light" } });
+    expect(second.passed.map((d) => d.criticRank)).toEqual([1, 3]);
+  });
+
+  it("keeps picks made before the owner review out of the taste log", async () => {
+    const { env, raw } = makeEnv();
+    const { b, ideas } = await seed(env);
+    const keys = addDraft(raw, b.id, ideas[0]!.id, "77777777-7777-7777-7777-777777777777");
+    raw.prepare("INSERT INTO picks (render_key, batch_id, idea_id, created_at) VALUES (?, ?, ?, 'now')").run(keys[0], b.id, ideas[0]!.id);
+    expect((await batch.tasteLog(env)).picks).toEqual([]);
+  });
+
+  it("needs the owner's words for each pick on the MCP picks_save tool", () => {
+    const tool = TOOLS.find((t) => t.name === "picks_save")!;
+    const key = "renders/11111111-1111-1111-1111-111111111111/1.jpg";
+    const args = { batchId: "11111111-1111-1111-1111-111111111111", picks: [{ key }] };
+    expect(() => validate(tool.inputSchema as never, args)).toThrow();
+    expect(() => validate(tool.inputSchema as never, { ...args, picks: [{ key, ownerSaid: "this one" }] })).not.toThrow();
+  });
+
   it("refuses to rank or pick a key that is not a finished draft of the batch", async () => {
     const { env } = makeEnv();
     const { b } = await seed(env);

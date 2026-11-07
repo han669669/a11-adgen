@@ -149,10 +149,10 @@ describe("web app accounts", () => {
     expect(r.status).toBe(415);
   });
 
-  it("needs a session for batches and for the render step", async () => {
+  it("needs a session for batches and for saving picks", async () => {
     const { env } = makeEnv();
     expect((await call(env, "/api/batches")).status).toBe(401);
-    expect((await call(env, "/api/batches/11111111-1111-1111-1111-111111111111/render", { body: { picks: [] } })).status).toBe(401);
+    expect((await call(env, "/api/batches/11111111-1111-1111-1111-111111111111/picks", { body: { picks: [] } })).status).toBe(401);
   });
 });
 

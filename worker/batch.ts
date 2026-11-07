@@ -176,7 +176,9 @@ export async function draftsRank(env: Env, batchId: string, ranks: { key: string
 }
 
 /**
- * The owner's picks (D2). Picks that already have a final render stay; other old picks not in the list are removed.
+ * The owner's picks (2026-11-07: the owner picks 1 of the 3 drafts per idea; Claude never picks for him).
+ * Picks that already have a final render stay; other old picks not in the list are removed.
+ * Returns how each pick compares with the critic's blind rank, and the running tally over all batches.
  */
 export async function picksSave(env: Env, batchId: string, picks: { key: string; note?: string }[]) {
   const keys = await draftKeys(env, batchId);
@@ -198,13 +200,63 @@ export async function picksSave(env: Env, batchId: string, picks: { key: string;
     ).bind(batchId, JSON.stringify(listed)),
     ...picks.map((p) =>
       env.DB.prepare(
-        `INSERT INTO picks (render_key, batch_id, idea_id, note, created_at) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT (render_key) DO UPDATE SET note = excluded.note`,
+        `INSERT INTO picks (render_key, batch_id, idea_id, note, by_owner, created_at) VALUES (?, ?, ?, ?, 1, ?)
+         ON CONFLICT (render_key) DO UPDATE SET note = excluded.note, by_owner = 1`,
       ).bind(p.key, batchId, keys.get(p.key)!, p.note ?? null, at),
     ),
   ];
   await env.DB.batch(stmts);
-  return { picks: listed.length };
+  const ranks = await env.DB.prepare(
+    "SELECT render_key, rank FROM draft_ranks WHERE batch_id = ? AND render_key IN (SELECT value FROM json_each(?))",
+  ).bind(batchId, JSON.stringify(listed)).all<{ render_key: string; rank: number }>();
+  const rankOf = new Map(ranks.results.map((r) => [r.render_key, r.rank]));
+  return {
+    picks: listed.length,
+    review: picks.map((p) => ({ key: p.key, criticRank: rankOf.get(p.key) ?? null, agreed: rankOf.get(p.key) === 1 })),
+    tally: await tasteTally(env),
+  };
+}
+
+/** How often the owner's pick was the critic's rank 1, over every owner pick that has a rank. */
+async function tasteTally(env: Env) {
+  const r = await env.DB.prepare(
+    `SELECT COUNT(*) AS reviewed, COALESCE(SUM(d.rank = 1), 0) AS agreed
+     FROM picks p JOIN draft_ranks d ON d.render_key = p.render_key WHERE p.by_owner = 1`,
+  ).first<{ reviewed: number; agreed: number }>();
+  return { reviewed: r?.reviewed ?? 0, agreed: r?.agreed ?? 0 };
+}
+
+/**
+ * What the owner chose and what he passed over, newest first, so the next ideas and ranks learn from it.
+ * Each row has his words, the critic's rank and reason for the chosen draft, and the same for the drafts he passed.
+ */
+export async function tasteLog(env: Env, limit = 30) {
+  const picks = await env.DB.prepare(
+    `SELECT p.render_key, p.idea_id, p.batch_id, p.note, p.created_at, i.format, i.headline, i.visual, b.label
+     FROM picks p JOIN ideas i ON i.id = p.idea_id AND i.batch_id = p.batch_id JOIN batches b ON b.id = p.batch_id
+     WHERE p.by_owner = 1 ORDER BY p.created_at DESC LIMIT ?`,
+  ).bind(limit).all<Record<string, any>>();
+  const ideaIds = [...new Set(picks.results.map((p) => p.idea_id as string))];
+  const ranks = await env.DB.prepare(
+    "SELECT render_key, idea_id, rank, reason FROM draft_ranks WHERE idea_id IN (SELECT value FROM json_each(?)) ORDER BY rank",
+  ).bind(JSON.stringify(ideaIds)).all<{ render_key: string; idea_id: string; rank: number; reason: string | null }>();
+  return {
+    tally: await tasteTally(env),
+    picks: picks.results.map((p) => {
+      const mine = ranks.results.filter((r) => r.idea_id === p.idea_id);
+      const chosen = mine.find((r) => r.render_key === p.render_key);
+      return {
+        batch: p.label,
+        stage: p.format,
+        headline: p.headline,
+        visual: p.visual,
+        at: p.created_at,
+        ownerSaid: p.note,
+        chosen: { key: p.render_key, criticRank: chosen?.rank ?? null, criticReason: chosen?.reason ?? null },
+        passed: mine.filter((r) => r.render_key !== p.render_key).map((r) => ({ key: r.render_key, criticRank: r.rank, criticReason: r.reason })),
+      };
+    }),
+  };
 }
 
 /**

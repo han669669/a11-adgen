@@ -108,8 +108,9 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
     let m = path.match(new RegExp(`^/api/batches/(${UUID})$`));
     if (m && method === "GET") return json(await batch.batchGet(env, m[1]!));
 
-    // The one human step (D2): save the owner's picks, then start their high finals.
-    m = path.match(new RegExp(`^/api/batches/(${UUID})/render$`));
+    // The one human step: the owner picks 1 draft per idea. This only saves the picks. Claude then runs the final
+    // (house recipe, creative-playbook §7), so the finish pass happens before the logo is drawn.
+    m = path.match(new RegExp(`^/api/batches/(${UUID})/picks$`));
     if (m && method === "POST") {
       const b = await body(request);
       const picks = Array.isArray(b.picks) ? b.picks : [];
@@ -119,14 +120,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
         const note = typeof p.note === "string" ? p.note.slice(0, 600) : undefined;
         return { key: p.key, note };
       });
-      await batch.picksSave(env, m[1]!, clean);
-      const started = await Promise.allSettled(clean.map((p: { key: string }) => batch.finalRender(env, m![1]!, p.key)));
-      return json({
-        results: started.map((r, i) => ({
-          key: clean[i]!.key,
-          ...(r.status === "fulfilled" ? { ok: true, render: r.value } : { ok: false, error: String((r.reason as Error)?.message ?? r.reason) }),
-        })),
-      });
+      return json(await batch.picksSave(env, m[1]!, clean));
     }
 
     m = path.match(new RegExp(`^/api/renders/(${UUID})/refresh$`));
