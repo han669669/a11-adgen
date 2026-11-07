@@ -163,6 +163,8 @@ def open_source(a):
     strip = E[s0:s1 + 1].copy()
     if a.repeat < 1:
         sys.exit("--repeat must be at least 1")
+    if strip.shape[0] * a.repeat > s1 + 1:
+        sys.exit(f"--repeat {a.repeat} adds {strip.shape[0] * a.repeat} rows but only {s1 + 1} rows of padding and neck lie above the strip's end: lower --repeat")
     strip = np.concatenate([strip] * a.repeat, axis=0)
     n = strip.shape[0]
     ext = np.concatenate([E[:s1 + 1], strip, E[s1 + 1:]], axis=0)[n:]  # the top n rows are plain backdrop: the base keeps its y
@@ -216,6 +218,18 @@ def vary_food(a):
             sys.exit("--extra-src must be the same size and framing as --packshot")
     regions = [ints(r, 4) for r in a.region]
     edge, ov = a.edge, a.overlap
+    if a.count < 1:
+        sys.exit("--count must be at least 1")
+    if edge < 0 or ov < 1:
+        sys.exit("--edge must be 0 or more and --overlap at least 1")
+    if not (1 <= a.strip_min <= a.strip_max):
+        sys.exit("--strip-min must be at least 1 and not above --strip-max")
+    H0, W0 = pack.shape[:2]
+    for (x0, y0, x1, y1) in regions:
+        if not (0 <= x0 < x1 <= W0 and 0 <= y0 < y1 <= H0):
+            sys.exit(f"a --region is outside the packshot ({W0}x{H0})")
+        if x1 - x0 < 2 * edge + 2 * ov + 8:
+            sys.exit(f"region {x0},{y0},{x1},{y1} is too narrow for --edge {edge} and --overlap {ov}")
     for k in range(1, a.count + 1):
         out = pack.copy()
         if k > 1:
@@ -227,7 +241,7 @@ def vary_food(a):
                 iw = inners[0].shape[1]
                 canvas = R[:, :edge + ov].copy()                  # left glass edge
                 used = []
-                while canvas.shape[1] < w - edge - ov:
+                while canvas.shape[1] < w - edge:                  # enough width that the right glass edge is joined at w - edge exactly
                     sw = rng.randint(a.strip_min, a.strip_max)
                     for _ in range(40):                           # a start that is not near one already used in this jar
                         st = rng.randint(0, max(0, iw - sw))
@@ -241,7 +255,7 @@ def vary_food(a):
                     piece = np.asarray(Image.fromarray(np.ascontiguousarray(piece)).resize((nw, h), Image.LANCZOS))
                     canvas = _seam_blend(canvas, piece, ov)
                 right = R[:, w - edge - ov:]
-                canvas = _seam_blend(canvas[:, :max(canvas.shape[1], w - edge)], right, ov) if canvas.shape[1] >= ov else canvas
+                canvas = _seam_blend(canvas[:, :min(canvas.shape[1], w - edge)], right, ov) if canvas.shape[1] >= ov else canvas
                 if canvas.shape[1] != w:                          # trim or pad (edge replicate) to the region width
                     canvas = canvas[:, :w] if canvas.shape[1] > w else np.pad(canvas, ((0, 0), (0, w - canvas.shape[1]), (0, 0)), mode="edge")
                 # feather the top and bottom rows of the region into the original, so no hard line shows where the new rows start
@@ -281,6 +295,8 @@ def relight(a):
     gain = 1 + a.shade * 0.35 - a.shade * (toward + 1) / 2
     gain *= 1 - a.edge * np.abs(u) ** 3
     ys = np.arange(H, dtype=float)
+    if not np.isfinite(a.bounce_zone) or a.bounce_zone <= 0:
+        sys.exit("--bounce-zone must be finite and greater than zero")
     w = np.clip((ys - (base - (base - top) * a.bounce_zone)) / ((base - top) * a.bounce_zone), 0, 1)[:, None]   # 0 above the zone, 1 at the base
     out = arr.copy()
     lit = arr * gain[None, :, None]

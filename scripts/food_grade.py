@@ -51,7 +51,7 @@ def grade(src, regions, ref, ref_box, strength=0.8, sd_boost=1.0, contrast=1.0, 
     r = np.asarray(ref.convert("RGB")).astype(float)
     x0, y0, x1, y1 = ref_box
     rc = r[y0:y1, x0:x1]
-    for name, v, lo in (("strength", strength, 0.0), ("sd_boost", sd_boost, 0.01), ("contrast", contrast, 0.01), ("clarity", clarity, 0.0)):
+    for name, v, lo in (("strength", strength, 0.0), ("sd_boost", sd_boost, 0.01), ("contrast", contrast, 0.01), ("clarity", clarity, 0.0), ("dist", dist, 0.0), ("sat_min", sat_min, 0.0)):
         if not np.isfinite(v) or v < lo:
             raise ValueError(f"{name} must be a finite number of at least {lo}, got {v}")
     if len(ref_bg) != 3 or not all(0 <= c <= 255 for c in ref_bg):
