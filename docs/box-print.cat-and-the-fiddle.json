@@ -1,0 +1,15 @@
+{
+  "packshot": "packshot.jpg",
+  "face": [95, 445, 585, 650],
+  "font": "oswald-var.ttf",
+  "wght": 400,
+  "blocks": [
+    { "box": [100, 452, 290, 555], "xmin": 104, "thr": [0.40, 0.60, 0.6] },
+    {
+      "box": [396, 506, 570, 578],
+      "thr": [0.50, 0.66, 0.42],
+      "band": [[406.8, 558.0], [555.4, 525.9], 7.5],
+      "typeset": { "text": "ASIAN-INSPIRED CHEESECAKES", "lean": 3.5 }
+    }
+  ]
+}
