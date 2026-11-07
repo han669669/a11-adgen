@@ -52,8 +52,8 @@ Three ads per batch: 1 tof, 1 mof, 1 bof (owner, 07-11-2026). The database allow
 3. Kill: apply §2, and kill an idea that needs a `render-checklist.md` defect (D1 to D8) to work. Most ideas must die here. If fewer than the needed picks survive, write more ideas. Do not lower the bar.
 4. Looks: give each of the 3 picks its own look (§7.2): a different backdrop, light and camera per stage. Do not copy option B's look onto every ad.
 5. Draft: 3 `low` drafts per picked idea with the house recipe (§7.1, prompt 1). The packshot is the only reference.
-6. Pick (D2, Claude): judge each draft against §2 first, then the product shape against the packshot (§7.3), then `render-checklist.md` §1 to §3 at phone size, craft last. Pick one per idea with `picks_save`, then the final (§7.1, prompt 2) and the finish pass (§7.1, prompt 3).
-7. Check the finish pass against §2, §7.3 and the food check (§6.4). `food_fix` and `region_fix` are repair tools for a rare defect on an otherwise good final, not default steps. When a final needs more than one repair, redraft the idea with a simpler scene instead. Then `compose_final` the completed key.
+6. Pick (D2, Claude): judge each draft against §2 first, then the product shape against the packshot (§7.3), then `render-checklist.md` §1 to §3 at phone size, craft last. Pick one per idea with `picks_save`, then the final (§7.1, prompt 2) and, when food shows, the finish pass (§7.1, prompt 3).
+7. Poll each final, finish pass and repair with `render_status`. Check the resulting key against §2 and §7.3, run the food check (§6.4) when food shows, and inspect any repair and its edges at full size. `food_fix` and `region_fix` are repair tools for a rare defect on an otherwise good final, not default steps. When a final needs more than one repair, redraft the idea with a simpler scene instead. Then `compose_final` only the verified completed key.
 8. Final check: §2 and `render-checklist.md` again on the composed final. When a final fails, say which item in the report. Do not send it.
 
 ## 6. Real food (owner, 07-11-2026)
@@ -62,7 +62,7 @@ The food must look like the real product. In W46b every final showed the caramel
 
 1. **Kit.** Each food brand's kit has texture photos (real close-ups) and `food`: the real food in words, written once from those photos. Say the shape, the surface, the colour, how the pieces sit, and what it must never look like. Save it with `brand_save`. Name the colour against its wrong neighbour ("deep amber, darker than pale tan") and the pattern's shape ("angular cracks, not round dots"), and name small true details (a split seam with a dark husk line). In W46b the general words gave pale kernels with leopard dots; these exact words gave the real colour and cracks in one round (kit v3).
 2. **Drafts and finish.** Drafts get the packshot only (§7.1). The texture photo and the food words go into the finish pass (prompt 3). Show as little loose food as the idea allows: food behind the pack's own window reads as real; a heap in close-up shows every AI flaw.
-3. **`food_fix`.** On every finished final that shows food, give boxes around all the food (also the food inside a jar). The server builds a mask. fal treats the mask as a guide only and re-renders the whole picture (in W46b the chips outside the mask became barley). So when the result arrives, the Worker pastes only the boxes onto the original final: outside the boxes the picture stays the original (re-encoded once as JPEG at quality 95). When the paste cannot run, the render fails; the raw fal image is never saved. Text, glass, reflections, labels or props inside a box can still change, so keep the boxes tight and check those parts in the food check. In `keep`, never call the surface under the food "clean" or "empty": in W46b that removed the heap. The references are the final, the texture photos and the packshot. The texture photo is a texture cue only: the amount of food and its state (heap, jar fill level, crumbs) come from the final, not from the photo.
+3. **`food_fix` (repair only).** When the finish pass (§7.1, prompt 3) still shows food that fails the food check, give boxes around all the food (also the food inside a jar). The server builds a mask. fal treats the mask as a guide only and re-renders the whole picture (in W46b the chips outside the mask became barley). So when the result arrives, the Worker pastes only the boxes onto the original final: outside the boxes the picture stays the original (re-encoded once as JPEG at quality 95). When the paste cannot run, the render fails; the raw fal image is never saved. Text, glass, reflections, labels or props inside a box can still change, so keep the boxes tight and check those parts in the food check. In `keep`, never call the surface under the food "clean" or "empty": in W46b that removed the heap. The references are the final, the texture photos and the packshot. The texture photo is a texture cue only: the amount of food and its state (heap, jar fill level, crumbs) come from the final, not from the photo.
 4. **Food check.** Crop the food at full size and put it next to the texture photo. Fail it when you see repeated identical shapes, perfect spheres, a dot or spot pattern, gloss the photo does not show, the wrong colour, or a painted look. Also fail it when a text, label, glass edge or prop inside a box changed, or when food inside a box went missing or moved. On a fail, run `food_fix` again on the new key, with tighter boxes or more `keep` detail. Never pass food you did not compare.
 5. **Compose.** Run `compose_final` only on the version that passed the food check.
 
@@ -75,20 +75,20 @@ Option B was made in 3 renders plus the logo in code. W46b used more steps and b
 Fill the parts in angle brackets. Keep the rest of the words.
 
 1. **Draft** (`render_submit` kind `draft`, 3 images, low; references: the packshot only):
-   > Premium studio product photograph for a static social ad. Image 1 is the exact product: <product name>. Keep its label, <the label's main elements>, <the cap or closure> and <the pack material> exactly as in the photo. <The kit's shape words (kit notes).>
+   > <Look opener: "Premium studio product photograph" for a studio look, "Real phone photo, honest and unposed" for a native look> for a static social ad. Image 1 is the exact product: <product name>. Keep its label, <the label's main elements>, <the cap or closure> and <the pack material> exactly as in the photo. <The kit's shape words (kit notes), with the product's real size.>
    >
-   > Scene: <one or two sentences: where the product stands, its state that carries the idea (open, almost empty, one missing), at most one other object>. <This stage's light and backdrop (§7.2)>. No other objects. No hands.
+   > Scene: <one or two sentences: where the product stands (which side of the frame, not centred unless the look says so), its state that carries the idea (open, almost empty, one missing), at most one other object at its true size>. <This stage's backdrop, light and camera (§7.2)>. No other objects. No hands.
    >
    > Text, painted exactly and nothing else: leave the top band of the picture plain for a logo added later. Below it, a large headline in <the kit font>, <the kit text colour>: "<headline>" Directly under the headline, one smaller line in the same colour: "<tagline>"
    >
-   > Calm and minimal, with generous clean space. A real photograph with natural texture, not an illustration, no glossy AI look.
+   > Calm and minimal, with generous clean space. <The `render-checklist.md` §4 style line for this look.> Not an illustration, no glossy AI look.
 
 2. **Final** (kind `final`, high; references: the chosen draft only):
    > Recreate image 1 as a high-quality final ad. Keep everything in image 1 the same: composition, camera, light, the product, its label <with its distinctive details, for example "the dark brown bands at its top and bottom">, and every text exactly: <each text>. Do not add, remove or change any word. Keep the top band plain, with nothing in it.
    >
    > The story of the ad depends on this, so keep it exactly as in image 1: <the product state and every object, in words>.
    >
-   > Improve only the finish: crisp clean letter edges, real <material> reflections, a soft natural floor shadow, fine natural grain on the backdrop. A real photograph, calm and minimal, no glossy AI look.
+   > Keep the light, the shadows and the backdrop exactly as in image 1. Improve only the finish: crisp clean letter edges, real <material> reflections and the natural texture of this look (for example fine grain on a studio sweep, phone grain on a native photo). A real photograph, calm and minimal, no glossy AI look.
 
 3. **Finish pass**, only when food shows (kind `final`, high; references: the final, then the kit's texture photo):
    > Recreate image 1 as the same high-quality ad with exactly one change. Keep everything else identical: <the same list as prompt 2>.
@@ -113,6 +113,6 @@ Pick a different look for each of the 3 ads in a batch, and a different set from
 
 ### 7.3 Product truth checks before you pick
 
-- **Shape.** Compare each draft with the packshot: height to width, cap width and height, label position, every band and colour block on the label. The kit notes give the measured proportions (WonGi kit v4: body 2.3 times as tall as wide; cap as wide as the body and one third as tall as wide). Without these words, W46b drafts came out about 10% off; with them, within about 3%.
+- **Shape.** Compare each draft with the packshot: height to width, cap width and height, label position, every band and colour block on the label. The kit notes give the measured proportions (WonGi kit v4: body 2.3 times as tall as wide; cap as wide as the body and one third as tall as wide). Estimated by eye (about ±3%): without these words the option B rerun had the cap at 0.89 of the body width (real 0.97); with them, three drafts had 0.93 to 0.98. W46b drafts were not measured.
 - **One object at most** next to the product, and only when the idea needs it (`render-checklist.md` F2).
 - **Reference state.** A reference carries its state (Phase 0, lesson 2). Never pass a reference whose state differs from the scene, except the texture photo in prompt 3.
