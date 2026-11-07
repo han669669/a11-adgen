@@ -433,7 +433,7 @@ export const TOOLS: Tool[] = [
         action: { type: "string", enum: ["add", "edit", "evidence", "retire", "restore"] },
         id: { type: "string", pattern: "^[0-9a-f]{8}$", description: "The rule id (edit, evidence, retire, restore)." },
         rule: { type: "string", minLength: 8, maxLength: 400 },
-        stage: { type: "string", enum: ["all", "tof", "mof", "bof"], default: "all" },
+        stage: { type: "string", enum: ["all", "tof", "mof", "bof"], description: "add: defaults to all. edit: leave out to keep the rule's stage." },
         source: { type: "string", minLength: 3, maxLength: 300, description: "Where the taste came from: a batch, a pick, a message date." },
         quote: { type: "string", maxLength: 500, description: "The owner's own words, copied exactly." },
         kind: { type: "string", enum: ["hit", "miss"] },
@@ -516,7 +516,7 @@ export const TOOLS: Tool[] = [
       "Gold items without the owner's marks, in the same order every time, so you can judge them blind: for each, say use or pass, as the owner would. Then send the answers to gold_score. An item with an imageKey can be seen with image_get.",
     inputSchema: {
       type: "object",
-      properties: { limit: { type: "integer", minimum: 1, maximum: 100, default: 30 }, offset: { type: "integer", minimum: 0, default: 0 } },
+      properties: { limit: { type: "integer", minimum: 1, maximum: 500, default: 30 }, offset: { type: "integer", minimum: 0, default: 0 } },
       additionalProperties: false,
     },
     run: async (env, a) => text(await canon.goldGet(env, a)),
@@ -532,7 +532,7 @@ export const TOOLS: Tool[] = [
         answers: {
           type: "array",
           minItems: 1,
-          maxItems: 100,
+          maxItems: 500,
           items: {
             type: "object",
             properties: { id: { type: "string", pattern: "^[0-9a-f-]{36}$" }, mark: { type: "string", enum: ["use", "pass"] } },

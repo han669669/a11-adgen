@@ -33,7 +33,7 @@ const view = (r: Rule, at = Date.now()) => {
     misses: r.misses,
     hitRate: seen ? Math.round((r.hits / seen) * 100) / 100 : null,
     daysSinceEvidence: Math.floor((at - Date.parse(r.last_evidence_at)) / DAY),
-    retireDue: r.status === "active" && at - Date.parse(r.last_evidence_at) > STALE_DAYS * DAY,
+    retireDue: r.status === "active" && at - Date.parse(r.last_evidence_at) >= STALE_DAYS * DAY,
     ...(r.retired_reason ? { retiredReason: r.retired_reason } : {}),
   };
 };
@@ -41,7 +41,7 @@ const hitsTotal = (r: Rule) => r.hits + r.misses;
 
 export async function canonGet(env: Env, a: { stage?: string; includeRetired?: boolean }) {
   const rows = await env.DB.prepare(
-    `SELECT * FROM canon_rules WHERE (? IS NULL OR stage IN ('all', ?)) AND (? = 1 OR status = 'active') ORDER BY status, created_at`,
+    `SELECT * FROM canon_rules WHERE (? IS NULL OR stage IN ('all', ?)) AND (? = 1 OR status = 'active') ORDER BY status, created_at, rowid`,
   ).bind(a.stage ?? null, a.stage ?? null, a.includeRetired ? 1 : 0).all<Rule>();
   const rules = rows.results.map((r) => view(r));
   const active = await env.DB.prepare("SELECT COUNT(*) AS n FROM canon_rules WHERE status = 'active'").first<{ n: number }>();
@@ -94,11 +94,10 @@ export async function canonUpdate(env: Env, c: CanonChange) {
   need(r, "No such rule.");
   if (c.action === "edit") {
     need(c.rule && c.source, "edit needs rule and source.");
-    const evidence = [...JSON.parse(r!.evidence), { at, source: c.source, ...(c.quote ? { quote: c.quote } : {}) }];
+    need(r!.status === "active", "A retired rule cannot be edited. Restore it first.");
+    // An edit is not evidence: it does not refresh the 60-day clock. The source is kept in the log.
     await env.DB.batch([
-      env.DB.prepare("UPDATE canon_rules SET text = ?, stage = ?, evidence = ?, updated_at = ?, last_evidence_at = ? WHERE id = ?").bind(
-        c.rule, c.stage ?? r!.stage, JSON.stringify(evidence), at, at, c.id,
-      ),
+      env.DB.prepare("UPDATE canon_rules SET text = ?, stage = ?, updated_at = ? WHERE id = ?").bind(c.rule, c.stage ?? r!.stage, at, c.id),
       log(c.id!, "edit", { from: r!.text, to: c.rule, source: c.source }),
     ]);
     return { id: c.id, edited: true };
@@ -128,7 +127,7 @@ export async function canonUpdate(env: Env, c: CanonChange) {
   need(r!.status === "retired", "That rule is already active.");
   try {
     await env.DB.batch([
-      env.DB.prepare("UPDATE canon_rules SET status = 'active', retired_at = NULL, retired_reason = NULL, last_evidence_at = ?, updated_at = ? WHERE id = ?").bind(at, at, c.id),
+      env.DB.prepare("UPDATE canon_rules SET status = 'active', retired_at = NULL, retired_reason = NULL, updated_at = ? WHERE id = ?").bind(at, c.id),
       log(c.id!, "restore", { reason: c.reason }),
     ]);
   } catch (e) {
@@ -160,10 +159,17 @@ export async function swipeAdd(env: Env, s: SwipeIn) {
 
 /** Top examples per brand and stage (newest first). A brand's own examples come before examples from other brands. */
 export async function swipeSearch(env: Env, a: { brandSlug?: string; stage?: string; perGroup?: number }) {
+  // Only the filters that were asked for are in the query, so each shape can use an index (swipe_stage, swipe_lookup).
+  const where: string[] = [];
+  const args: (string | null)[] = [];
+  if (a.stage) (where.push("stage = ?"), args.push(a.stage));
+  if (a.brandSlug) (where.push("(brand_slug = ? OR brand_slug IS NULL)"), args.push(a.brandSlug));
+  const order = a.brandSlug ? "CASE WHEN brand_slug = ? THEN 0 ELSE 1 END, created_at DESC, rowid DESC" : "created_at DESC, rowid DESC";
+  if (a.brandSlug) args.push(a.brandSlug);
   const rows = await env.DB.prepare(
     `SELECT id, brand_slug, stage, title, why, source, source_url, image_key, created_at FROM swipe
-     WHERE (? IS NULL OR stage = ?) AND (? IS NULL OR brand_slug = ? OR brand_slug IS NULL) ORDER BY created_at DESC LIMIT 200`,
-  ).bind(a.stage ?? null, a.stage ?? null, a.brandSlug ?? null, a.brandSlug ?? null).all<Record<string, string | null>>();
+     ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY ${order} LIMIT 200`,
+  ).bind(...args).all<Record<string, string | null>>();
   const per = a.perGroup ?? 3;
   const seen = new Map<string, number>();
   const out = rows.results.filter((r) => {
@@ -189,15 +195,17 @@ export interface GoldIn {
 
 export async function goldImport(env: Env, items: GoldIn[]) {
   const at = now();
-  await env.DB.batch(
+  const done = await env.DB.batch(
     items.map((g) =>
       env.DB.prepare(
-        `INSERT INTO gold_items (id, label, stage, headline, image_key, mark, note, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO gold_items (id, label, stage, headline, image_key, mark, note, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(crypto.randomUUID(), g.label, g.stage ?? null, g.headline ?? null, g.imageKey ?? null, g.mark, g.note ?? null, g.source ?? "v1", at),
     ),
   );
   const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM gold_items").first<{ n: number }>();
-  return { imported: items.length, goldItems: n?.n ?? 0 };
+  const added = done.reduce((sum, r) => sum + ((r as { meta?: { changes?: number } }).meta?.changes ?? 0), 0);
+  // A label seen before (same source) is skipped, so a retried import adds nothing twice.
+  return { imported: added, skippedAsKnown: items.length - added, goldItems: n?.n ?? 0 };
 }
 
 /** The gold items WITHOUT the owner's marks, so the critic judges them blind. Same order every time, so runs compare. */
