@@ -1,9 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { claimCompose, settleCompose } from "../worker/api";
-import { composeFinal, finalAttach, jpegSize } from "../worker/compose";
+import { composeFinal, finalAttach, hasJpegEnd, jpegSize } from "../worker/compose";
 import type { Env } from "../worker/env";
 import { TOOLS } from "../worker/mcp";
+import { validate } from "../worker/schema";
 import { fakeD1 } from "./helpers/d1";
 
 const ID = "11111111-2222-3333-4444-555555555555";
@@ -62,7 +63,8 @@ describe("compose_final success path", () => {
     const out = await composeFinal(env, input());
     const { saved, calls } = env as unknown as { saved: Map<string, unknown>; calls: unknown[][] };
     expect(out).toMatchObject({ logoWidth: 522, top: 96, grain: "on" });
-    expect(out.key).toMatch(new RegExp(`^renders/${ID}/1-c\\d+\\.jpg$`));
+    // Date.now() (13 digits) then a random number: the shape compose_final makes.
+    expect(out.key).toMatch(new RegExp(`^renders/${ID}/1-c\\d{13}\\d+\\.jpg$`));
     expect([...saved.keys()]).toEqual([out.key]);
     expect(calls).toEqual([
       ["draw", "base", { repeat: true, opacity: 0.18 }],
@@ -118,11 +120,20 @@ describe("jpegSize", () => {
   });
 });
 
+describe("hasJpegEnd", () => {
+  it("is true with the end marker, also with zero padding, and false without it", () => {
+    expect(hasJpegEnd(jpeg(10, 10))).toBe(true);
+    expect(hasJpegEnd(new Uint8Array([...jpeg(10, 10), 0, 0]))).toBe(true);
+    expect(hasJpegEnd(jpeg(10, 10).slice(0, -2))).toBe(false);
+  });
+});
+
 describe("final_attach", () => {
   const UP = "0a1b2c3d-0000-4000-8000-0123456789ab";
   const UPLOAD = `repairs/${UP}.jpg`;
-  function attachEnv(kind = "final", status = "done", files: Record<string, Uint8Array> = { [UPLOAD]: jpeg(1536, 1920) }) {
-    const env = envWith(kind, status) as unknown as { MEDIA: unknown; saved: Map<string, unknown> };
+  function attachEnv(kind = "final", status = "done", files: Record<string, Uint8Array> = { [UPLOAD]: jpeg(1536, 1920) }, composed: string | null = `renders/${ID}/1-c1.jpg`) {
+    const env = envWith(kind, status) as unknown as { MEDIA: unknown; DB: { raw: DatabaseSync }; saved: Map<string, unknown> };
+    env.DB.raw.prepare("UPDATE renders SET composed_key = ? WHERE id = ?").run(composed, ID);
     const saved = env.saved;
     env.MEDIA = {
       get: async (k: string) => (files[k] ? { arrayBuffer: async () => files[k]!.buffer.slice(files[k]!.byteOffset, files[k]!.byteOffset + files[k]!.byteLength) } : null),
@@ -141,11 +152,31 @@ describe("final_attach", () => {
     const env = attachEnv();
     const tool = TOOLS.find((t) => t.name === "final_attach")!;
     expect(tool.inputSchema.required).toEqual(["key", "upload"]);
-    const res = (await tool.run(env, { key: KEY, upload: UPLOAD })) as { content: { text: string }[] };
+    const args = validate(tool.inputSchema as never, { key: KEY, upload: UPLOAD });
+    const res = (await tool.run(env, args)) as { content: { text: string }[] };
     const { key } = JSON.parse(res.content[0]!.text);
     const row = (env.DB as unknown as { raw: DatabaseSync }).raw.prepare("SELECT composed_key FROM renders WHERE id = ?").get(ID);
     expect(row).toEqual({ composed_key: key });
     expect(key).toMatch(/^renders\//);
+  });
+  it("the tool schema refuses a malformed key, a malformed upload name and extra fields", () => {
+    const tool = TOOLS.find((t) => t.name === "final_attach")!;
+    const bad = [
+      { key: `renders/${"a".repeat(36)}/1.jpg`, upload: UPLOAD },
+      { key: KEY, upload: `repairs/${"a".repeat(36)}.jpg` },
+      { key: KEY, upload: `repairs/${"-".repeat(36)}.jpg` },
+      { key: KEY, upload: `refs/${UP}.jpg` },
+      { key: KEY },
+      { key: KEY, upload: UPLOAD, extra: 1 },
+    ];
+    for (const a of bad) expect(() => validate(tool.inputSchema as never, a), JSON.stringify(a)).toThrow();
+  });
+  it("refuses a final that was never composed", async () => {
+    await expect(finalAttach(attachEnv("final", "done", undefined, null), { key: KEY, upload: UPLOAD })).rejects.toThrow("not composed yet");
+  });
+  it("refuses a cut-off JPEG (no end marker)", async () => {
+    const cut = jpeg(1536, 1920).slice(0, -2);
+    await expect(finalAttach(attachEnv("final", "done", { [UPLOAD]: cut }), { key: KEY, upload: UPLOAD })).rejects.toThrow("cut short");
   });
   it("refuses a draft, a final that is not done, a bad key and a bad upload key", async () => {
     await expect(finalAttach(attachEnv("draft", "done"), { key: KEY, upload: UPLOAD })).rejects.toThrow("not a completed final");

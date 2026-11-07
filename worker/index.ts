@@ -5,6 +5,8 @@ import { handlePortal } from "./portal";
 
 /** A Worker bundle on the Free plan is at most 3 MB. */
 const STAGE_MAX_BYTES = 3_000_000;
+// A repaired final is a full-size JPEG (quality 95, with grain): it can pass 3 MB, so repairs have their own limit.
+const REPAIR_MAX_BYTES = 10_000_000;
 
 const MEDIA_KEY = /^(renders\/[0-9a-f-]{36}\/(\d+(-c\d*)?\.jpg|mask-\d+\.png)|brands\/[0-9a-f-]{36}\/(logo|ref\d)\.(png|jpg|webp)|refs\/[0-9a-f-]{36}\.(png|jpg))$/;
 
@@ -43,16 +45,16 @@ const TYPES: Record<string, string> = {
 };
 const typeOf = (path: string) => TYPES[path.split(".").pop() ?? ""] ?? "application/octet-stream";
 
-async function stage(request: Request, env: Env, name: string, pattern: RegExp, prefix: string): Promise<Response> {
+async function stage(request: Request, env: Env, name: string, pattern: RegExp, prefix: string, maxBytes = STAGE_MAX_BYTES): Promise<Response> {
   if (!(await tokenOk(request, env.MCP_TOKEN_SHA256))) return new Response("Unauthorized", { status: 401 });
   if (!pattern.test(name)) return new Response("Bad name", { status: 400 });
   // Check the declared size before reading the body, so an oversized upload is never buffered.
   const declared = request.headers.get("content-length");
   if (declared === null) return new Response("Content-Length required", { status: 411 });
-  if (Number(declared) > STAGE_MAX_BYTES) return new Response("Too large", { status: 413 });
+  if (Number(declared) > maxBytes) return new Response("Too large", { status: 413 });
   const body = await request.arrayBuffer();
   if (body.byteLength === 0) return new Response("Empty body", { status: 400 });
-  if (body.byteLength > STAGE_MAX_BYTES) return new Response("Too large", { status: 413 });
+  if (body.byteLength > maxBytes) return new Response("Too large", { status: 413 });
   const contentType = prefix === "app/" || prefix === "refs/" || prefix === "repairs/" ? typeOf(name) : "application/javascript";
   await env.MEDIA.put(`${prefix}${name}`, body, { httpMetadata: { contentType } });
   return Response.json({ key: `${prefix}${name}`, bytes: body.byteLength });
@@ -104,7 +106,7 @@ export default {
 
     // A repaired final made outside the Worker (scripts/box_print.py): saved to R2 repairs/<uuid>.jpg, then taken into the pack with final_attach.
     if (url.pathname.startsWith("/admin/repair/") && request.method === "PUT") {
-      return stage(request, env, url.pathname.slice("/admin/repair/".length), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$/, "repairs/");
+      return stage(request, env, url.pathname.slice("/admin/repair/".length), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$/, "repairs/", REPAIR_MAX_BYTES);
     }
 
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);

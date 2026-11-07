@@ -738,8 +738,8 @@ export const TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        key: { type: "string", pattern: "^renders/[0-9a-f-]{36}/\\d+\\.jpg$", description: "The final's render image key" },
-        upload: { type: "string", pattern: "^repairs/[0-9a-f-]{36}\\.jpg$", description: "The uploaded repaired picture" },
+        key: { type: "string", pattern: "^renders/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/\\d+\\.jpg$", description: "The final's render image key" },
+        upload: { type: "string", pattern: "^repairs/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.jpg$", description: "The uploaded repaired picture" },
       },
       required: ["key", "upload"],
       additionalProperties: false,

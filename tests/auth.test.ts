@@ -105,13 +105,26 @@ describe("/admin/repair", () => {
   };
   it("refuses without the token", async () => expect((await put(null, `${id}.jpg`)).r.status).toBe(401));
   it("refuses a name that is not an exact uuid jpg", async () => {
-    for (const name of ["repair.jpg", `${id}.png`, `${id}.js`]) expect((await put(`Bearer ${TOKEN}`, name)).r.status, name).toBe(400);
+    for (const name of ["repair.jpg", `${id}.png`, `${id}.js`, "a".repeat(36) + ".jpg", "-".repeat(36) + ".jpg"]) expect((await put(`Bearer ${TOKEN}`, name)).r.status, name).toBe(400);
   });
   it("saves under repairs/ with the jpeg type", async () => {
     const { r, saved } = await put(`Bearer ${TOKEN}`, `${id}.jpg`);
     expect(r.status).toBe(200);
     expect([...saved.keys()]).toEqual([`repairs/${id}.jpg`]);
     expect(saved.get(`repairs/${id}.jpg`)!.type).toBe("image/jpeg");
+  });
+});
+
+describe("/admin/repair size limit", () => {
+  const id = "0a1b2c3d-0000-4000-8000-0123456789ab";
+  const put = (length: string) =>
+    worker.fetch(
+      new Request(`https://x/admin/repair/${id}.jpg`, { method: "PUT", headers: { Authorization: `Bearer ${TOKEN}`, "Content-Length": length }, body: "abc" }),
+      { ...env, MEDIA: { put: async () => undefined } } as unknown as Env,
+    );
+  it("takes a picture over 3 MB (a full-size repaired final) and refuses over 10 MB with 413", async () => {
+    expect((await put("3000001")).status).not.toBe(413);
+    expect((await put("10000001")).status).toBe(413);
   });
 });
 
