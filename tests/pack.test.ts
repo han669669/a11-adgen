@@ -184,7 +184,7 @@ describe("client portal", () => {
     expect(html).toContain("10 minutes later, poof.");
     expect(html).toContain("a11_W");
     expect(html).toContain("Launch plan");
-    expect(html.indexOf('class="ad"')).toBeLessThan(html.indexOf("Your ads are ready.")); // pictures first, the guide above the launch plan
+    expect(html.lastIndexOf('class="ad"')).toBeLessThan(html.indexOf("Your ads are ready.")); // pictures first, the guide above the launch plan
     expect(html.indexOf("Your ads are ready.")).toBeLessThan(html.indexOf("Launch plan"));
     expect(html).toContain('font-family:"Plus Jakarta Sans"');
     expect(html).not.toMatch(/https?:\/\/fonts/);
@@ -200,8 +200,10 @@ describe("client portal", () => {
 
   it("serves the page font from the Worker, as a woff2 file", async () => {
     const { fontResponse, FONT_PATH } = await import("../worker/font");
+    const { default: entry } = await import("../worker/entry");
     expect(fontResponse("/other")).toBeNull();
-    const r = fontResponse(FONT_PATH)!;
+    const r = await entry.fetch(new Request(`https://x.example${FONT_PATH}`), { PUBLIC_BASE_URL: "https://x.example" } as any, {} as any); // through the Worker entry, so a routing break fails here
+    expect(r.status).toBe(200);
     expect(r.headers.get("content-type")).toBe("font/woff2");
     const bytes = new Uint8Array(await r.arrayBuffer());
     expect(String.fromCharCode(...bytes.slice(0, 4))).toBe("wOF2");
@@ -225,7 +227,8 @@ describe("client portal", () => {
     const r = await pack.packPublish(m.env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy() }, { renderId: finals[1]!, ...copy() }] });
     const html = await (await get(m.env, new URL(r.link).pathname)).text();
     const box = (n: number) => html.slice(html.indexOf(`id="view-${n}"`), html.indexOf("</div>", html.indexOf(`id="view-${n}"`)));
-    expect(html).toContain('class="track"'); // one swipe row for all the slides
+    expect(html.match(/class="track"/g) ?? []).toHaveLength(1); // one swipe row for all the slides
+    expect(html.lastIndexOf('class="ad"')).toBeLessThan(html.indexOf("Your ads are ready.")); // every picture comes before the guide
     const one = box(1);
     const two = box(2);
     expect(one).toContain('aria-modal="true"');

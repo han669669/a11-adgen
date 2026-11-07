@@ -19,7 +19,7 @@ const CSS = `@font-face{font-family:"Plus Jakarta Sans";src:url(${FONT_PATH}) fo
 *{box-sizing:border-box}html{scroll-behavior:smooth}
 body{font:16px/1.6 "Plus Jakarta Sans",system-ui,sans-serif;margin:0;background:#faf7f2;color:#2b1d14}body:has(.slide:target){overflow:hidden}
 main{max-width:1000px;margin:0 auto;padding:20px 16px 64px}
-.top{margin:0 0 4px;font-size:.9rem}.top span,.muted{color:#6b5a4d}
+.top{margin:0 0 4px;font-size:.9rem;font-weight:400;line-height:1.6}.lead{font-size:1.1rem;max-width:60ch;margin-top:48px}.top span,.muted{color:#6b5a4d}
 h2{font-size:1.3rem;margin:48px 0 8px}h3{margin:0 0 4px;font-size:1.15rem;line-height:1.3}
 .ad{display:grid;grid-template-columns:minmax(0,380px) minmax(0,1fr);gap:28px;margin:16px 0;padding:16px;background:#fff;border-radius:12px;scroll-margin-top:12px}
 .pic{display:block;position:relative;cursor:zoom-in;border-radius:8px;overflow:hidden}.pic img{width:100%;height:auto;display:block}
@@ -27,7 +27,7 @@ h2{font-size:1.3rem;margin:48px 0 8px}h3{margin:0 0 4px;font-size:1.15rem;line-h
 .tag{display:inline-block;font-size:.8rem;padding:2px 10px;border-radius:99px;background:#efe6da}
 .btn{display:inline-block;margin:10px 8px 0 0;padding:9px 16px;border-radius:8px;background:#2b1d14;color:#fff;text-decoration:none;font-size:.9rem;font-weight:600}
 .label{margin:18px 0 4px;font-weight:700}.label small{font-weight:400;color:#6b5a4d}
-.ad p{margin:0 0 6px}
+.ad p:not(.label){margin:0 0 6px}
 code{font:inherit;font-weight:600;background:#efe6da;padding:1px 6px;border-radius:4px;word-break:break-all}
 .plan{margin:12px 0 0;padding-left:1.3em;max-width:60ch}.plan li{margin:0 0 18px;padding-left:4px;font-size:1.05rem}
 .steps{padding-left:1.4em;margin:8px 0}.steps li{margin:4px 0}
@@ -102,8 +102,8 @@ export function renderPack(token: string, title: string, c: PackContent): string
     : "";
   const heading = `${c.brand}: ad pack`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${esc(heading)}${version ? ` v${version}` : ""}</title><link rel="preload" href="${FONT_PATH}" as="font" type="font/woff2" crossorigin><style>${CSS}</style></head><body><main>
-<p class="top"><b>${esc(c.brand)}</b>${version ? ` <span>Version ${esc(version)}</span>` : ""}</p>${ads}
-<p class="lead" style="margin-top:48px">Your ads are ready. Each one has the picture, the words to paste into Meta, and the reason we made it. Tap any picture to see it full size.</p>
+<h1 class="top"><b>${esc(c.brand)}</b>${version ? ` <span>Version ${esc(version)}</span>` : ""}</h1>${ads}
+<p class="lead">Your ads are ready. Each one has the picture, the words to paste into Meta, and the reason we made it. Tap any picture to see it full size.</p>
 <ol class="steps"><li>Download the picture.</li><li>Paste the text into Meta Ads Manager.</li><li>Copy the ad name exactly.</li><li>Follow the launch plan below.</li></ol>
 <h2 style="margin-top:32px">Launch plan</h2><ul class="plan">${sentences(c.launchPlan).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>${c.healthNote ? `<p>${esc(c.healthNote)}</p>` : ""}${facts}
 <p class="foot muted">This page is private. Only people with this link can see it.</p><div class="lb" aria-label="Ads, full size"><div class="track">${slides}</div></div>
