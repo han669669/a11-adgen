@@ -19,7 +19,7 @@ Claude Code is the brain. Cloudflare is the hands. The owner picks 1 draft per i
 | **D1** `a11adgen-db` | Brands, kit versions, products, facts, research, ideas, drafts, picks, canon, swipe file, results, spend. |
 | **R2** `a11adgen-assets` | Images, packs, client uploads, the v1 export. |
 | **Workflows** | fal render jobs with retries; a step waits for the fal result. |
-| **Browser Rendering** | Brand site screenshot, header HTML, logo files. |
+| **Browser Rendering** | Later upgrade for `brand_extract` (screenshot, script-built sites). Today `brand_extract` uses a plain fetch. |
 | **Cron Triggers** | Weekly client reminder for results; canon health check. |
 
 ```mermaid
@@ -39,7 +39,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 
 | # | Step | Who | What happens |
 |---|---|---|---|
-| 0 | Brand kit | CODE, CLAUDE | Browser Rendering reads the home page: screenshot, header HTML, logo files, colours, fonts. Claude writes voice, palette roles and "what this brand would never say". Kit is versioned. Claude checks that the logo reads the brand name. |
+| 0 | Brand kit | CODE, CLAUDE | `brand_extract` reads the home page source (fetch; Browser Rendering is a later upgrade): colours, fonts, logo and icon candidates. Claude writes voice, palette roles and "what this brand would never say". Kit is versioned. Claude checks that the logo reads the brand name. |
 | 1 | Subject | HAN (input only) | Product URL, or brand only (no product), or redesign (upload a live ad). This is input, not a decision step. |
 | 2 | Fact sheet | PAID Exa, CLAUDE | Exa `/contents` reads the page. Each fact keeps its source URL and exact quote: price, offer, pack size, proof. |
 | 3 | Research | PAID Exa, CLAUDE | Exa search: Reddit, HardwareZone, reviews, competitor pages, Singapore moments. Optional later: Meta Ad Library through Apify (long-running ads are likely winners). |
@@ -82,7 +82,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 
 | Group | Tools |
 |---|---|
-| Brand | `brand_extract`, `brand_get`, `brand_save_version` |
+| Brand | `brand_extract` (built: fetch-based), `brand_get`, `brand_save_version` |
 | Subject | `product_read`, `facts_save`, `redesign_get` |
 | Research | `exa_search`, `exa_contents`, `adlibrary_fetch` (later; paid, asks first) |
 | Ideas | `ideas_save`, `ideas_pick_save` |
