@@ -1,0 +1,7 @@
+{
+  "name": "a11",
+  "description": "a11 Studio static ads: subagents (writer, critic, art-director) and the a11adgen MCP server. The slash commands come from the server: /mcp__a11__batch, /mcp__a11__final, /mcp__a11__learn, /mcp__a11__gold-test, /mcp__a11__brand.",
+  "version": "0.1.0",
+  "author": { "name": "a11 Studio" },
+  "repository": "https://github.com/han669669/a11-adgen"
+}

@@ -52,7 +52,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | 10 | Final | PAID fal | `edit`, `quality: high`, 1536x1920, with the chosen draft as a reference so the layout stays. Claude checks the final once. |
 | 11 | Pack | CODE, CLAUDE | Build the deliverable (§5). Publish the client link. |
 | 12 | Results | CLIENT, CLAUDE | The client uploads an Ads Manager screenshot or CSV in the portal (or sends it on WhatsApp; the owner drops it on the board). Claude reads CTR, CPC, spend per ad name. Baseline CTR comes from one screenshot at onboarding (D3). |
-| 13 | Learn | CLAUDE | `/a11:learn` reads new picks, notes and results. It changes the canon and the swipe file. It records each change with its evidence. The owner can undo any change on the board; no approval is needed (D2). |
+| 13 | Learn | CLAUDE | `/mcp__a11__learn` reads new picks, notes and results. It changes the canon and the swipe file. It records each change with its evidence. The owner can undo any change on the board; no approval is needed (D2). |
 
 ## 4. Learning and self-curation
 
@@ -91,14 +91,14 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | Memory | `taste_log` (his picks and passes with the critic's rank), `canon_get`, `canon_update`, `swipe_add`, `swipe_search`, `gold_import`, `gold_get`, `gold_score`, `gold_runs` (all built in Phase 2a), `picks_get`, `results_get` (not built yet) |
 | Ops | `batch_status`, `spend_get`, `pack_publish` |
 
-Prompts (slash commands): `/a11:brand`, `/a11:batch`, `/a11:redesign`, `/a11:final`, `/a11:results`, `/a11:learn`, `/a11:gold-test`. Each is resumable; state lives in D1.
+Prompts (slash commands) live on the server (`worker/prompts.ts`). Claude Code shows each MCP prompt as `/mcp__a11__<name>`: `brand`, `batch`, `final`, `learn`, `gold-test` (built in Phase 2b); `redesign` and `results` come with their tools (redesign in Phase 1, results in Phase 3). Each is resumable; state lives in D1.
 
-Plugin (in this repo, installed once): subagents `writer`, `critic`, `art-director`, plus the MCP config.
+Plugin (in this repo, `plugin/`, installed once): subagents `writer`, `critic`, `art-director`, plus the MCP config. Install: `/plugin marketplace add han669669/a11-adgen`, then `/plugin install a11@a11-adgen`. Until MCP OAuth is built (Phase 1), the plugin's MCP config reads the bearer token from the environment variable `A11_MCP_TOKEN`.
 
-Connect:
+Connect without the plugin (an alternative; do not add it when the plugin is installed, because both name the server `a11`):
 
 ```bash
-claude mcp add --transport http a11 https://a11adgen.gamingcomputing.workers.dev/mcp
+claude mcp add --transport http a11 https://a11adgen.gamingcomputing.workers.dev/mcp --header "Authorization: Bearer $A11_MCP_TOKEN"
 ```
 
 ## 7. Claude plan facts (checked 2026-11-06)
@@ -142,7 +142,7 @@ Phase 0 measures the real fal cost at 1536x1920 high and the Claude usage per ba
 |---|---|---|
 | 0. Spike | Worker `a11adgen` with `/mcp` (OAuth stub or allow-list token), tools `exa_search`, `render_drafts`, `image_get`, `render_final`. One product, one idea, 3 drafts, 1 final. | Claude Code makes one 4:5 final end to end. Cost, Claude usage and time recorded. |
 | 1. Core loop | Email + password auth with allow-list, full OAuth for MCP, D1 schema, brand kit, product / brand-only / redesign subjects, ideas, drafts, the final-pick board, finals. | One full batch of 4. Owner's pick recorded. |
-| 2. Learning | Canon, swipe file, `/a11:learn`, critic subagent, v1 export → gold set. | Gold-set agreement measured before and after one canon change. |
+| 2. Learning | Canon, swipe file, `/mcp__a11__learn`, critic subagent, v1 export → gold set. | Gold-set agreement measured before and after one canon change. |
 | 3. Client side | Pack, client portal, ad names, results upload and read, baseline, week report. | One real client week: pack sent, results read back. |
 | 4. Growth (later) | Meta Ad Library research (Apify), Exa Websets prospect lists, 9:16 extension. | Owner asks for it. |
 

@@ -32,6 +32,76 @@ describe("mcp handler", () => {
     const r = await post({ jsonrpc: "2.0", method: "tools/call", params: { name: "spend_get", arguments: {} } });
     expect(r.status).toBe(202);
   });
+  it("lists the prompts and returns one with its arguments filled in", async () => {
+    const list: any = await (await post({ jsonrpc: "2.0", id: 4, method: "prompts/list" })).json();
+    expect(list.result.prompts.map((p: any) => p.name)).toEqual(["brand", "batch", "final", "learn", "gold-test"]);
+    const got: any = await (await post({ jsonrpc: "2.0", id: 5, method: "prompts/get", params: { name: "final", arguments: { batchId: "abc-123" } } })).json();
+    expect(got.result.messages[0].content.text).toContain("Batch abc-123");
+    expect(got.result.messages[0].role).toBe("user");
+  });
+  it("refuses an unknown prompt, a missing argument and a non-text argument as invalid params", async () => {
+    for (const params of [{ name: "nope" }, { name: "final", arguments: {} }, { name: "final", arguments: { batchId: 5 } }]) {
+      const j: any = await (await post({ jsonrpc: "2.0", id: 6, method: "prompts/get", params })).json();
+      expect(j.error.code).toBe(-32602);
+    }
+  });
+  it("starts a new batch only with a product and a label, and says how to save the subject", async () => {
+    const get = async (args: unknown) => (await (await post({ jsonrpc: "2.0", id: 7, method: "prompts/get", params: { name: "batch", arguments: args } })).json()) as any;
+    expect((await get({ brand: "wongi" })).error.message).toMatch(/needs productUrl, productTitle and label/);
+    const ok = await get({ brand: "wongi", productUrl: "https://b.example/p", productTitle: "Pop Barley", label: "W47" });
+    const text: string = ok.result.messages[0].content.text;
+    expect(text).toMatch(/subject_save \(brandSlug wongi, kind 'product', title 'Pop Barley', url https:\/\/b\.example\/p\), then batch_create/);
+    expect(text.indexOf("ideas_update")).toBeGreaterThan(0);
+    expect(text.indexOf("finalPrompt")).toBeLessThan(text.indexOf("status 'board'"));
+    const resume = await get({ brand: "wongi", batchId: "11111111-1111-1111-1111-111111111111" });
+    expect(resume.result.messages[0].content.text).toContain("Resume batch 11111111");
+  });
+  it("handles an owner who passes on all 3 drafts before it makes any final", async () => {
+    const j: any = await (await post({ jsonrpc: "2.0", id: 8, method: "prompts/get", params: { name: "final", arguments: { batchId: "abc" } } })).json();
+    const text: string = j.result.messages[0].content.text;
+    expect(text.indexOf("passed on all 3 drafts")).toBeLessThan(text.indexOf("picks_save"));
+    expect(text).toContain("batch_update notes");
+    expect(text).toContain("when food shows");
+  });
+  it("runs the gold test inline, in the full set, and never asks to run another prompt", async () => {
+    const { PROMPTS } = await import("../worker/prompts");
+    for (const name of ["learn", "gold-test"]) {
+      const p = PROMPTS.find((x) => x.name === name)!;
+      const text = p.text({ note: "before X" });
+      expect(text).toContain("gold_get with limit 500");
+      expect(text).toContain("ONE gold_score");
+      expect(text).not.toMatch(/run \/mcp__a11__/);
+    }
+    const j: any = await (await post({ jsonrpc: "2.0", id: 9, method: "prompts/get", params: { name: "gold-test", arguments: { note: "x".repeat(201) } } })).json();
+    expect(j.error.message).toMatch(/too long \(at most 200/);
+  });
+  it("names only tools that exist in every prompt", async () => {
+    const { PROMPTS } = await import("../worker/prompts");
+    const known = new Set(TOOLS.map((t) => t.name));
+    const used = new Set<string>();
+    for (const p of PROMPTS) for (const m of p.text({ url: "u", slug: "s", brand: "b", batchId: "", productUrl: "https://b.example/p", productTitle: "P", label: "W1", note: "n" }).matchAll(/\b([a-z]+_[a-z_]+)\b/g)) used.add(m[1]!);
+    expect(used.size).toBeGreaterThan(10);
+    expect([...used].filter((n) => !known.has(n))).toEqual([]);
+  });
+  it("names only tools that exist in the plugin's subagents", async () => {
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const dir = new URL("../plugin/agents/", import.meta.url);
+    const known = new Set(TOOLS.map((t) => t.name));
+    const files = readdirSync(dir).filter((f) => f.endsWith(".md"));
+    expect(files.sort()).toEqual(["art-director.md", "critic.md", "writer.md"]);
+    for (const f of files) {
+      const names = [...readFileSync(new URL(f, dir), "utf8").matchAll(/mcp__a11__([a-z_]+)/g)].map((m) => m[1]!);
+      expect(names.length).toBeGreaterThan(0);
+      expect(names.filter((n) => !known.has(n))).toEqual([]);
+    }
+    // Every tool a subagent is told to call is in its tools line.
+    const text = (f: string) => readFileSync(new URL(f, dir), "utf8");
+    const toolsLine = (f: string) => text(f).match(/^tools: (.*)$/m)![1]!;
+    for (const [f, tool] of [["critic.md", "drafts_rank"], ["critic.md", "taste_log"], ["critic.md", "gold_score"], ["writer.md", "batch_get"], ["art-director.md", "brand_get"]]) {
+      expect(text(f!)).toContain(tool!);
+      expect(toolsLine(f!)).toContain(`mcp__a11__${tool}`);
+    }
+  });
   it("refuses GET", async () => {
     const r = await handleMcp(new Request("https://x/mcp"), env);
     expect(r.status).toBe(405);
