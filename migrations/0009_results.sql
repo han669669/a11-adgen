@@ -4,7 +4,7 @@
 CREATE TABLE baselines (
   id TEXT PRIMARY KEY,
   brand_id TEXT NOT NULL REFERENCES brands(id),
-  ctr REAL NOT NULL,              -- a fraction: 0.012 is 1.2 percent
+  ctr REAL NOT NULL CHECK (ctr >= 0 AND ctr <= 1), -- a fraction: 0.012 is 1.2 percent
   source TEXT NOT NULL,           -- where the number came from, in plain words
   created_at TEXT NOT NULL
 );
@@ -15,11 +15,12 @@ CREATE TABLE results (
   brand_id TEXT NOT NULL REFERENCES brands(id),
   ad_name TEXT NOT NULL,          -- a11_W47_catfiddle_b01_tof_c03_v1
   report_date TEXT NOT NULL,      -- YYYY-MM-DD, the day the report was taken
-  impressions INTEGER NOT NULL,
-  clicks INTEGER NOT NULL,
-  spend_sgd REAL,
+  impressions INTEGER NOT NULL CHECK (impressions >= 0),
+  clicks INTEGER NOT NULL CHECK (clicks >= 0 AND clicks <= impressions),
+  spend_sgd REAL CHECK (spend_sgd IS NULL OR spend_sgd >= 0),
   source TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  UNIQUE (ad_name, report_date)
+  -- Brand first: ad names drop the hyphens of a slug, so foo-bar and foobar can make the same name.
+  -- This key also serves the latest-report lookup per ad.
+  UNIQUE (brand_id, ad_name, report_date)
 );
-CREATE INDEX results_brand ON results (brand_id, report_date);

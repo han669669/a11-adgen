@@ -1,5 +1,6 @@
 import { brandBySlug } from "./brand";
 import type { Env } from "./env";
+import { singaporeClock } from "./pack";
 import { InputError } from "./schema";
 
 const now = () => new Date().toISOString();
@@ -7,8 +8,9 @@ const now = () => new Date().toISOString();
 /** An ad is judged only after this many impressions (the launch plan in the pack says the same). */
 export const MIN_IMPRESSIONS = 1000;
 
-/** a11_W47_catfiddle_b01_tof_c03_v1 (see adName in pack.ts). */
-export const AD_NAME = /^a11_W(\d{2})_([a-z0-9]+)_b(\d{2})_([a-z]+)_c(\d{2})_v(\d+)$/;
+/** a11_W47_catfiddle_b01_tof_c03_v1 (see adName in pack.ts). Packs made before batch numbers have no _bNN part: it is optional here. */
+export const AD_NAME_PATTERN = "^a11_W(\\d{2})_([a-z0-9]+)(?:_b(\\d{2}))?_([a-z]+)_c(\\d{2})_v(\\d+)$";
+export const AD_NAME = new RegExp(AD_NAME_PATTERN);
 
 export interface ResultRowInput {
   adName: string;
@@ -35,7 +37,7 @@ export async function resultsSave(env: Env, input: { brand: string; reportDate: 
   const b = await brandBySlug(env, input.brand);
   const day = new Date(`${input.reportDate}T00:00:00Z`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.reportDate) || Number.isNaN(day.getTime()) || day.toISOString().slice(0, 10) !== input.reportDate) throw new InputError("reportDate must be a real date, YYYY-MM-DD.");
-  if (input.reportDate > now().slice(0, 10)) throw new InputError("reportDate is in the future.");
+  if (input.reportDate > singaporeClock(new Date()).toISOString().slice(0, 10)) throw new InputError("reportDate is in the future.");
   const seen = new Set<string>();
   for (const r of input.rows) {
     if (!AD_NAME.test(r.adName)) throw new InputError(`"${r.adName}" is not an a11 ad name (a11_W47_catfiddle_b01_tof_c03_v1).`);
@@ -54,7 +56,7 @@ export async function resultsSave(env: Env, input: { brand: string; reportDate: 
     input.rows.map((r) =>
       env.DB.prepare(
         `INSERT INTO results (id, brand_id, ad_name, report_date, impressions, clicks, spend_sgd, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (ad_name, report_date) DO UPDATE SET impressions = excluded.impressions, clicks = excluded.clicks, spend_sgd = excluded.spend_sgd, source = excluded.source, created_at = excluded.created_at`,
+         ON CONFLICT (brand_id, ad_name, report_date) DO UPDATE SET impressions = excluded.impressions, clicks = excluded.clicks, spend_sgd = excluded.spend_sgd, source = excluded.source, created_at = excluded.created_at`,
       ).bind(crypto.randomUUID(), b.id, r.adName, input.reportDate, r.impressions, r.clicks, r.spendSgd ?? null, input.source, at),
     ),
   );

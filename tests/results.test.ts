@@ -92,13 +92,41 @@ describe("results ledger", () => {
     expect((raw.prepare("SELECT COUNT(*) AS n FROM results").get() as { n: number }).n).toBe(0);
   });
 
+  it("accepts a zero baseline and a pre-batch-number ad name", async () => {
+    const { env, raw } = await makeEnv();
+    const legacy = "a11_W45_wongi_tof_c01_v1";
+    raw.prepare("INSERT INTO packs (id, batch_id, version, token_hash, title, content, created_at) VALUES ('p0', (SELECT batch_id FROM packs LIMIT 1), 2, 'h0', 't', ?, 'n')").run(JSON.stringify({ ads: [{ name: legacy }] }));
+    await run(env, "baseline_save", { brand: "won-gi", ctrPct: 0, source: "screenshot, no clicks" });
+    await save(env, [{ adName: legacy, impressions: 2000, clicks: 1 }]);
+    const g = await run(env, "results_get", { brand: "won-gi" });
+    expect(g.ads[0]).toMatchObject({ adName: legacy, stage: "tof", idea: 1, verdict: "winner" });
+  });
+
+  it("lets the database refuse bad numbers when the code is skipped", async () => {
+    const { raw } = await makeEnv();
+    const brand = (raw.prepare("SELECT id FROM brands LIMIT 1").get() as { id: string }).id;
+    const ins = (imp: number, clk: number, spend: number | null) =>
+      raw.prepare("INSERT INTO results (id, brand_id, ad_name, report_date, impressions, clicks, spend_sgd, source, created_at) VALUES (?, ?, 'a', 'd', ?, ?, ?, 's', 'n')").run(crypto.randomUUID(), brand, imp, clk, spend);
+    // The same ad name and date under two brands (foo-bar and foobar make one name) are two rows.
+    const other = (raw.prepare("SELECT id FROM brands WHERE id != ? LIMIT 1").get(brand) as { id: string }).id;
+    const insFor = (b: string) => raw.prepare("INSERT INTO results (id, brand_id, ad_name, report_date, impressions, clicks, spend_sgd, source, created_at) VALUES (?, ?, 'same', 'd', 5, 1, NULL, 's', 'n')").run(crypto.randomUUID(), b);
+    insFor(brand);
+    insFor(other);
+    expect(() => insFor(brand)).toThrow(/UNIQUE/);
+    expect(() => ins(10, 11, null)).toThrow(/CHECK/);
+    expect(() => ins(-1, 0, null)).toThrow(/CHECK/);
+    expect(() => ins(10, 1, -5)).toThrow(/CHECK/);
+    expect(() => raw.prepare("INSERT INTO baselines (id, brand_id, ctr, source, created_at) VALUES ('b', ?, 1.5, 's', 'n')").run(brand)).toThrow(/CHECK/);
+  });
+
   it("refuses bad input at the schema, and an unknown brand", async () => {
     const { env } = await makeEnv();
     const t = TOOLS.find((x) => x.name === "results_save")!;
     expect(() => validate(t.inputSchema, { brand: "won-gi", reportDate: "6 Nov", source: "s", rows: [{ adName: TOF, impressions: 1, clicks: 1 }] })).toThrow();
     expect(() => validate(t.inputSchema, { brand: "won-gi", reportDate: "2026-11-06", source: "s", rows: [{ adName: "my ad", impressions: 1, clicks: 1 }] })).toThrow();
     expect(() => validate(t.inputSchema, { brand: "won-gi", reportDate: "2026-11-06", source: "s", rows: [{ adName: TOF, impressions: 1.5, clicks: 1 }] })).toThrow();
-    expect(() => validate(TOOLS.find((x) => x.name === "baseline_save")!.inputSchema, { brand: "won-gi", ctrPct: 0, source: "s" })).toThrow();
+    expect(() => validate(TOOLS.find((x) => x.name === "baseline_save")!.inputSchema, { brand: "won-gi", ctrPct: -1, source: "s" })).toThrow();
+    expect(() => validate(TOOLS.find((x) => x.name === "baseline_save")!.inputSchema, { brand: "won-gi", ctrPct: 101, source: "s" })).toThrow();
     expect(() => validate(TOOLS.find((x) => x.name === "baseline_save")!.inputSchema, { brand: "won-gi", ctrPct: "1.2", source: "s" })).toThrow();
     await expect(run(env, "results_get", { brand: "nope-co" })).rejects.toThrow(/No brand/);
   });
@@ -106,6 +134,6 @@ describe("results ledger", () => {
   it("has a results prompt that points to the three tools", () => {
     const p = PROMPTS.find((x) => x.name === "results")!;
     const text = p.text({ brand: "won-gi", reportDate: "2026-11-06" });
-    for (const w of ["baseline_save", "results_save", "results_get", "30/50/20", "Never send"]) expect(text).toContain(w);
+    for (const w of ["baseline_save", "results_save", "results_get", "30 percent new angles", "canon_get", "Never send"]) expect(text).toContain(w);
   });
 });

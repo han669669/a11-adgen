@@ -1,5 +1,5 @@
 /**
- * A small JSON Schema subset for tool inputs: object, string, integer, boolean, array, enum, default.
+ * A small JSON Schema subset for tool inputs: object, string, integer, number, boolean, array, enum, default.
  * The same object goes to tools/list (so Claude sees it) and checks the arguments.
  */
 export type StringProp = {
@@ -15,7 +15,7 @@ export type StringProp = {
 export type Prop =
   | StringProp
   | { type: "integer"; description?: string; minimum?: number; maximum?: number; default?: number }
-  | { type: "number"; description?: string; minimum?: number; maximum?: number }
+  | { type: "number"; description?: string; minimum?: number; maximum?: number; default?: number }
   | { type: "boolean"; description?: string; default?: boolean }
   | { type: "array"; description?: string; items: StringProp | ObjectSchema; minItems?: number; maxItems?: number }
   | ObjectSchema;

@@ -457,7 +457,7 @@ export const TOOLS: Tool[] = [
       type: "object",
       properties: {
         brand: { type: "string", pattern: SLUG },
-        ctrPct: { type: "number", minimum: 0.01, maximum: 100, description: "The CTR in percent, for example 1.2 for 1.2%" },
+        ctrPct: { type: "number", minimum: 0, maximum: 100, description: "The CTR in percent, for example 1.2 for 1.2%" },
         source: { type: "string", minLength: 3, maxLength: 300, description: "Where the number came from, for example 'client screenshot, last 30 days, 2026-11-05'" },
       },
       required: ["brand", "ctrPct", "source"],
@@ -482,7 +482,7 @@ export const TOOLS: Tool[] = [
           items: {
             type: "object",
             properties: {
-              adName: { type: "string", pattern: "^a11_W\\d{2}_[a-z0-9]+_b\\d{2}_[a-z]+_c\\d{2}_v\\d+$" },
+              adName: { type: "string", pattern: results.AD_NAME_PATTERN },
               impressions: { type: "integer", minimum: 0, maximum: 1000000000 },
               clicks: { type: "integer", minimum: 0, maximum: 1000000000 },
               spendSgd: { type: "number", minimum: 0, maximum: 10000000, description: "Spend in S$, when the report shows it" },
