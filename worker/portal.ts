@@ -91,7 +91,7 @@ export function renderPack(token: string, title: string, c: PackContent): string
       const base = `/c/${token}/ad/${i + 1}`;
       const prev = i > 0 ? `<a class="nav prev" href="#view-${i}" aria-label="Previous ad">&#8249;</a>` : "";
       const next = i < n - 1 ? `<a class="nav next" href="#view-${i + 2}" aria-label="Next ad">&#8250;</a>` : "";
-      return `<div class="lb" id="view-${i + 1}" role="dialog" aria-modal="true" aria-label="Ad ${i + 1} full size" tabindex="-1"><a class="x" href="#ad-${i + 1}" aria-label="Close">&times;</a><a class="bg" href="#ad-${i + 1}" aria-hidden="true" tabindex="-1"></a><img src="${base}.jpg" alt="${esc(a.headline)}" loading="lazy">${prev}${next}<a class="dl" href="${base}.jpg" download="${esc(a.name)}.jpg">Download JPEG</a></div>`;
+      return `<div class="lb" id="view-${i + 1}" role="dialog" aria-modal="true" aria-label="Ad ${i + 1} full size" tabindex="-1"><a class="x" href="#ad-${i + 1}" aria-label="Close">&times;</a><a class="bg" href="#ad-${i + 1}" aria-label="Close" tabindex="-1"></a><img src="${base}.jpg" alt="${esc(a.headline)}" loading="lazy">${prev}${next}<a class="dl" href="${base}.jpg" download="${esc(a.name)}.jpg">Download JPEG</a></div>`;
     })
     .join("");
   const facts = c.factCheck.length
