@@ -19,14 +19,15 @@ const HOME = `<!doctype html><html><head>
 </body></html>`;
 const CSS = `@font-face{font-family:"Gochi Hand";src:url(x.woff2)} body{font-family:Inter,Arial,sans-serif;color:#222;background:#fff} .btn{background:#2a9d8f;color:#fff} .x{color:#2A9D8F}`;
 
-function stub(routes: Record<string, { body: string; type: string; status?: number }>) {
+const asked: string[] = [];
+function stub(routes: Record<string, { body: string; type: string; status?: number; location?: string }>) {
+  asked.length = 0;
   vi.stubGlobal("fetch", async (input: any) => {
     const url = String(input?.url ?? input);
+    asked.push(url);
     const r = routes[url];
     if (!r) return new Response("nope", { status: 404, headers: { "content-type": "text/plain" } });
-    const res = new Response(r.body, { status: r.status ?? 200, headers: { "content-type": r.type } });
-    Object.defineProperty(res, "url", { value: url });
-    return res;
+    return new Response(r.body, { status: r.status ?? 200, headers: { "content-type": r.type, ...(r.location ? { location: r.location } : {}) } });
   });
 }
 
@@ -79,6 +80,41 @@ describe("brand_extract", () => {
   it("stops reading a page past the size cap", async () => {
     stub({ "https://big.test/": { body: "<html>" + "a".repeat(1_600_000), type: "text/html" } });
     await expect(brandExtract({ url: "https://big.test/" })).rejects.toThrow(/over HTTPS/);
+  });
+
+  it("follows an https redirect by hand, and never requests a plain-http address", async () => {
+    stub({
+      "https://a.test/": { body: "", type: "text/html", status: 301, location: "https://www.a.test/home" },
+      "https://www.a.test/home": { body: "<title>Ok</title>", type: "text/html" },
+      "https://b.test/": { body: "", type: "text/html", status: 302, location: "http://b.test/plain" },
+      "http://b.test/plain": { body: "<title>Plain</title>", type: "text/html" },
+    });
+    expect((await brandExtract({ url: "https://a.test/" })).url).toBe("https://www.a.test/home");
+    await expect(brandExtract({ url: "https://b.test/" })).rejects.toThrow(/over HTTPS/);
+    expect(asked).not.toContain("http://b.test/plain");
+  });
+
+  it("resolves links against <base href>", async () => {
+    stub({ "https://c.test/x/": { body: `<html><head><base href="https://cdn.test/assets/"><link rel="icon" href="i.png"></head><body><img src="logo.png"></body></html>`, type: "text/html" } });
+    const r = await brandExtract({ url: "https://c.test/x/" });
+    expect(r.icons).toEqual(["https://cdn.test/assets/i.png"]);
+    expect(r.logoCandidates[0]!.url).toBe("https://cdn.test/assets/logo.png");
+  });
+
+  it("does not count an id selector as a colour, and keeps the theme-color boost out of uses", async () => {
+    stub({
+      "https://d.test/": {
+        body: `<html><head><meta name="theme-color" content="#2a9d8f"><style>#add{margin:0} #bad-state .x{color:#e63946} .a{color:#e63946} .b{color:#E63946}</style></head></html>`,
+        type: "text/html",
+      },
+    });
+    const r = await brandExtract({ url: "https://d.test/" });
+    const hexes = r.colours.map((c) => c.hex);
+    expect(hexes).not.toContain("#AADD00");
+    expect(hexes).not.toContain("#ADD");
+    expect(r.colours.find((c) => c.hex === "#E63946")!.uses).toBe(3);
+    // theme-color is listed (it never appears in CSS), with its true CSS count of 0.
+    expect(r.colours.find((c) => c.hex === "#2A9D8F")!.uses).toBe(0);
   });
 
   it("the brand prompt starts with brand_extract", () => {

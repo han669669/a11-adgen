@@ -9,13 +9,25 @@ const GENERIC = new Set(["serif", "sans-serif", "monospace", "cursive", "fantasy
 
 const decode = (s: string) => s.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 
-/** An https fetch of text (also after redirects). Returns null on any failure: one bad sheet must not stop the report. */
+const REDIRECTS = 5;
+
+/** An https fetch of text. Redirects are followed by hand, so a plain-http address is never requested. Returns null on any failure: one bad sheet must not stop the report. */
 async function fetchText(url: string, max: number, type: RegExp): Promise<{ url: string; text: string } | null> {
   try {
-    if (new URL(url).protocol !== "https:") return null;
-    const res = await fetch(url, { headers: UA, signal: AbortSignal.timeout(15_000) });
-    if (!res.ok || !res.url.startsWith("https:") || !type.test(contentType(res))) return null;
-    return { url: res.url, text: new TextDecoder().decode(await readCapped(res, "The page", max)) };
+    let at = url;
+    for (let hop = 0; hop <= REDIRECTS; hop++) {
+      if (new URL(at).protocol !== "https:") return null;
+      const res = await fetch(at, { headers: UA, redirect: "manual", signal: AbortSignal.timeout(15_000) });
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get("location");
+        if (!loc) return null;
+        at = new URL(loc, at).href;
+        continue;
+      }
+      if (!res.ok || !type.test(contentType(res))) return null;
+      return { url: at, text: new TextDecoder().decode(await readCapped(res, "The page", max)) };
+    }
+    return null;
   } catch {
     return null;
   }
@@ -48,8 +60,10 @@ function isNeutral(hex: string): boolean {
   return max === 0 || (max - min) / max < 0.15;
 }
 
-const top = <T extends string>(counts: Map<T, number>, n: number) =>
-  [...counts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, n);
+const top = <T extends string>(counts: Map<T, number>, n: number, boost?: T | null) => {
+  const rank = ([k, v]: [T, number]) => v + (k === boost ? 5 : 0);
+  return [...counts.entries()].sort((a, b) => rank(b) - rank(a) || (a[0] < b[0] ? -1 : 1)).slice(0, n);
+};
 
 /**
  * Read a brand's home page without a browser: its own CSS (inline and up to 3 linked sheets) gives the colours and fonts,
@@ -60,15 +74,25 @@ export async function brandExtract(input: { url: string }) {
   const page = await fetchText(input.url, HTML_MAX, /^text\/html|^application\/xhtml/);
   if (!page) throw new Error("Could not read that page over HTTPS (it must answer 200 with HTML).");
   const html = page.text;
-  const base = page.url;
-
   const tags = (name: string) => html.match(new RegExp(`<${name}\\b[^>]*>`, "gi")) ?? [];
-  const meta = (key: string) => {
-    for (const t of tags("meta")) {
-      if ((attr(t, "property") ?? attr(t, "name"))?.toLowerCase() === key) return decode(attr(t, "content") ?? "").trim() || null;
+  // A <base href> changes what relative links mean. The first valid one wins; the page address is the fallback.
+  let base = page.url;
+  for (const t of tags("base")) {
+    const h = attr(t, "href");
+    const u = h ? abs(h, page.url) : null;
+    if (u) {
+      base = u;
+      break;
     }
-    return null;
-  };
+  }
+  // Scan the meta tags once.
+  const metas = new Map<string, string>();
+  for (const t of tags("meta")) {
+    const k = (attr(t, "property") ?? attr(t, "name"))?.toLowerCase();
+    const c = decode(attr(t, "content") ?? "").trim();
+    if (k && c && !metas.has(k)) metas.set(k, c);
+  }
+  const meta = (key: string) => metas.get(key) ?? null;
   const title = decode(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] ?? "").replace(/\s+/g, " ").trim() || null;
   const ogImage = meta("og:image") ? abs(meta("og:image")!, base) : null;
 
@@ -105,22 +129,25 @@ export async function brandExtract(input: { url: string }) {
   const styleAttrs = [...html.matchAll(/\bstyle\s*=\s*"([^"]*)"/gi)].map((m) => m[1]!);
   const css = [...inline, ...sheets.map((s) => s.text), ...styleAttrs].join("\n");
 
+  // Colours count only inside declaration blocks and style attributes, so an id selector such as #add is not a colour.
+  const decls = [...[...inline, ...sheets.map((s) => s.text)].flatMap((c) => [...c.matchAll(/\{([^{}]*)\}/g)].map((m) => m[1]!)), ...styleAttrs].join("\n");
   const colours = new Map<string, number>();
-  for (const m of css.matchAll(/#[0-9a-f]{3,8}\b/gi)) {
+  for (const m of decls.matchAll(/#[0-9a-f]{3,8}\b/gi)) {
     const h = normHex(m[0]);
     if (h) colours.set(h, (colours.get(h) ?? 0) + 1);
   }
+  // theme-color is a strong sign, but it is not a CSS use: it raises the rank only, the reported count stays the CSS count.
   const themeColor = meta("theme-color") ? normHex(meta("theme-color")!) : null;
-  if (themeColor) colours.set(themeColor, (colours.get(themeColor) ?? 0) + 5);
   // Custom properties named like a brand colour (--brand, --primary, --accent ...) are the strongest sign.
   const named: { name: string; hex: string }[] = [];
-  for (const m of css.matchAll(/--([a-z0-9-]*(?:brand|primary|accent|secondary|main|theme|color|colour)[a-z0-9-]*)\s*:\s*(#[0-9a-f]{3,6})\b/gi)) {
+  for (const m of decls.matchAll(/--([a-z0-9-]*(?:brand|primary|accent|secondary|main|theme|color|colour)[a-z0-9-]*)\s*:\s*(#[0-9a-f]{3,6})\b/gi)) {
     const hex = normHex(m[2]!);
     if (hex && !named.some((n) => n.name === m[1])) named.push({ name: m[1]!, hex });
     if (named.length >= 12) break;
   }
   const chromatic = new Map([...colours].filter(([h]) => !isNeutral(h)));
   const neutral = new Map([...colours].filter(([h]) => isNeutral(h)));
+  if (themeColor && !isNeutral(themeColor) && !chromatic.has(themeColor)) chromatic.set(themeColor, 0);
 
   const fonts = new Map<string, number>(googleFamilies);
   const bump = (name: string, by = 1) => {
@@ -141,7 +168,7 @@ export async function brandExtract(input: { url: string }) {
     siteName: meta("og:site_name"),
     description: meta("description") ?? meta("og:description"),
     themeColor,
-    colours: top(chromatic, 8).map(([hex, uses]) => ({ hex, uses })),
+    colours: top(chromatic, 8, themeColor).map(([hex, uses]) => ({ hex, uses })),
     neutrals: top(neutral, 4).map(([hex, uses]) => ({ hex, uses })),
     namedColours: named,
     fonts: top(fonts, 6).map(([name, uses]) => ({ name, uses })),
