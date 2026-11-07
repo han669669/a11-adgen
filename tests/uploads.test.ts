@@ -206,6 +206,27 @@ describe("client results upload", () => {
     ]);
   });
 
+  it("removes the file when the insert fails and no row exists, and keeps it when the row is there", async () => {
+    const { env, raw, store } = await makeEnv();
+    const real = env.DB.prepare.bind(env.DB);
+    // 1. The write fails and nothing is stored: the object must go.
+    env.DB.prepare = ((sql: string) => {
+      const s = real(sql);
+      return sql.startsWith("INSERT INTO uploads") ? { bind: () => ({ run: async () => { throw new Error("d1 down"); } }) } : s;
+    }) as typeof env.DB.prepare;
+    await expect(send(env, new Blob([PNG]))).rejects.toThrow();
+    expect(uploadKeys(store)).toHaveLength(0);
+    // 2. The write commits, then the reply fails: the row exists, so the object must stay.
+    env.DB.prepare = ((sql: string) => {
+      const s = real(sql);
+      if (!sql.startsWith("INSERT INTO uploads")) return s;
+      return { bind: (...a: unknown[]) => ({ run: async () => { await s.bind(...a).run(); throw new Error("reply lost"); } }) };
+    }) as typeof env.DB.prepare;
+    await expect(send(env, new Blob([PNG]))).rejects.toThrow();
+    expect(uploadKeys(store)).toHaveLength(1);
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM uploads").get()).toEqual({ n: 1 });
+  });
+
   it("an over-limit post is refused before any file is written", async () => {
     const { env, store } = await makeEnv();
     for (let i = 0; i < UPLOADS_PER_DAY; i++) expect((await send(env, new Blob([PNG]))).status).toBe(303);

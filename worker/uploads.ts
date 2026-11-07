@@ -86,7 +86,13 @@ export async function uploadAdd(env: Env, request: Request, token: string): Prom
       "INSERT INTO uploads (id, pack_id, r2_key, kind, bytes, file_name, created_at) SELECT ?, ?, ?, ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM uploads WHERE pack_id = ? AND created_at > ?) < ?",
     ).bind(id, pack.id, key, kind.kind, file.size, cleanName(file.name), now(), pack.id, since, UPLOADS_PER_DAY).run();
   } catch (e) {
-    await env.MEDIA.delete(key); // no row: nothing points to the object
+    // The write may have committed before the error. Keep the object unless we can prove there is no row.
+    try {
+      const row = await env.DB.prepare("SELECT id FROM uploads WHERE id = ?").bind(id).first();
+      if (!row) await env.MEDIA.delete(key);
+    } catch {
+      // Outcome unknown: keep the object. An unused file is safer than a row with no file.
+    }
     throw e;
   }
   if (!r.meta.changes) {
