@@ -40,7 +40,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | # | Step | Who | What happens |
 |---|---|---|---|
 | 0 | Brand kit | CODE, CLAUDE | `brand_extract` reads the home page source (fetch; Browser Rendering is a later upgrade): colours, fonts, logo candidates (header logo first, each file probed live) and icons, with a `missing` list. Only public https hosts are fetched. Claude writes voice, palette roles and "what this brand would never say". Kit is versioned. Claude checks that the logo reads the brand name. |
-| 1 | Subject | HAN (input only) | Product URL, or brand only (no product), or redesign (upload a live ad). This is input, not a decision step. |
+| 1 | Subject | HAN (input only) | Product URL, or brand only (no product), or redesign (picture links of a live ad). This is input, not a decision step. |
 | 2 | Fact sheet | PAID Exa, CLAUDE | Exa `/contents` reads the page. Each fact keeps its source URL and exact quote: price, offer, pack size, proof. |
 | 3 | Research | PAID Exa, CLAUDE | Exa search: Reddit, HardwareZone, reviews, competitor pages, Singapore moments. Optional later: Meta Ad Library through Apify (long-running ads are likely winners). |
 | 4 | Insight sheet | CLAUDE | 8 to 12 buyer truths, each with its source. |
@@ -83,7 +83,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | Group | Tools |
 |---|---|
 | Brand | `brand_extract` (built: fetch-based), `brand_get`, `brand_save_version` |
-| Subject | `product_read`, `facts_save`; redesign: `subject_save` keeps the live ad's images (`subjects/` keys) and `image_get` shows them (`redesign_get` is not needed) |
+| Subject | `subject_save`, `facts_save`; redesign images are kept under `subjects/` and shown by `image_get` (`redesign_get` is not needed). `exa_contents` reads product-page text |
 | Research | `exa_search`, `exa_contents`, `adlibrary_fetch` (later; paid, asks first) |
 | Ideas | `ideas_save`, `ideas_pick_save` |
 | Images | `render_drafts`, `render_edit`, `render_final`, `image_get` (returns the image) |

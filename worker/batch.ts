@@ -24,8 +24,10 @@ export async function subjectSave(
       .bind(id, brand.id, input.kind, input.title, input.url ?? null, JSON.stringify(data), now())
       .run();
   } catch (e) {
-    // The subject row was not written, so nothing points at the stored images (the id is new and random).
-    await Promise.all(imageKeys.map((k) => env.MEDIA.delete(k).catch(() => undefined)));
+    // The write may have committed before the error: delete the files only when no row points at them.
+    // When the check itself fails, keep the files (an orphan is harmless; a row without its images is not).
+    const row = await env.DB.prepare("SELECT id FROM subjects WHERE id = ?").bind(id).first().catch(() => ({ id }));
+    if (!row) await Promise.all(imageKeys.map((k) => env.MEDIA.delete(k).catch(() => undefined)));
     throw e;
   }
   return { id, brandSlug: brand.slug, kind: input.kind, title: input.title, imageKeys, imageErrors };

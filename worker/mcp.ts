@@ -190,8 +190,8 @@ export const TOOLS: Tool[] = [
         brandSlug: { type: "string", pattern: SLUG },
         kind: { type: "string", enum: ["product", "brand", "redesign"] },
         title: { type: "string", minLength: 1, maxLength: 160 },
-        url: { type: "string", format: "uri" },
-        imageUrls: { type: "array", items: { type: "string", format: "uri" }, maxItems: 6 },
+        url: { type: "string", format: "uri", maxLength: 2000 },
+        imageUrls: { type: "array", items: { type: "string", format: "uri", maxLength: 2000 }, maxItems: 6 },
         notes: { type: "string", maxLength: 2000 },
       },
       required: ["brandSlug", "kind", "title"],
@@ -876,7 +876,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "image_get",
-    description: "Return a saved image so you can look at it (for draft checks). Pass a key from render_status.",
+    description: "Return a saved image so you can look at it (for draft checks). Pass a key from render_status, uploads_get, gold_get or subject_save (imageKeys).",
     inputSchema: {
       type: "object",
       properties: { key: { type: "string", pattern: KEY_PATTERN } },

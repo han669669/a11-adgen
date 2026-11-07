@@ -122,6 +122,29 @@ describe("subject_save keeps a live ad's images", () => {
   });
 });
 
+describe("subject_save edge cases", () => {
+  it("keeps the images when the insert fails after it committed (a row points at them)", async () => {
+    const { env, store } = await makeEnv();
+    stub({ "https://ads.example/a.png": { body: PNG } });
+    const real = env.DB.prepare.bind(env.DB);
+    env.DB.prepare = ((sql: string) => {
+      const st = real(sql);
+      if (!sql.startsWith("INSERT INTO subjects")) return st;
+      return { bind: (...a: unknown[]) => ({ run: async () => { await (st.bind(...a) as any).run(); throw new Error("reply lost"); } }) };
+    }) as unknown as typeof env.DB.prepare;
+    await expect(save(env, ["https://ads.example/a.png"])).rejects.toThrow("reply lost");
+    expect([...store.keys()].filter((k) => k.startsWith("subjects/"))).toHaveLength(1);
+  });
+
+  it("rejects a body that starts like a PNG but has a wrong signature", async () => {
+    const { env } = await makeEnv();
+    stub({ "https://ads.example/fake.png": { body: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0, 1, 2, 3, 4]) } });
+    const s = await save(env, ["https://ads.example/fake.png"]);
+    expect(s.imageKeys).toEqual([]);
+    expect(s.imageErrors[0]).toMatch(/not a PNG, JPEG or WebP/);
+  });
+});
+
 describe("the stored image is private and the agent can look at it", () => {
   it("image_get accepts a subjects/ key, shows it, and gives no public URL", async () => {
     const { env } = await makeEnv();
@@ -158,6 +181,9 @@ describe("the redesign prompt", () => {
     const text = p.text(a);
     expect(text).toContain("subject_save: brandSlug wongi, kind 'redesign', title 'Old ad', url https://a.example/ad, imageUrls [https://a.example/1.png, https://a.example/2.jpg]");
     expect(text).toContain("imageKeys and imageErrors");
+    expect(text).toContain("24 to 30 ideas, at least 8 per funnel stage");
+    expect(text).toContain("writer subagent");
+    expect(text).toContain("batch_update insights: 8 to 12 buyer truths, each with its source URL");
     expect(text).not.toMatch(/run \/mcp__a11__(batch|brand|redesign)/);
     expect(p.check!(a)).toBeNull();
     expect(p.check!({ ...a, adImageUrls: "http://a.example/1.png" })).toMatch(/https/);
