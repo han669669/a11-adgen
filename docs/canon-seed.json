@@ -1,0 +1,140 @@
+[
+ {
+  "stage": "all",
+  "rule": "The headline carries the ad. It must stop the scroll and send the eye to the product with curiosity. A good headline does not save a weak image either.",
+  "source": "taste-seed §1, han 2026-10-21",
+  "quote": "extremely crucial critical"
+ },
+ {
+  "stage": "all",
+  "rule": "Generic, average or pointless headlines and boring concepts are a Pass. Prefer an oddly specific true detail or a buyer's own words, used word for word.",
+  "source": "taste-seed §1 (B41, B43)",
+  "quote": "boring, non-creative concepts"
+ },
+ {
+  "stage": "all",
+  "rule": "Calm ads win: one focal product, little to look at.",
+  "source": "taste-seed §1 (B41)",
+  "quote": "because they weren't chaotic or busy like B39"
+ },
+ {
+  "stage": "all",
+  "rule": "A clever object that IS the headline's idea is the best kind of ad (butter on toast, a zested lemon, an empty snail shell for 'The snail had a good run.').",
+  "source": "taste-seed §1 (B19, B15)",
+  "quote": "A clever object that IS the headline's idea"
+ },
+ {
+  "stage": "all",
+  "rule": "Add a short, true supporting line under the headline when the product page backs it. Without it the ad feels incomplete.",
+  "source": "taste-seed §1 (B43, B45)",
+  "quote": "A true supporting tagline under the headline"
+ },
+ {
+  "stage": "all",
+  "rule": "Show a real serving only when it shows what the pack hides (the tart inside the tin, the layers) or the size of a food sold by weight.",
+  "source": "taste-seed §1",
+  "quote": "A real serving only when it shows what the pack hides"
+ },
+ {
+  "stage": "all",
+  "rule": "Every prop, sticker, tagline and callout must add meaning. One filler prop (a spare bowl, spoon, plate, blanket, saucer, ice tray, glass of water) turns a good ad into a reject. An upturned bowl reads unlucky.",
+  "source": "taste-seed §1 (HFM-muse)",
+  "quote": "Props that add no meaning"
+ },
+ {
+  "stage": "all",
+  "rule": "Props match the brand's level (a fine Chinese teacup for a heritage brand), never cheap props (tote, foil, plastic bottle).",
+  "source": "taste-seed §1 (B43)",
+  "quote": "Props that match the brand's level"
+ },
+ {
+  "stage": "all",
+  "rule": "No AI slop: no drip on a cup, no painted prepared food, no doubled or flat-printed product, no garbled letters.",
+  "source": "taste-seed §1 (B44)",
+  "quote": "very ai slop looking less premium"
+ },
+ {
+  "stage": "all",
+  "rule": "A wrong or garbled logo, or a logo outside the safe zone, rejects the ad by itself. Draw the real logo file in code, never paint it.",
+  "source": "taste-seed §1 (HFB5b)",
+  "quote": "A wrong or garbled logo, or a logo outside the safe zone: that alone rejects the ad"
+ },
+ {
+  "stage": "all",
+  "rule": "Food must look like the real product's own food, from its real photo, and look appetising. Painted food, glossy round kernels and plastic-looking colour are rejected.",
+  "source": "marks.md, W46c",
+  "quote": "food seems ai slop not true to actual real life product"
+ },
+ {
+  "stage": "all",
+  "rule": "Do not push food colour past the real photo: a richer caramel colour looked fake and plastic.",
+  "source": "marks.md, W46c v4",
+  "quote": "simply fake looking plastic looking"
+ },
+ {
+  "stage": "all",
+  "rule": "The product's container keeps its real shape, height, width and camera angle. Build it from the real packshot pixels, never from a model redraw.",
+  "source": "marks.md, W46c",
+  "quote": "the product's container doesn't match real life too, the dimensions height and width"
+ },
+ {
+  "stage": "all",
+  "rule": "In a row of identical packs the food must differ pack to pack. No pattern may be visible to the eye.",
+  "source": "marks.md, W46c v5-v6",
+  "quote": "there can be no patterns Discernible decipherable from a human eye"
+ },
+ {
+  "stage": "all",
+  "rule": "A pasted product must sit in the scene: the same light, shadow and blending as the room. It must not look pasted in.",
+  "source": "marks.md, W46c v7",
+  "quote": "it looks pasted in"
+ },
+ {
+  "stage": "all",
+  "rule": "The brand logo must be big enough (24 to 26 percent of the width) and have breathing room above it (top at 4 to 5 percent of the height), clear of the headline.",
+  "source": "marks.md, W46c v2-v5",
+  "quote": "shifted downward a little bit to include breathing empty space"
+ },
+ {
+  "stage": "all",
+  "rule": "A moment in the copy must be true to Singapore life. Do not invent habits.",
+  "source": "taste-seed §1",
+  "quote": "Baking lapis this CNY? Not again."
+ },
+ {
+  "stage": "all",
+  "rule": "Never name or hint at an ethnicity, race or religion, or a negative association. Reject on sight.",
+  "source": "taste-seed §1 (HFX-mix2, 2026-10-25)",
+  "quote": "really really bad headline, sounds racist"
+ },
+ {
+  "stage": "all",
+  "rule": "Filler stickers and taglines are a Pass: shelf life, thin review counts, a rating line that adds nothing, a useless discount sticker. Keep taglines short and useful.",
+  "source": "taste-seed §1",
+  "quote": "useless 15% off tagline sticker"
+ },
+ {
+  "stage": "tof",
+  "rule": "A top-of-funnel ad carries no offer sticker.",
+  "source": "taste-seed §1",
+  "quote": "An offer sticker on a ToF ad"
+ },
+ {
+  "stage": "bof",
+  "rule": "A bottom-of-funnel ad needs a real reason to buy now and a correct price.",
+  "source": "taste-seed §1",
+  "quote": "A BoF ad with no reason to buy now"
+ },
+ {
+  "stage": "all",
+  "rule": "The flavour named in the headline is the flavour in the picture.",
+  "source": "taste-seed §1 (HFB5b, HFB6)",
+  "quote": "A headline flavour that is not the slice in front"
+ },
+ {
+  "stage": "all",
+  "rule": "No unneeded hands, no wrong scale and no busy layouts.",
+  "source": "taste-seed §1",
+  "quote": "Unneeded hands, wrong scale, cheap props"
+ }
+]
