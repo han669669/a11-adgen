@@ -152,6 +152,14 @@ describe("pack_publish", () => {
     expect(pack.isoWeek(new Date("2026-01-01T00:00:00Z"))).toBe(1);
     expect(pack.isoWeek(new Date("2026-12-31T00:00:00Z"))).toBe(53);
   });
+
+  it("counts the week by the Singapore clock", () => {
+    const wk = (iso: string) => pack.isoWeek(pack.singaporeClock(new Date(iso)));
+    expect(wk("2026-11-07T18:00:00Z")).toBe(45); // Sunday 8 Nov 02:00 in Singapore
+    expect(wk("2026-11-08T15:59:00Z")).toBe(45); // Sunday 23:59 in Singapore
+    expect(wk("2026-11-08T16:00:00Z")).toBe(46); // Monday 9 Nov 00:00 in Singapore
+    expect(wk("2026-11-16T00:00:00Z")).toBe(47);
+  });
 });
 
 describe("client portal", () => {
