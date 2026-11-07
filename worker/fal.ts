@@ -1,4 +1,5 @@
 import type { Env } from "./env";
+import { pasteBack } from "./paste";
 import { PRICE, reserve, settle } from "./spend";
 
 /** A batch needs about 20 renders; submit refuses more than this, so batch_get never cuts the list. */
@@ -126,8 +127,11 @@ export async function check(env: Env, id: string) {
     const file = await fetch(img.url, { signal: AbortSignal.timeout(15_000) });
     if (!file.ok) continue;
     const key = `renders/${id}/${i + 1}.jpg`;
-    await env.MEDIA.put(key, await file.arrayBuffer(), {
-      httpMetadata: { contentType: img.content_type ?? "image/jpeg" },
+    const raw = await file.arrayBuffer();
+    // A food_fix result keeps the original pixels outside its boxes (food.ts).
+    const merged = row.kind === "final" ? await pasteBack(env, id, raw) : null;
+    await env.MEDIA.put(key, merged ?? raw, {
+      httpMetadata: { contentType: merged ? "image/jpeg" : (img.content_type ?? "image/jpeg") },
     });
     keys.push(key);
   }

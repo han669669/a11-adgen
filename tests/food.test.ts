@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../worker/env";
 import { foodFix } from "../worker/food";
 import worker from "../worker/index";
+import { pasteBack } from "../worker/paste";
 import { maskPng } from "../worker/png";
 import { fakeD1 } from "./helpers/d1";
 
@@ -90,8 +91,23 @@ function makeEnv(opts: { food?: string; laterFood?: string; kind?: string } = {}
     put: async (k: string, v: Uint8Array, o: { httpMetadata: { contentType: string } }) => void saved.set(k, { bytes: v, type: o.httpMetadata.contentType }),
     get: async (k: string) => (saved.has(k) ? { body: new Blob([saved.get(k)!.bytes]).stream(), size: saved.get(k)!.bytes.length, httpMetadata: { contentType: saved.get(k)!.type } } : null),
   };
-  const env = { DB, MEDIA, FAL_KEY: "k", SPEND_CAP_USD: "5.00", PUBLIC_BASE_URL: "https://w" } as unknown as Env;
-  return { env, saved, raw };
+  // Records the Images pipeline instead of drawing pixels.
+  const calls: unknown[][] = [];
+  const size = { width: 1536, height: 1920 };
+  const handle = (src: string) => {
+    const self = {
+      transform: (t: unknown) => (calls.push(["transform", src, t]), self),
+      draw: (_c: unknown, o: unknown) => (calls.push(["draw", src, o]), self),
+      output: async () => ({ response: () => new Response("merged") }),
+    };
+    return self;
+  };
+  const IMAGES = {
+    info: async () => ({ format: "image/jpeg", fileSize: 1, ...size }),
+    input: (body: ReadableStream) => handle(body instanceof ReadableStream ? "stream" : String(body)),
+  };
+  const env = { DB, MEDIA, IMAGES, FAL_KEY: "k", SPEND_CAP_USD: "5.00", PUBLIC_BASE_URL: "https://w" } as unknown as Env;
+  return { env, saved, raw, calls, size };
 }
 
 function stubFal() {
@@ -155,5 +171,35 @@ describe("food_fix", () => {
     const r = await worker.fetch(new Request(`https://w/m/${maskKey}`), env);
     expect(r.status).toBe(200);
     expect(r.headers.get("content-type")).toBe("image/png");
+  });
+});
+
+describe("paste-back", () => {
+  it("food_fix saves a paste plan; the result keeps the original outside the boxes", async () => {
+    const { env, saved, calls } = makeEnv({ food: "f" });
+    saved.set(KEY, { bytes: new TextEncoder().encode("original"), type: "image/jpeg" });
+    stubFal();
+    const out = await foodFix(env, input);
+    const plan = JSON.parse(String(saved.get(`renders/${out.id}/paste.json`)!.bytes));
+    expect(plan).toEqual({ source: KEY, width: 1536, height: 1920, boxes: input.boxes });
+
+    const merged = await pasteBack(env, out.id, new TextEncoder().encode("fixed").buffer as ArrayBuffer);
+    expect(new TextDecoder().decode(merged!)).toBe("merged");
+    // Box {x 40, y 80, w 35, h 15} of 1536 x 1920: the new image is cropped to the box and drawn at the same place.
+    expect(calls).toEqual([
+      ["transform", "stream", { trim: { top: 1536, left: 614, width: 538, height: 288 } }],
+      ["draw", "stream", { top: 1536, left: 614 }],
+    ]);
+  });
+
+  it("does nothing for a render without a paste plan, or with a different size", async () => {
+    const { env, saved, size } = makeEnv({ food: "f" });
+    saved.set(KEY, { bytes: new TextEncoder().encode("original"), type: "image/jpeg" });
+    const bytes = new TextEncoder().encode("x").buffer as ArrayBuffer;
+    expect(await pasteBack(env, RID, bytes)).toBeNull();
+    stubFal();
+    const out = await foodFix(env, input);
+    size.width = 1024;
+    expect(await pasteBack(env, out.id, bytes)).toBeNull();
   });
 });
