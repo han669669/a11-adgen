@@ -161,6 +161,9 @@ def open_source(a):
     if not (0 <= s0 <= s1 < a.real_from < E.shape[0]):
         sys.exit(f"--strip {a.strip} and --real-from {a.real_from} must be in bounds and ordered: 0 <= strip start <= strip end < real-from < {E.shape[0]}")
     strip = E[s0:s1 + 1].copy()
+    if a.repeat < 1:
+        sys.exit("--repeat must be at least 1")
+    strip = np.concatenate([strip] * a.repeat, axis=0)
     n = strip.shape[0]
     ext = np.concatenate([E[:s1 + 1], strip, E[s1 + 1:]], axis=0)[n:]  # the top n rows are plain backdrop: the base keeps its y
     if a.neck:
@@ -169,9 +172,98 @@ def open_source(a):
     print(f"{a.out}: neck extended by {n} px; the rim moved up {n} px; the box top is the old rim y minus {n}")
 
 
+def _seam_blend(left, right, ov):
+    """Join two pieces that overlap by `ov` columns along the vertical path where they differ least (no ghosting)."""
+    h = left.shape[0]
+    A, B = left[:, -ov:].astype(float), right[:, :ov].astype(float)
+    cost = ((A - B) ** 2).sum(axis=2)
+    acc = cost.copy()
+    for y in range(1, h):
+        prev = acc[y - 1]
+        best = np.minimum(prev, np.minimum(np.r_[prev[1:], 1e18], np.r_[1e18, prev[:-1]]))
+        acc[y] += best
+    path = np.zeros(h, dtype=int)
+    path[-1] = int(np.argmin(acc[-1]))
+    for y in range(h - 2, -1, -1):
+        x = path[y + 1]
+        lo, hi = max(0, x - 1), min(ov, x + 2)
+        path[y] = lo + int(np.argmin(acc[y, lo:hi]))
+    cols = np.arange(ov)[None, :]
+    take_right = cols >= path[:, None]
+    mix = np.where(take_right[..., None], B, A)
+    return np.concatenate([left[:, :-ov], mix.astype(np.uint8), right[:, ov:]], axis=1)
+
+
+def vary_food(a):
+    """Make N copies of a packshot whose kernels are arranged differently, so a row of identical packs does not show the same
+    kernels four times. Each food region is rebuilt from random full-height strips of the real photo (random place, mirror and a
+    slight width change), joined along minimum-difference seams. The left and right glass edges, the label, the cap and the
+    horizontal glass highlights stay where they are, because the strips keep their height. Copy 1 is the photo unchanged."""
+    import random
+    pack = np.asarray(Image.open(a.packshot).convert("RGB")).copy()
+    # more kernels to draw from: other photos of the same pack with the same framing (e.g. another flavour), graded to match
+    extras = [np.asarray(Image.open(e).convert("RGB")) for e in (a.extra_src or [])]
+    for e in extras:
+        if e.shape != pack.shape:
+            sys.exit("--extra-src must be the same size and framing as --packshot")
+    regions = [ints(r, 4) for r in a.region]
+    edge, ov = a.edge, a.overlap
+    for k in range(1, a.count + 1):
+        out = pack.copy()
+        if k > 1:
+            for ri, (x0, y0, x1, y1) in enumerate(regions):
+                rng = random.Random(a.seed * 1000 + k * 17 + ri)
+                R = pack[y0:y1, x0:x1]
+                h, w = R.shape[:2]
+                inners = [R[:, edge:w - edge]] + [e[y0:y1, x0 + edge:x1 - edge] for e in extras]   # kernels without the glass edges
+                iw = inners[0].shape[1]
+                canvas = R[:, :edge + ov].copy()                  # left glass edge
+                used = []
+                while canvas.shape[1] < w - edge - ov:
+                    sw = rng.randint(a.strip_min, a.strip_max)
+                    for _ in range(40):                           # a start that is not near one already used in this jar
+                        st = rng.randint(0, max(0, iw - sw))
+                        if all(abs(st - u) > sw * 0.6 for u in used):
+                            break
+                    used.append(st)
+                    piece = inners[rng.randrange(len(inners))][:, st:st + sw]
+                    if rng.random() < 0.5:
+                        piece = piece[:, ::-1]
+                    nw = max(ov * 2 + 8, round(piece.shape[1] * rng.uniform(0.94, 1.06)))
+                    piece = np.asarray(Image.fromarray(np.ascontiguousarray(piece)).resize((nw, h), Image.LANCZOS))
+                    canvas = _seam_blend(canvas, piece, ov)
+                right = R[:, w - edge - ov:]
+                canvas = _seam_blend(canvas[:, :max(canvas.shape[1], w - edge)], right, ov) if canvas.shape[1] >= ov else canvas
+                if canvas.shape[1] != w:                          # trim or pad (edge replicate) to the region width
+                    canvas = canvas[:, :w] if canvas.shape[1] > w else np.pad(canvas, ((0, 0), (0, w - canvas.shape[1]), (0, 0)), mode="edge")
+                # feather the top and bottom rows of the region into the original, so no hard line shows where the new rows start
+                f = min(a.feather, h // 4)
+                wy = np.ones(h)
+                if f > 0:
+                    ramp = np.linspace(0, 1, f + 2)[1:-1]
+                    wy[:f] = ramp
+                    wy[h - f:] = ramp[::-1]
+                out[y0:y1, x0:x1] = (R * (1 - wy[:, None, None]) + canvas * wy[:, None, None]).astype(np.uint8)
+        Image.fromarray(out).save(f"{a.out_prefix}{k}.jpg", quality=95)
+        print(f"{a.out_prefix}{k}.jpg" + (" (the photo unchanged)" if k == 1 else ""))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
+    v = sub.add_parser("vary-food", help="N copies of a packshot with differently arranged kernels (for a row of identical packs)")
+    v.add_argument("--packshot", required=True)
+    v.add_argument("--region", action="append", required=True, help="x0,y0,x1,y1 of a food area; repeat for each")
+    v.add_argument("--count", type=int, default=4)
+    v.add_argument("--seed", type=int, default=7)
+    v.add_argument("--extra-src", action="append", help="another photo of the pack, same size and framing; its kernels are mixed in")
+    v.add_argument("--edge", type=int, default=34, help="px at each side kept as the real glass edge")
+    v.add_argument("--overlap", type=int, default=18, help="px where two strips are joined along a seam")
+    v.add_argument("--feather", type=int, default=7, help="px blended at the top and bottom of each region")
+    v.add_argument("--strip-min", type=int, default=90)
+    v.add_argument("--strip-max", type=int, default=125)
+    v.add_argument("--out-prefix", required=True, help="writes <prefix>1.jpg ... <prefix>N.jpg (copy 1 is unchanged)")
+    v.set_defaults(fn=vary_food)
     d = sub.add_parser("pad45", help="pad a square packshot to 4:5 for a model edit")
     d.add_argument("--packshot", required=True)
     d.add_argument("--out", required=True)
@@ -181,6 +273,7 @@ def main():
     o.add_argument("--edit", required=True, help="the model's edit of it (cap off, same framing)")
     o.add_argument("--real-from", type=int, required=True, help="padded y inside the label's top band: from here down the real photo is used")
     o.add_argument("--strip", required=True, help="y0,y1 of a strip of the neck's threads to repeat (a whole number of thread periods)")
+    o.add_argument("--repeat", type=int, default=1, help="how many copies of the strip to add (each copy adds the strip's height)")
     o.add_argument("--neck", help="rim_y,neck_end_y,shoulder_end_y in the output: widen the neck rows (see widen_neck)")
     o.add_argument("--neck-widen", type=float, default=1.05, help="widen factor for the neck (the model draws it at 0.90 of the body width; the real one is about 0.95)")
     o.add_argument("--cx", type=float, default=513, help="centre x of the jar in the padded packshot")
