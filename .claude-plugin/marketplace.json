@@ -1,0 +1,11 @@
+{
+  "name": "a11-adgen",
+  "owner": { "name": "a11 Studio" },
+  "plugins": [
+    {
+      "name": "a11",
+      "source": "./plugin",
+      "description": "a11 Studio static ads: writer, critic and art-director subagents, and the a11adgen MCP server."
+    }
+  ]
+}
