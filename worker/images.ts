@@ -18,7 +18,7 @@ export function contentType(res: Response): string {
 }
 
 /** Read a body, but stop at MAX_IMAGE_BYTES even when the server sent no Content-Length. */
-export async function readCapped(res: Response, what: string): Promise<Uint8Array> {
+export async function readCapped(res: Pick<Response, "body" | "arrayBuffer">, what: string, max = MAX_IMAGE_BYTES): Promise<Uint8Array> {
   const reader = res.body?.getReader();
   if (!reader) return new Uint8Array(await res.arrayBuffer());
   const parts: Uint8Array[] = [];
@@ -27,9 +27,9 @@ export async function readCapped(res: Response, what: string): Promise<Uint8Arra
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > MAX_IMAGE_BYTES) {
+    if (size > max) {
       await reader.cancel();
-      throw new Error(`${what} is larger than ${MAX_IMAGE_BYTES} bytes.`);
+      throw new Error(`${what} is larger than ${max} bytes.`);
     }
     parts.push(value);
   }

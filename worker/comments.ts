@@ -1,5 +1,6 @@
 import { brandBySlug } from "./brand";
 import type { Env } from "./env";
+import { readCapped } from "./images";
 import { packByToken } from "./pack";
 
 const now = () => new Date().toISOString();
@@ -11,39 +12,19 @@ const FORM_MAX_BYTES = 8192;
 
 export type CommentResult = { ok: true } | { ok: false; status: number; message: string };
 
-/** The body as text, or null as soon as it is more than max bytes. It stops reading at the cap, so a body of unknown length is not buffered whole. */
-async function readCapped(request: Request, max: number): Promise<string | null> {
-  if (!request.body) return "";
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > max) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(value);
-  }
-  const all = new Uint8Array(total);
-  let at = 0;
-  for (const c of chunks) {
-    all.set(c, at);
-    at += c.byteLength;
-  }
-  return new TextDecoder().decode(all);
-}
-
 /** POST /c/<token>/comment. The token is the secret, as for the page. A cross-site POST is refused. */
 export async function commentAdd(env: Env, request: Request, token: string): Promise<CommentResult> {
   if (request.headers.get("sec-fetch-site") === "cross-site") return { ok: false, status: 403, message: "Not allowed." };
   const pack = await packByToken(env, token);
   if (!pack) return { ok: false, status: 404, message: "Not found." };
   if (Number(request.headers.get("content-length") ?? 0) > FORM_MAX_BYTES) return { ok: false, status: 413, message: "That is too long." };
-  const raw = await readCapped(request, FORM_MAX_BYTES);
-  if (raw === null) return { ok: false, status: 413, message: "That is too long." };
+  // Stops reading at the cap, so a body of unknown length is not buffered whole.
+  let raw: string;
+  try {
+    raw = new TextDecoder().decode(await readCapped(request, "The comment", FORM_MAX_BYTES));
+  } catch {
+    return { ok: false, status: 413, message: "That is too long." };
+  }
   const form = new URLSearchParams(raw);
   // Keep new lines, drop other control characters.
   const body = (form.get("body") ?? "").replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/g, "").trim();
