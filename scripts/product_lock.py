@@ -167,7 +167,15 @@ def open_source(a):
     n = strip.shape[0]
     ext = np.concatenate([E[:s1 + 1], strip, E[s1 + 1:]], axis=0)[n:]  # the top n rows are plain backdrop: the base keeps its y
     if a.neck:
-        ext = widen_neck(ext, *ints(a.neck, 3), a.neck_widen, a.cx)
+        rim, neck_end, shoulder_end = ints(a.neck, 3)
+        if not (0 <= rim <= neck_end < shoulder_end < ext.shape[0]):
+            sys.exit(f"--neck {a.neck} must satisfy 0 <= rim <= neck_end < shoulder_end < {ext.shape[0]}")
+        if not np.isfinite(a.neck_widen) or a.neck_widen <= 0:
+            sys.exit("--neck-widen must be finite and greater than zero")
+        cx = a.cx if a.cx is not None else ext.shape[1] / 2   # the jar's centre; pass --cx when the pack is not centred in the photo
+        if not np.isfinite(cx):
+            sys.exit("--cx must be finite")
+        ext = widen_neck(ext, rim, neck_end, shoulder_end, a.neck_widen, cx)
     Image.fromarray(ext).save(a.out, quality=95)
     print(f"{a.out}: neck extended by {n} px; the rim moved up {n} px; the box top is the old rim y minus {n}")
 
@@ -276,7 +284,7 @@ def main():
     o.add_argument("--repeat", type=int, default=1, help="how many copies of the strip to add (each copy adds the strip's height)")
     o.add_argument("--neck", help="rim_y,neck_end_y,shoulder_end_y in the output: widen the neck rows (see widen_neck)")
     o.add_argument("--neck-widen", type=float, default=1.05, help="widen factor for the neck (the model draws it at 0.90 of the body width; the real one is about 0.95)")
-    o.add_argument("--cx", type=float, default=513, help="centre x of the jar in the padded packshot")
+    o.add_argument("--cx", type=float, default=None, help="centre x of the jar in the padded packshot (default: the middle of the picture)")
     o.add_argument("--out", required=True)
     o.set_defaults(fn=open_source)
     s = sub.add_parser("skeleton")
