@@ -65,6 +65,26 @@ const top = <T extends string>(counts: Map<T, number>, n: number, boost?: T | nu
   return [...counts.entries()].sort((a, b) => rank(b) - rank(a) || (a[0] < b[0] ? -1 : 1)).slice(0, n);
 };
 
+/** The declaration text of a style sheet at any nesting depth: what sits inside braces, without the selectors. A nested rule does not hide its parent's declarations. */
+function declarations(css: string): string {
+  const out: string[] = [];
+  let depth = 0;
+  let last = 0;
+  for (const m of css.matchAll(/[{}]/g)) {
+    const text = css.slice(last, m.index);
+    last = m.index + 1;
+    if (m[0] === "{") {
+      // Text before a "{" is a selector, except what a parent rule declared before its nested rule: up to the last ";".
+      if (depth >= 1 && text.includes(";")) out.push(text.slice(0, text.lastIndexOf(";") + 1));
+      depth++;
+    } else {
+      if (depth >= 1) out.push(text);
+      depth = Math.max(0, depth - 1);
+    }
+  }
+  return out.join("\n");
+}
+
 /**
  * Read a brand's home page without a browser: its own CSS (inline and up to 3 linked sheets) gives the colours and fonts,
  * and its tags give the logo and icon candidates. Candidates only: the owner's agent decides, then brand_save stores the kit.
@@ -130,7 +150,7 @@ export async function brandExtract(input: { url: string }) {
   const css = [...inline, ...sheets.map((s) => s.text), ...styleAttrs].join("\n");
 
   // Colours count only inside declaration blocks and style attributes, so an id selector such as #add is not a colour.
-  const decls = [...[...inline, ...sheets.map((s) => s.text)].flatMap((c) => [...c.matchAll(/\{([^{}]*)\}/g)].map((m) => m[1]!)), ...styleAttrs].join("\n");
+  const decls = [...[...inline, ...sheets.map((s) => s.text)].map(declarations), ...styleAttrs].join("\n");
   const colours = new Map<string, number>();
   for (const m of decls.matchAll(/#[0-9a-f]{3,8}\b/gi)) {
     const h = normHex(m[0]);
@@ -147,6 +167,7 @@ export async function brandExtract(input: { url: string }) {
   }
   const chromatic = new Map([...colours].filter(([h]) => !isNeutral(h)));
   const neutral = new Map([...colours].filter(([h]) => isNeutral(h)));
+  const cssChromatic = chromatic.size; // the warning below is about the CSS, so the theme colour does not count
   if (themeColor && !isNeutral(themeColor) && !chromatic.has(themeColor)) chromatic.set(themeColor, 0);
 
   const fonts = new Map<string, number>(googleFamilies);
@@ -158,7 +179,7 @@ export async function brandExtract(input: { url: string }) {
   for (const m of css.matchAll(/@font-face\s*\{[^}]*?font-family\s*:\s*([^;}]+)/gi)) bump(m[1]!, 3);
 
   const warnings: string[] = [];
-  if (!chromatic.size) warnings.push("No brand colours found in the CSS. The page may build its styles with script, or use rgb() or hsl() colours. Take the colours from the logo and the packshot instead.");
+  if (!cssChromatic) warnings.push("No brand colours found in the CSS. The page may build its styles with script, or use rgb() or hsl() colours. Take the colours from the logo and the packshot instead.");
   if (!logoCandidates.length && !icons.length) warnings.push("No logo or icon found in the page tags. Ask the owner for the logo file.");
   if (sheetUrls.length && sheets.length < sheetUrls.length) warnings.push(`${sheetUrls.length - sheets.length} stylesheet(s) could not be read.`);
 

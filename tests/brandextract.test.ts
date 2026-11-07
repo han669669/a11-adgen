@@ -117,6 +117,24 @@ describe("brand_extract", () => {
     expect(r.colours.find((c) => c.hex === "#2A9D8F")!.uses).toBe(0);
   });
 
+  it("reads a parent rule's declarations when a nested rule follows them", async () => {
+    stub({
+      "https://n.test/": {
+        body: `<html><head><style>.card{color:#e63946;background:#fff; &:hover{color:#111} .x{margin:0}} @media (min-width:1px){.a{color:#e63946}}</style></head></html>`,
+        type: "text/html",
+      },
+    });
+    const r = await brandExtract({ url: "https://n.test/" });
+    expect(r.colours.find((c) => c.hex === "#E63946")!.uses).toBe(2);
+  });
+
+  it("still warns when the only colour is the theme-color meta", async () => {
+    stub({ "https://t.test/": { body: `<html><head><meta name="theme-color" content="#2a9d8f"><style>p{margin:0}</style></head></html>`, type: "text/html" } });
+    const r = await brandExtract({ url: "https://t.test/" });
+    expect(r.colours.map((c) => c.hex)).toContain("#2A9D8F");
+    expect(r.warnings.join(" ")).toContain("No brand colours found in the CSS");
+  });
+
   it("the brand prompt starts with brand_extract", () => {
     const p = promptGet("brand", { url: "https://wongi.test/", slug: "wongi" });
     const text = JSON.stringify(p);
