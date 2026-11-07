@@ -68,6 +68,14 @@ def cutout(a):
     H, W = arr.shape[:2]
     mx, mn = arr.max(axis=2), arr.min(axis=2)
     sat = (mx - mn) / np.maximum(mx, 1)
+    lum = arr.mean(axis=2)
+    smooth = None
+    if a.smooth > 0:  # local standard deviation of brightness in a 5x5 window: a plain backdrop is smooth, a dark textured product is not
+        def box(v, k=5):
+            p = k // 2
+            c = np.pad(np.cumsum(np.cumsum(np.pad(v, p, mode="edge"), 0), 1), ((1, 0), (1, 0)))
+            return (c[k:, k:] - c[:-k, k:] - c[k:, :-k] + c[:-k, :-k]) / (k * k)
+        smooth = np.sqrt(np.maximum(box(lum ** 2) - box(lum) ** 2, 0)) < a.smooth
     border = [(x, y) for x in range(W) for y in (0, H - 1)] + [(x, y) for y in range(H) for x in (0, W - 1)]
 
     def backdrop(cls):
@@ -80,8 +88,10 @@ def cutout(a):
                 out |= np.asarray(t) == 128
         return out
 
-    bg = backdrop(mx < a.dark_max) | backdrop((sat < a.light_sat) & (mx > a.light_min))
-    m = Image.fromarray(((~bg) * 255).astype("uint8"), "L").filter(ImageFilter.MinFilter(a.open)).filter(ImageFilter.MaxFilter(a.open)).filter(ImageFilter.MinFilter(3))
+    bg = backdrop((mx < a.dark_max) & (smooth if smooth is not None else True)) | backdrop((sat < a.light_sat) & (mx > a.light_min))
+    m = Image.fromarray(((~bg) * 255).astype("uint8"), "L").filter(ImageFilter.MinFilter(a.open)).filter(ImageFilter.MaxFilter(a.open))
+    for _ in range(a.erode):
+        m = m.filter(ImageFilter.MinFilter(3))
     fg = np.asarray(m) > 0
     lab = Image.fromarray((fg * 255).astype("uint8"), "L")
     seen = np.zeros((H, W), bool)
@@ -98,7 +108,8 @@ def cutout(a):
             best = c
     if best is None:
         sys.exit("no product found: every pixel counts as backdrop. Lower --dark-max or --light-sat.")
-    Image.fromarray((best * 255).astype("uint8"), "L").filter(ImageFilter.GaussianBlur(0.9)).save(a.out)
+    soft = Image.fromarray((best * 255).astype("uint8"), "L").filter(ImageFilter.GaussianBlur(0.9))
+    soft.point(lambda v: 0 if v < 110 else min(255, (v - 110) * 255 // 110)).save(a.out)  # drops the faint rim a blurred hairline leaves
     ys, xs = np.where(best)
     print(f"{a.out}: product box x {xs.min()},{xs.max()} y {ys.min()},{ys.max()} ({int(best.sum())} px of {W * H}). Use --box {xs.min()},{ys.min()},{xs.max()},{ys.max()} --alpha {a.out}")
 
@@ -405,6 +416,8 @@ def main():
     c.add_argument("--light-sat", type=float, default=0.17, help="a light pixel with saturation below this, joined to the border, is backdrop")
     c.add_argument("--light-min", type=int, default=150, help="the lowest brightness of a light backdrop pixel")
     c.add_argument("--open", type=int, default=3, help="odd size of the opening filter: thin lines narrower than this are removed (3 keeps fine edges, 7 removes a horizon line)")
+    c.add_argument("--smooth", type=float, default=0, help="0 = off. Above 0, a dark pixel counts as backdrop only where the picture is smooth (local brightness std below this, 2.0 works): keeps a dark textured product, such as a brownie, on a black backdrop")
+    c.add_argument("--erode", type=int, default=1, help="how many 1 px erosions to apply at the end (more removes a dark fringe of backdrop)")
     c.add_argument("--seed-step", type=int, default=7, help="try every Nth border pixel as a flood fill start")
     c.set_defaults(fn=cutout)
     d = sub.add_parser("pad45", help="pad a square packshot to 4:5 for a model edit")
