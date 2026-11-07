@@ -48,6 +48,9 @@ export function isoWeek(d: Date): number {
   return Math.ceil(((t.getTime() - y0) / 86_400_000 + 1) / 7);
 }
 
+/** The owner and the clients work in Singapore (UTC+8, no daylight saving). A new ISO week starts there on Monday 00:00, which is Sunday 16:00 UTC. isoWeek reads UTC fields, so shift the clock by 8 hours first. */
+export const singaporeClock = (d: Date) => new Date(d.getTime() + 8 * 3_600_000);
+
 /** a11_W46_wongi_tof_c03_v1: week, brand, stage, idea number, pack version. The client uses these names, so results map back. */
 export function adName(week: number, brandSlug: string, stage: string, n: number, version: number): string {
   return `a11_W${String(week).padStart(2, "0")}_${brandSlug.replace(/-/g, "")}_${stage}_c${String(n).padStart(2, "0")}_v${version}`;
@@ -83,7 +86,7 @@ export async function packPublish(
   if (!b) throw new InputError("No such batch.");
   const facts = (await env.DB.prepare("SELECT label, value, quote, source_url FROM facts WHERE subject_id = ? ORDER BY id LIMIT 200")
     .bind(b.subject_id).all<FactRow>()).results;
-  const week = isoWeek(a.at ?? new Date());
+  const week = isoWeek(singaporeClock(a.at ?? new Date()));
 
   const ads: PackAd[] = [];
   const factCheck: PackContent["factCheck"] = [];

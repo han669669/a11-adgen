@@ -152,6 +152,16 @@ describe("pack_publish", () => {
     expect(pack.isoWeek(new Date("2026-01-01T00:00:00Z"))).toBe(1);
     expect(pack.isoWeek(new Date("2026-12-31T00:00:00Z"))).toBe(53);
   });
+
+  it("names the ad with the Singapore week, on both sides of Monday 00:00", async () => {
+    const { env, raw, files } = makeEnv();
+    const { b, finals } = await seed(env, raw, files);
+    const sunday = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy() }], at: new Date("2026-11-08T15:59:00Z") });
+    const monday = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy() }], at: new Date("2026-11-08T16:00:00Z") });
+    expect(sunday.adNames[0]).toBe("a11_W45_wongi_tof_c01_v1");
+    expect(monday.adNames[0]).toBe("a11_W46_wongi_tof_c01_v2");
+    expect(pack.isoWeek(pack.singaporeClock(new Date("2026-11-16T00:00:00Z")))).toBe(47);
+  });
 });
 
 import { sentences as sentencesOf } from "../worker/portal";
