@@ -32,6 +32,39 @@ describe("mcp handler", () => {
     const r = await post({ jsonrpc: "2.0", method: "tools/call", params: { name: "spend_get", arguments: {} } });
     expect(r.status).toBe(202);
   });
+  it("lists the prompts and returns one with its arguments filled in", async () => {
+    const list: any = await (await post({ jsonrpc: "2.0", id: 4, method: "prompts/list" })).json();
+    expect(list.result.prompts.map((p: any) => p.name)).toEqual(["brand", "batch", "final", "learn", "gold-test"]);
+    const got: any = await (await post({ jsonrpc: "2.0", id: 5, method: "prompts/get", params: { name: "final", arguments: { batchId: "abc-123" } } })).json();
+    expect(got.result.messages[0].content.text).toContain("Batch abc-123");
+    expect(got.result.messages[0].role).toBe("user");
+  });
+  it("refuses an unknown prompt, a missing argument and a non-text argument as invalid params", async () => {
+    for (const params of [{ name: "nope" }, { name: "final", arguments: {} }, { name: "final", arguments: { batchId: 5 } }]) {
+      const j: any = await (await post({ jsonrpc: "2.0", id: 6, method: "prompts/get", params })).json();
+      expect(j.error.code).toBe(-32602);
+    }
+  });
+  it("names only tools that exist in every prompt", async () => {
+    const { PROMPTS } = await import("../worker/prompts");
+    const known = new Set(TOOLS.map((t) => t.name));
+    const used = new Set<string>();
+    for (const p of PROMPTS) for (const m of p.text({ url: "u", slug: "s", brand: "b", batchId: "", note: "n" }).matchAll(/\b([a-z]+_[a-z_]+)\b/g)) used.add(m[1]!);
+    expect(used.size).toBeGreaterThan(10);
+    expect([...used].filter((n) => !known.has(n))).toEqual([]);
+  });
+  it("names only tools that exist in the plugin's subagents", async () => {
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const dir = new URL("../plugin/agents/", import.meta.url);
+    const known = new Set(TOOLS.map((t) => t.name));
+    const files = readdirSync(dir).filter((f) => f.endsWith(".md"));
+    expect(files.sort()).toEqual(["art-director.md", "critic.md", "writer.md"]);
+    for (const f of files) {
+      const names = [...readFileSync(new URL(f, dir), "utf8").matchAll(/mcp__a11__([a-z_]+)/g)].map((m) => m[1]!);
+      expect(names.length).toBeGreaterThan(0);
+      expect(names.filter((n) => !known.has(n))).toEqual([]);
+    }
+  });
   it("refuses GET", async () => {
     const r = await handleMcp(new Request("https://x/mcp"), env);
     expect(r.status).toBe(405);

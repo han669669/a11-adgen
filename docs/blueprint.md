@@ -91,9 +91,9 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | Memory | `taste_log` (his picks and passes with the critic's rank), `canon_get`, `canon_update`, `swipe_add`, `swipe_search`, `gold_import`, `gold_get`, `gold_score`, `gold_runs` (built in Phase 2a), `picks_get`, `results_get` |
 | Ops | `batch_status`, `spend_get`, `pack_publish` |
 
-Prompts (slash commands): `/a11:brand`, `/a11:batch`, `/a11:redesign`, `/a11:final`, `/a11:results`, `/a11:learn`, `/a11:gold-test`. Each is resumable; state lives in D1.
+Prompts (slash commands) live on the server (`worker/prompts.ts`). Claude Code shows each MCP prompt as `/mcp__a11__<name>`: `brand`, `batch`, `final`, `learn`, `gold-test` (built in Phase 2b); `redesign` and `results` come with their tools (redesign in Phase 1, results in Phase 3). Each is resumable; state lives in D1.
 
-Plugin (in this repo, installed once): subagents `writer`, `critic`, `art-director`, plus the MCP config.
+Plugin (in this repo, `plugin/`, installed once): subagents `writer`, `critic`, `art-director`, plus the MCP config. Install: `/plugin marketplace add han669669/a11-adgen`, then `/plugin install a11@a11-adgen`. Until MCP OAuth is built (Phase 1), the plugin's MCP config reads the bearer token from the environment variable `A11_MCP_TOKEN`.
 
 Connect:
 

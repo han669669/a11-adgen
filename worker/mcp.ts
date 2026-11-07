@@ -10,6 +10,7 @@ import { brandBySlug, brandGet, brandList, brandSave, latestKit, SLUG } from "./
 import { composeFinal } from "./compose";
 import { foodFix, regionFix } from "./food";
 import * as exa from "./exa";
+import { promptGet, promptList } from "./prompts";
 import * as fal from "./fal";
 import { InputError, type ObjectSchema, validate } from "./schema";
 import { BudgetError, totals } from "./spend";
@@ -737,7 +738,7 @@ async function handleOne(env: Env, msg: RpcRequest): Promise<object | null> {
       const protocolVersion = SUPPORTED_VERSIONS.includes(asked) ? asked : SUPPORTED_VERSIONS[0];
       return rpcResult(msg.id, {
         protocolVersion,
-        capabilities: { tools: { listChanged: false } },
+        capabilities: { tools: { listChanged: false }, prompts: { listChanged: false } },
         serverInfo: SERVER_INFO,
         instructions: INSTRUCTIONS,
       });
@@ -748,6 +749,12 @@ async function handleOne(env: Env, msg: RpcRequest): Promise<object | null> {
       return rpcResult(msg.id, { tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
     case "tools/call":
       return rpcResult(msg.id, await callTool(env, msg.params));
+    case "prompts/list":
+      return rpcResult(msg.id, { prompts: promptList() });
+    case "prompts/get": {
+      const got = promptGet(msg.params?.name, msg.params?.arguments);
+      return typeof got === "string" ? rpcError(msg.id, -32602, got) : rpcResult(msg.id, got);
+    }
     default:
       return rpcError(msg.id, -32601, `Method not found: ${msg.method}`);
   }
