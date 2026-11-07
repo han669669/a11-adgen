@@ -36,6 +36,8 @@ export interface SubmitInput {
   prompt: string;
   referenceUrls: string[];
   numImages: number;
+  /** Mask PNG URL: white = edit, black = keep (the food truth stage). */
+  maskUrl?: string;
 }
 
 export async function submit(env: Env, input: SubmitInput) {
@@ -55,6 +57,7 @@ export async function submit(env: Env, input: SubmitInput) {
       body: JSON.stringify({
         prompt,
         image_urls: input.referenceUrls,
+        ...(input.maskUrl ? { mask_url: input.maskUrl } : {}),
         image_size: { width: size.width, height: size.height },
         quality: size.quality,
         num_images: input.numImages,

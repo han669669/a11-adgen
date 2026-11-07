@@ -21,6 +21,8 @@ export interface KitInput {
   logoWidthPct?: number;
   logoTopPct?: number;
   notes?: string;
+  /** The real food in words, written once from the texture photos (shape, surface, colour, how pieces sit). */
+  food?: string;
 }
 
 export interface Kit {
@@ -32,6 +34,8 @@ export interface Kit {
   refs: { key: string; url: string; sourceUrl: string; label: string; role: string }[];
   placement: { logoWidthPct: number; logoTopPct: number };
   notes: string;
+  /** Absent in kits saved before 07-11-2026. */
+  food?: string;
 }
 
 interface BrandRow {
@@ -57,6 +61,13 @@ export async function latestKit(env: Env, brandId: string, version?: number) {
         .first<{ version: number; kit: string; note: string | null; created_at: string }>();
   if (!row) return null;
   return { version: row.version, note: row.note, createdAt: row.created_at, kit: JSON.parse(row.kit) as Kit };
+}
+
+/** The food does not change between kit versions: a save without `food` keeps the latest kit's description. */
+async function previousFood(env: Env, slug: string): Promise<string | undefined> {
+  const brand = await env.DB.prepare("SELECT id FROM brands WHERE slug = ?").bind(slug).first<{ id: string }>();
+  const prev = brand ? await latestKit(env, brand.id) : null;
+  return prev?.kit.food?.trim() || undefined;
 }
 
 /**
@@ -99,6 +110,7 @@ export async function brandSave(env: Env, input: { slug: string; name: string; s
     refs,
     placement: { logoWidthPct: input.kit.logoWidthPct ?? 28, logoTopPct: input.kit.logoTopPct ?? 3 },
     notes: input.kit.notes ?? "",
+    food: input.kit.food?.trim() || (await previousFood(env, input.slug)),
   };
 
   for (const f of puts) await env.MEDIA.put(f.key, f.bytes, { httpMetadata: { contentType: f.type } });

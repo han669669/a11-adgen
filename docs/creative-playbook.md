@@ -25,7 +25,7 @@ Pick an idea only when the answer to all four questions is yes:
 1. **One idea.** Do the picture and the headline make one point together? Cover the headline: does the picture still carry half of it?
 2. **The buyer's truth.** Does a Singaporean snacker see their own behaviour or feeling in it, in words they would use? Not a product claim.
 3. **Calm.** One focal product. Does every prop, line and sticker earn its place (`taste-seed.md` §1, "Hates")?
-4. **Real.** Is the product the real packshot (draft from the kit's packshot reference), with the real logo drawn in code?
+4. **Real.** Is the product the real packshot (draft from the kit's packshot reference), with the real logo drawn in code? If the ad shows food, does the food match the kit's texture photos (§6)? Food that looks painted rejects the ad.
 
 Then apply the owner gate in `taste-seed.md` §2 (Singapore truth, no ethnicity, race or religion, logo, funnel fit), then the render defects.
 
@@ -51,6 +51,18 @@ Three ads per batch: 1 tof, 1 mof, 1 bof (owner, 07-11-2026). The database allow
 2. Burst: at least 8 ideas per stage before you pick. Ideas cost nothing; drafts cost money.
 3. Kill: apply §2. Most ideas must die here. If fewer than the needed picks survive, write more ideas. Do not lower the bar.
 4. Mix: at least 1 of the 3 picks in a native look (not the beige studio look).
-5. Draft: 3 `low` drafts per picked idea, with the packshot as the reference.
-6. Pick (D2, Claude): judge each draft against §2 first, craft second. Pick one per idea with `picks_save`, then `final_render`, then `compose_final`.
-7. When a final fails §2, say so in the report. Do not send it.
+5. Draft: 3 `low` drafts per picked idea, with the packshot as the reference. When the ad shows food, also pass the kit's texture photo and put the kit's food words in the prompt. Say in the prompt that the texture photo is a texture cue only: do not copy its amount of food or its state.
+6. Pick (D2, Claude): judge each draft against §2 first, craft second. Pick one per idea with `picks_save`, then `final_render`.
+7. Food truth (§6): `food_fix` on every final that shows food, then the food check. Repeat until the food matches. Then `compose_final`.
+8. When a final fails §2, say so in the report. Do not send it.
+
+## 6. Real food (owner, 07-11-2026)
+
+The food must look like the real product. In W46b every final showed the caramel Pop Barley as round balls with leopard spots. The real kernels are lumpy, split open, with a crackled caramel net. A one-line prompt instruction did not fix it reliably, so food has its own stage.
+
+1. **Kit.** Each food brand's kit has texture photos (real close-ups) and `food`: the real food in words, written once from those photos. Say the shape, the surface, the colour, how the pieces sit, and what it must never look like. Save it with `brand_save`.
+2. **Drafts.** Pass the texture photo with the packshot, and put the kit's food words in the prompt.
+3. **`food_fix`.** On every finished final that shows food, give boxes around all the food (also the food inside a jar). The server builds a mask. Only the area outside the boxes is protected: text, glass, reflections, labels or props inside a box can change, so keep the boxes tight and check those parts in the food check. The references are the final, the texture photos and the packshot. The texture photo is a texture cue only: the amount of food and its state (heap, jar fill level, crumbs) come from the final, not from the photo.
+4. **Food check.** Crop the food at full size and put it next to the texture photo. Fail it when you see repeated identical shapes, perfect spheres, a dot or spot pattern, gloss the photo does not show, the wrong colour, or a painted look. Also fail it when a text, label, glass edge or prop inside a box changed. On a fail, run `food_fix` again on the new key, with tighter boxes or more `keep` detail. Never pass food you did not compare.
+5. **Compose.** Run `compose_final` only on the version that passed the food check.
+
