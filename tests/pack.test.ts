@@ -223,6 +223,14 @@ describe("client portal", () => {
     expect(r.headers.get("content-security-policy")).toMatch(/font-src 'self'/);
   });
 
+  it("shows the fact check as one card per number, not a table, so a phone screen does not break the numbers", async () => {
+    const { env, path } = await published();
+    const html = await (await get(env, path)).text();
+    expect(html).not.toContain("<table");
+    expect(html).toContain('<ul class="facts">');
+    expect(html).toMatch(/<li><span class="n">8\.90<\/span><p class="what"><b>Price:<\/b> S\$8\.90 a jar<\/p><p class="q muted">"Caramel Pop Barley 70g S\$8\.90"<\/p><span class="src"><a href="https:\/\/b\.example\/p"/);
+  });
+
   it("serves the page font from the Worker, as a woff2 file", async () => {
     const { fontResponse, FONT_PATH } = await import("../worker/font");
     const { default: entry } = await import("../worker/entry");
