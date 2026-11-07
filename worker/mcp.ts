@@ -11,6 +11,7 @@ import * as results from "./results";
 import { brandBySlug, brandGet, brandList, brandSave, latestKit, SLUG } from "./brand";
 import { composeFinal, finalAttach } from "./compose";
 import { foodFix, regionFix } from "./food";
+import { brandExtract } from "./brandextract";
 import * as exa from "./exa";
 import { promptGet, promptList } from "./prompts";
 import * as pack from "./pack";
@@ -84,6 +85,18 @@ export const TOOLS: Tool[] = [
       additionalProperties: false,
     },
     run: async (env, a) => text({ note: UNTRUSTED, pages: await exa.contents(env, a.urls, a.maxCharacters) }),
+  },
+  {
+    name: "brand_extract",
+    description:
+      "Read a brand's home page (HTTPS) and return CANDIDATES for the kit: colours used in its CSS (brand colours and neutrals, with counts), fonts, logo and icon image URLs, the share image, title and description. It reads the page source without a browser, so a page built by script shows less (see warnings). It saves nothing: you choose, then call brand_save.",
+    inputSchema: {
+      type: "object",
+      properties: { url: { type: "string", format: "uri", pattern: "^https://" } },
+      required: ["url"],
+      additionalProperties: false,
+    },
+    run: async (_env, a) => text(await brandExtract({ url: a.url })),
   },
   {
     name: "brand_save",

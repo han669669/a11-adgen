@@ -82,7 +82,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 
 | Group | Tools |
 |---|---|
-| Brand | `brand_extract`, `brand_get`, `brand_save_version` |
+| Brand | `brand_extract` (built: fetch-based), `brand_get`, `brand_save_version` |
 | Subject | `product_read`, `facts_save`, `redesign_get` |
 | Research | `exa_search`, `exa_contents`, `adlibrary_fetch` (later; paid, asks first) |
 | Ideas | `ideas_save`, `ideas_pick_save` |
