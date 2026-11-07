@@ -1,6 +1,6 @@
 import { brandBySlug } from "./brand";
 import type { Env } from "./env";
-import { readCapped } from "./images";
+import { readCapped, TooLargeError } from "./images";
 import { packByToken } from "./pack";
 
 const now = () => new Date().toISOString();
@@ -22,8 +22,9 @@ export async function commentAdd(env: Env, request: Request, token: string): Pro
   let raw: string;
   try {
     raw = new TextDecoder().decode(await readCapped(request, "The comment", FORM_MAX_BYTES));
-  } catch {
-    return { ok: false, status: 413, message: "That is too long." };
+  } catch (e) {
+    if (e instanceof TooLargeError) return { ok: false, status: 413, message: "That is too long." };
+    throw e;
   }
   const form = new URLSearchParams(raw);
   // Keep new lines, drop other control characters.
