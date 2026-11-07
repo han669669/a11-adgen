@@ -73,7 +73,7 @@ describe("pack_publish", () => {
     const { b, finals } = await seed(env, raw, files);
     const r = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy() }, { renderId: finals[1]!, ...copy() }], at: new Date("2026-11-07T04:00:00Z") });
     expect(r.version).toBe(1);
-    expect(r.adNames).toEqual(["a11_W45_wongi_tof_c01_v1", "a11_W45_wongi_bof_c02_v1"]);
+    expect(r.adNames).toEqual(["a11_W45_wongi_b01_tof_c01_v1", "a11_W45_wongi_b01_bof_c02_v1"]);
     expect(r.link).toMatch(/^https:\/\/w\/c\/[0-9a-f]{48}$/);
     expect(r.numbersChecked).toBe(2);
     const stored = raw.prepare("SELECT token_hash, content FROM packs").get() as { token_hash: string; content: string };
@@ -147,6 +147,31 @@ describe("pack_publish", () => {
     expect(y.adNames[0]).toMatch(new RegExp(`_v${y.version}$`));
   });
 
+  it("keeps two batches of one brand in one week apart, with the batch number in the ad name", async () => {
+    const { env, raw, files } = makeEnv();
+    const first = await seed(env, raw, files);
+    const subjectId = (raw.prepare("SELECT subject_id AS s FROM batches WHERE id = ?").get(first.b.id) as { s: string }).s;
+    const second = await batch.batchCreate(env, { brandSlug: "won-gi", subjectId, label: "W45b" });
+    raw.prepare("UPDATE batches SET created_at = ? WHERE id = ?").run("2026-11-02T01:00:00.000Z", first.b.id); // fixed times: the order does not depend on the clock
+    raw.prepare("UPDATE batches SET created_at = ? WHERE id = ?").run("2026-11-03T01:00:00.000Z", second.id);
+    const [idea] = await batch.ideasSave(env, second.id, [{ format: "tof", insight: "jar empties fast", visual: "empty jar", headline: "Gone by noon.", picked: true }]);
+    const id = "bbbbbbbb-bbbb-bbbb-bbbb-000000000000";
+    raw
+      .prepare(
+        `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, image_keys, composed_key, usd_est, created_at, updated_at)
+         VALUES (?, ?, ?, 'final', 'done', 'p', '[]', 1536, 1920, 'high', 1, ?, ?, 0.06, 'now', 'now')`,
+      )
+      .run(id, second.id, idea!.id, JSON.stringify([`renders/${id}/1.jpg`]), `renders/${id}/1-c1.jpg`);
+    files.set(`renders/${id}/1-c1.jpg`, "jpeg-b");
+    const at = new Date("2026-11-07T04:00:00Z");
+    const a = await pack.packPublish(env, { batchId: first.b.id, ads: [{ renderId: first.finals[0]!, ...copy() }], at });
+    const b = await pack.packPublish(env, { batchId: second.id, ads: [{ renderId: id, ...copy() }], at });
+    const a2 = await pack.packPublish(env, { batchId: first.b.id, ads: [{ renderId: first.finals[0]!, ...copy() }], at });
+    expect(a.adNames[0]).toBe("a11_W45_wongi_b01_tof_c01_v1"); // both batches: idea 1, version 1, same week
+    expect(b.adNames[0]).toBe("a11_W45_wongi_b02_tof_c01_v1");
+    expect(a2.adNames[0]).toBe("a11_W45_wongi_b01_tof_c01_v2"); // a later pack of the first batch keeps its number
+  });
+
   it("reads numbers and the ISO week", () => {
     expect(pack.numbersIn("S$8.90 a jar, 70g, 1,000 now. Free from S$35.")).toEqual(["8.90", "70", "1,000", "35"]);
     expect(pack.isoWeek(new Date("2026-01-01T00:00:00Z"))).toBe(1);
@@ -158,8 +183,8 @@ describe("pack_publish", () => {
     const { b, finals } = await seed(env, raw, files);
     const sunday = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy() }], at: new Date("2026-11-08T15:59:00Z") });
     const monday = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy() }], at: new Date("2026-11-08T16:00:00Z") });
-    expect(sunday.adNames[0]).toBe("a11_W45_wongi_tof_c01_v1");
-    expect(monday.adNames[0]).toBe("a11_W46_wongi_tof_c01_v2");
+    expect(sunday.adNames[0]).toBe("a11_W45_wongi_b01_tof_c01_v1");
+    expect(monday.adNames[0]).toBe("a11_W46_wongi_b01_tof_c01_v2");
     expect(pack.isoWeek(pack.singaporeClock(new Date("2026-11-16T00:00:00Z")))).toBe(47);
   });
 });

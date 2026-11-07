@@ -72,7 +72,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 |---|---|
 | 4 finals | 4:5, 1536x1920, JPEG and PNG |
 | Meta text | Primary text (first 125 characters show), headline (about 40 characters), description, CTA button; 2 variants each |
-| Ad names | Fixed format, for example `a11_W46_catfiddle_hook_c03_v1`. The client uses these names, so results map back with no manual work. |
+| Ad names | Fixed format, for example `a11_W46_catfiddle_b01_hook_c03_v1` (week, brand, the brand's batch number, stage, idea, version). The client uses these names, so results map back with no manual work. |
 | Why each ad | One line: the buyer truth and its source |
 | Launch plan | One ad set, all 4 ads, 72 hours, the kill rule |
 | Fact check | Every claim and its source; HSA-safe note for health products |
