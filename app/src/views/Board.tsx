@@ -71,7 +71,8 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
   const savedIdeas = new Set(batch.picks.map((p) => p.ideaId));
   // The button works when the screen differs from what is saved, so a saved pick can also be cleared.
   const savedKeys = new Set(batch.picks.filter((p) => p.byOwner && !p.finalRenderId).map((p) => p.key));
-  const dirty = toSave.length !== savedKeys.size || toSave.some((k) => !savedKeys.has(k));
+  const savedNotes = new Map(batch.picks.map((p) => [p.key, p.note ?? ""]));
+  const dirty = toSave.length !== savedKeys.size || toSave.some((k) => !savedKeys.has(k) || (picks.get(k) ?? "") !== (savedNotes.get(k) ?? ""));
 
   // One draft per idea: tapping another draft of the same idea swaps the pick.
   function toggle(idea: Idea, key: string) {

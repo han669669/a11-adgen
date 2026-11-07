@@ -98,6 +98,16 @@ describe("web app accounts", () => {
     expect((await call(env, "/api/me", { cookie })).status).toBe(401);
   });
 
+  it("saves picks only from a list: a missing field is refused, an empty list clears", async () => {
+    const { env } = makeEnv();
+    const cookie = cookieOf(await call(env, "/api/signup", { body: signupBody }));
+    const path = "/api/batches/11111111-1111-1111-1111-111111111111/picks";
+    const bad = await call(env, path, { body: { pick: [] }, cookie });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: "Send picks as a list." });
+    expect((await call(env, path, { body: { picks: [] }, cookie })).status).toBe(200);
+  });
+
   it("refuses a second sign-up for the same email", async () => {
     const { env } = makeEnv();
     await call(env, "/api/signup", { body: signupBody });

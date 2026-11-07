@@ -6,7 +6,7 @@ The design of `a11-adgen`, version 2 (2026-11-06 SGT). It includes the owner's d
 
 ## 1. The idea in one line
 
-Claude Code is the brain. Cloudflare is the hands. The owner touches nothing in a batch (D2, 07-11-2026). He judges the finished ads.
+Claude Code is the brain. Cloudflare is the hands. The owner picks 1 draft per idea in each batch (D2, second change, 07-11-2026) and judges the finished ads. He picks no ideas.
 
 ## 2. Parts
 
@@ -87,7 +87,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | Research | `exa_search`, `exa_contents`, `adlibrary_fetch` (later; paid, asks first) |
 | Ideas | `ideas_save`, `ideas_pick_save` |
 | Images | `render_drafts`, `render_edit`, `render_final`, `image_get` (returns the image) |
-| Human step | `final_picks_get` (reads the owner's picks from the board), `picks_save` (saves his picks with his own words) |
+| Human step | `picks_save` (saves the owner's draft picks with his own words; the board saves the same picks) |
 | Memory | `taste_log` (his picks and passes with the critic's rank), `canon_get`, `canon_update`, `swipe_search`, `picks_get`, `results_get` |
 | Ops | `batch_status`, `spend_get`, `pack_publish` |
 

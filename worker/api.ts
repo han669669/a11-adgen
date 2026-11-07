@@ -114,7 +114,9 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
     m = path.match(new RegExp(`^/api/batches/(${UUID})/picks$`));
     if (m && method === "POST") {
       const b = await body(request);
-      const picks = Array.isArray(b.picks) ? b.picks : [];
+      // An empty list clears the picks that have no final yet, so a missing or misnamed field must not look like one.
+      if (!Array.isArray(b.picks)) return fail(400, "Send picks as a list.");
+      const picks = b.picks;
       if (picks.length > 8) return fail(400, "Pick 0 to 8 drafts (none clears the picks that have no final yet).");
       const clean = picks.map((p: any) => {
         if (typeof p?.key !== "string" || !DRAFT_KEY.test(p.key)) throw new AuthError("Bad draft key.", 400);
