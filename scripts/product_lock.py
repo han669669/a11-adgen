@@ -256,6 +256,39 @@ def vary_food(a):
         print(f"{a.out_prefix}{k}.jpg" + (" (the photo unchanged)" if k == 1 else ""))
 
 
+def heal(a):
+    """Close a dark gap inside the kernel pile. Kernels in a jar rest on each other under gravity, so a black void with a glare streak
+    across the pile reads as unphysical (owner, W46c v10: kernels "have to reflect real life physics"). The gap's rows are replaced with
+    the same-size block of kernels from --donor-y, mirrored by default, with a feathered border. Run it on the graded packshot, before
+    vary-food and the lock."""
+    img = Image.open(a.packshot).convert("RGB")
+    arr = np.asarray(img).astype(float)
+    H, W = arr.shape[:2]
+    x0, y0, x1, y1 = ints(a.region, 4)
+    h, w = y1 - y0, x1 - x0
+    if not (0 <= x0 < x1 <= W and 0 <= y0 < y1 <= H):
+        sys.exit(f"--region {a.region} is outside the packshot ({W}x{H})")
+    if not (0 <= a.donor_y and a.donor_y + h <= H):
+        sys.exit(f"--donor-y {a.donor_y} with height {h} is outside the packshot")
+    if a.donor_y < y1 and a.donor_y + h > y0:
+        sys.exit("--donor-y block overlaps the region: pick kernel rows outside the gap")
+    donor = arr[a.donor_y:a.donor_y + h, x0:x1].copy()
+    if not a.no_flip:
+        donor = donor[:, ::-1]
+    f = min(a.feather, h // 2 - 1, w // 2 - 1)
+    mask = np.ones((h, w))
+    for i in range(f):
+        k = (i + 1) / (f + 1)
+        mask[i] *= k
+        mask[h - 1 - i] *= k
+        mask[:, i] *= k
+        mask[:, w - 1 - i] *= k
+    out = arr.copy()
+    out[y0:y1, x0:x1] = arr[y0:y1, x0:x1] * (1 - mask[..., None]) + donor * mask[..., None]
+    Image.fromarray(out.clip(0, 255).astype("uint8")).save(a.out, quality=95)
+    print(f"{a.out}: rows {y0}-{y1}, x {x0}-{x1} patched from y {a.donor_y}" + (" (not mirrored)" if a.no_flip else " (mirrored)"))
+
+
 def relight(a):
     """Make a pasted pack take the scene's light, so it does not look pasted: side shading across the cylinder (dark on the side away
     from the light), a soft fall-off at the edges, bounce light from the floor colour on the lower part, and a contact shadow
@@ -313,6 +346,14 @@ def main():
     r.add_argument("--contact-blur", type=float, default=9)
     r.add_argument("--out", required=True)
     r.set_defaults(fn=relight)
+    h = sub.add_parser("heal", help="close a dark gap inside the kernel pile with kernels from rows nearby (kernels must rest on each other)")
+    h.add_argument("--packshot", required=True)
+    h.add_argument("--region", required=True, help="x0,y0,x1,y1 of the gap, with a margin")
+    h.add_argument("--donor-y", type=int, required=True, help="top row of a same-size block of kernels to copy from (outside the gap)")
+    h.add_argument("--no-flip", action="store_true", help="do not mirror the donor block")
+    h.add_argument("--feather", type=int, default=8)
+    h.add_argument("--out", required=True)
+    h.set_defaults(fn=heal)
     v = sub.add_parser("vary-food", help="N copies of a packshot with differently arranged kernels (for a row of identical packs)")
     v.add_argument("--packshot", required=True)
     v.add_argument("--region", action="append", required=True, help="x0,y0,x1,y1 of a food area; repeat for each")
