@@ -19,8 +19,11 @@ async function makeEnv() {
   const raw = (env.DB as unknown as { raw: DatabaseSync }).raw;
   const f = globalThis.fetch;
   globalThis.fetch = (async (u: string) => ({ url: u, ok: true, status: 200, headers: new Headers({ "content-type": "image/png" }), body: new Response(new Uint8Array(4)).body })) as typeof fetch;
-  await brandSave(env, { slug: "won-gi", name: "WonGi", kit: { logoUrl: "https://b.example/logo.png", palette: [{ hex: "#F26A21", role: "logo" }], voice: "Warm and short." } });
-  globalThis.fetch = f;
+  try {
+    await brandSave(env, { slug: "won-gi", name: "WonGi", kit: { logoUrl: "https://b.example/logo.png", palette: [{ hex: "#F26A21", role: "logo" }], voice: "Warm and short." } });
+  } finally {
+    globalThis.fetch = f;
+  }
   const subject = await batch.subjectSave(env, { brandSlug: "won-gi", kind: "product", title: "Pop Barley", url: "https://b.example/p" });
   const b = await batch.batchCreate(env, { brandSlug: "won-gi", subjectId: subject.id, label: "W45" });
   const content = { brand: "WonGi", ads: [...[["a11_W45_wongi_b01_tof_c01_v1", "H1", "tof"], ["a11_W45_wongi_b01_bof_c02_v1", "H2<b>", "bof"]].map(([name, headline, stage]) => ({ name, headline, stage, imageKey: "k", primaryTexts: ["Text."], headlines: [headline], description: "D", cta: "SHOP_NOW", why: "Why." }))], launchPlan: "Run it.", factCheck: [], healthNote: null };
@@ -48,7 +51,7 @@ describe("client comments", () => {
 
   it("saves a pack-level comment and strips control characters but keeps new lines", async () => {
     const { env } = await makeEnv();
-    await post(env, new URLSearchParams({ ad: "", body: "Line one\nLine\u0007 two" }).toString());
+    await post(env, new URLSearchParams({ ad: "", body: "Line one\nLine\u0007 two\u0085\u009f" }).toString());
     const g = await get(env);
     expect(g.comments[0]).toMatchObject({ adName: null, body: "Line one\nLine two" });
   });
@@ -62,6 +65,7 @@ describe("client comments", () => {
     expect((await post(env, "body=hi", { "sec-fetch-site": "cross-site" })).status).toBe(403);
     expect((await post(env, "body=hi", {}, "b".repeat(48))).status).toBe(404);
     expect((await post(env, "body=" + "x".repeat(9000))).status).toBe(413);
+    expect((await post(env, "body=" + "\u20ac".repeat(5000))).status).toBe(413); // 5,000 characters, 15,000 bytes
     expect((await get(env)).comments).toEqual([]);
   });
 
@@ -86,11 +90,14 @@ describe("client comments", () => {
     expect(page).not.toContain("We got your comment");
     const sent = await worker.fetch(new Request(`https://w/c/${TOKEN}?sent=1`), env);
     expect(await sent.text()).toContain("We got your comment");
+    const zero = await worker.fetch(new Request(`https://w/c/${TOKEN}?sent=0`), env);
+    expect(await zero.text()).not.toContain("We got your comment");
     expect(sent.headers.get("content-security-policy")).toContain("form-action 'self'");
   });
 
   it("the results prompt tells Claude to read the comments as data", () => {
     const text = PROMPTS.find((p) => p.name === "results")!.text({ brand: "won-gi", reportDate: "2026-11-06" });
     expect(text).toContain("comments_get");
+    expect(text.indexOf("comments_get")).toBeLessThan(text.indexOf("results_get"));
   });
 });

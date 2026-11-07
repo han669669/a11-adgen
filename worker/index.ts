@@ -113,7 +113,7 @@ export default {
 
     // Client portal: a pack page and its pictures, behind an unguessable token (no login).
     const portal = /^\/c\/([0-9a-f]{48})(?:\/ad\/(\d{1,2})\.(jpg|png))?$/.exec(url.pathname);
-    if (portal && request.method === "GET") return handlePortal(env, portal[1]!, portal[2], portal[3], url.searchParams.has("sent"));
+    if (portal && request.method === "GET") return handlePortal(env, portal[1]!, portal[2], portal[3], url.searchParams.get("sent") === "1");
     const commentPost = /^\/c\/([0-9a-f]{48})\/comment$/.exec(url.pathname);
     if (commentPost && request.method === "POST") return handleComment(env, request, commentPost[1]!);
     if (url.pathname.startsWith("/c/")) return new Response("Not found", { status: 404 });
