@@ -134,6 +134,6 @@ describe("results ledger", () => {
   it("has a results prompt that points to the three tools", () => {
     const p = PROMPTS.find((x) => x.name === "results")!;
     const text = p.text({ brand: "won-gi", reportDate: "2026-11-06" });
-    for (const w of ["baseline_save", "results_save", "results_get", "30 percent new angles", "canon_get", "Never send"]) expect(text).toContain(w);
+    for (const w of ["baseline_save", "results_save", "results_get", "30 percent new angles", "50 percent big changes on winners", "20 percent small changes", "canon_get", "Never send"]) expect(text).toContain(w);
   });
 });
