@@ -3,7 +3,7 @@ import { inflateSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../worker/env";
 import { check } from "../worker/fal";
-import { foodFix } from "../worker/food";
+import { foodFix, regionFix } from "../worker/food";
 import worker from "../worker/index";
 import { pasteBack } from "../worker/paste";
 import { maskPng } from "../worker/png";
@@ -227,5 +227,27 @@ describe("paste-back", () => {
     expect((r as { error: string }).error).toContain("paste-back failed");
     expect(saved.has(`renders/${out.id}/1.jpg`)).toBe(false);
     expect(raw.prepare("SELECT status FROM renders WHERE id = ?").get(out.id)).toEqual({ status: "failed" });
+  });
+});
+
+describe("region_fix", () => {
+  it("edits only the boxes with a plain edit prompt: no food words, only the final as reference, a paste plan", async () => {
+    const { env, saved } = makeEnv({ food: "Irregular puffed grains." });
+    const sent = stubFal();
+    const out = await regionFix(env, { key: KEY, boxes: [{ x: 46, y: 29, w: 30, h: 21 }], edit: "Remove the yellow sticky note; show the empty clear jar behind it." });
+    const body = sent[0]!;
+    expect(body.image_urls).toEqual([`https://w/m/${KEY}`]);
+    expect(body.mask_url).toMatch(/\/mask-\d+\.png$/);
+    expect(body.prompt).toContain("The edit: Remove the yellow sticky note");
+    expect(body.prompt).toContain("Add nothing that the edit does not ask for: no food");
+    expect(body.prompt).not.toContain("Irregular puffed grains.");
+    expect(saved.has(`renders/${out.id}/paste.json`)).toBe(true);
+  });
+
+  it("refuses a draft and a box outside the picture", async () => {
+    stubFal();
+    const edit = "Remove the note from the jar.";
+    await expect(regionFix(makeEnv({ kind: "draft" }).env, { key: KEY, boxes: input.boxes, edit })).rejects.toThrow("not a completed final");
+    await expect(regionFix(makeEnv().env, { key: KEY, boxes: [{ x: 90, y: 0, w: 20, h: 5 }], edit })).rejects.toThrow("inside the picture");
   });
 });

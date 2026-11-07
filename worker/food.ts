@@ -27,20 +27,7 @@ export function foodPrompt(food: string, keep: string, textures: number, packsho
 }
 
 export async function foodFix(env: Env, input: { key: string; boxes: Box[]; keep: string }) {
-  const m = RENDER_KEY.exec(input.key);
-  if (!m) throw new Error("key must be a render image key (renders/<id>/<n>.jpg).");
-  const id = m[1]!;
-  checkBoxes(input.boxes);
-  const row = await env.DB.prepare(
-    `SELECT r.batch, r.idea, r.kind, r.status, r.width, r.height, r.image_keys, b.brand_id, b.kit_version
-     FROM renders r JOIN batches b ON b.id = r.batch WHERE r.id = ?`,
-  )
-    .bind(id)
-    .first<{ batch: string; idea: string; kind: string; status: string; width: number; height: number; image_keys: string | null; brand_id: string; kit_version: number }>();
-  if (!row) throw new Error(`No render ${id} in a batch.`);
-  if (row.kind !== "final" || row.status !== "done") throw new Error(`Render ${id} is not a completed final (${row.kind}, ${row.status}).`);
-  if (!(JSON.parse(row.image_keys ?? "[]") as string[]).includes(input.key)) throw new Error(`Render ${id} has no saved image ${input.key}.`);
-
+  const { id, row } = await finalRow(env, input.key, input.boxes);
   // The batch's pinned kit gives the photos. The food words may come from a later kit version (the food does not change).
   const pinned = await latestKit(env, row.brand_id, row.kit_version);
   const latest = await latestKit(env, row.brand_id);
@@ -50,24 +37,78 @@ export async function foodFix(env: Env, input: { key: string; boxes: Box[]; keep
   const textures = refsOf("texture").slice(0, 3);
   if (textures.length === 0) throw new Error("The brand kit has no texture photo (a real close-up of the food).");
   const packshots = refsOf("packshot").slice(0, 6 - 1 - textures.length);
+  return maskedEdit(env, id, row, input.key, input.boxes, foodPrompt(food, input.keep, textures.length, packshots.length), [...textures, ...packshots]);
+}
 
-  const mask = await maskPng(row.width, row.height, input.boxes);
+/**
+ * A plain masked edit of a finished final, for anything that is not the brand's food: remove an AI tell
+ * (a handwritten note, a drip, a filler prop) or repair a small part. food_fix is the wrong tool for this:
+ * its food words make fal paint food in the box (W46b: removing a sticky note filled the empty jar with kernels).
+ * Same mask and paste-back as food_fix; the only reference is the final itself.
+ */
+export function regionPrompt(edit: string): string {
+  return [
+    "Image 1 is a finished ad. Edit only the white area of the mask. Keep everything in the black area exactly as it is: every text, label, prop, shadow and the light.",
+    `The edit: ${edit.trim()}`,
+    "Match the light, colour, grain and perspective of the rest of image 1, so the edit shows no edge. Add nothing that the edit does not ask for: no food, text, object or mark.",
+    "A real photograph: no painted or CG look.",
+  ].join("\n\n");
+}
+
+export async function regionFix(env: Env, input: { key: string; boxes: Box[]; edit: string }) {
+  const { id, row } = await finalRow(env, input.key, input.boxes);
+  return maskedEdit(env, id, row, input.key, input.boxes, regionPrompt(input.edit), []);
+}
+
+interface FinalRow {
+  batch: string;
+  idea: string;
+  kind: string;
+  status: string;
+  width: number;
+  height: number;
+  image_keys: string | null;
+  brand_id: string;
+  kit_version: number;
+}
+
+/** The completed final behind an image key, with checks shared by food_fix and region_fix. */
+async function finalRow(env: Env, key: string, boxes: Box[]): Promise<{ id: string; row: FinalRow }> {
+  const m = RENDER_KEY.exec(key);
+  if (!m) throw new Error("key must be a render image key (renders/<id>/<n>.jpg).");
+  const id = m[1]!;
+  checkBoxes(boxes);
+  const row = await env.DB.prepare(
+    `SELECT r.batch, r.idea, r.kind, r.status, r.width, r.height, r.image_keys, b.brand_id, b.kit_version
+     FROM renders r JOIN batches b ON b.id = r.batch WHERE r.id = ?`,
+  )
+    .bind(id)
+    .first<FinalRow>();
+  if (!row) throw new Error(`No render ${id} in a batch.`);
+  if (row.kind !== "final" || row.status !== "done") throw new Error(`Render ${id} is not a completed final (${row.kind}, ${row.status}).`);
+  if (!(JSON.parse(row.image_keys ?? "[]") as string[]).includes(key)) throw new Error(`Render ${id} has no saved image ${key}.`);
+  return { id, row };
+}
+
+/** Mask PNG + paste plan + fal edit: only the boxes of the result are kept (paste.ts). */
+async function maskedEdit(env: Env, id: string, row: FinalRow, key: string, boxes: Box[], prompt: string, refs: string[]) {
+  const mask = await maskPng(row.width, row.height, boxes);
   const maskKey = `renders/${id}/mask-${Date.now()}${crypto.getRandomValues(new Uint32Array(1))[0]}.png`;
   await env.MEDIA.put(maskKey, mask, { httpMetadata: { contentType: "image/png" } });
   const maskUrl = fal.mediaUrl(env, maskKey);
   // The paste plan exists before fal accepts the render, so no poll can save the result without it.
   const renderId = crypto.randomUUID();
-  const plan: PastePlan = { source: input.key, width: row.width, height: row.height, boxes: input.boxes };
+  const plan: PastePlan = { source: key, width: row.width, height: row.height, boxes };
   await env.MEDIA.put(pasteKey(renderId), JSON.stringify(plan), { httpMetadata: { contentType: "application/json" } });
   const out = await fal.submit(env, {
     batch: row.batch,
     idea: row.idea,
     kind: "final",
-    prompt: foodPrompt(food, input.keep, textures.length, packshots.length),
-    referenceUrls: [fal.mediaUrl(env, input.key), ...textures, ...packshots],
+    prompt,
+    referenceUrls: [fal.mediaUrl(env, key), ...refs],
     numImages: 1,
     maskUrl,
     id: renderId,
   });
-  return { ...out, source: input.key, maskUrl };
+  return { ...out, source: key, maskUrl };
 }
