@@ -10,12 +10,12 @@ Needs Python 3 with Pillow, numpy and OpenCV (opencv-python-headless). Runs in t
 
   python3 scripts/box_print.py --config box_print.cat-and-the-fiddle.json --render final.jpg --out final-print.jpg [--debug mask.jpg]
 
---render must show the packshot's printed face (same product, a similar angle: SIFT matches the two). Run it on the final, before compose_final.
+--render must show the packshot's printed face (same product, a similar angle: SIFT matches the two). Run it on a final, never on a draft. The Worker has no step yet to take the repaired picture back into a pack (creative-playbook.md 7.5).
 Check the result at full size next to the packshot (creative-playbook.md 7.5).
 
 The config is one JSON file per product (keep it next to the brand's kit notes):
 
-  packshot   path to the real packshot (the photo of the box)
+  packshot   path to the real packshot (the photo of the box). A relative path (here and in font) is read from the config file's folder
   face       x0,y0,x1,y1 of the printed face in the packshot (feature matching looks only there)
   font       path to a variable TTF, only for a block that is re-set in type (a font file is not stored in this repo)
   wght       the font's weight axis value
@@ -23,13 +23,15 @@ The config is one JSON file per product (keep it next to the brand's kit notes):
     box      x0,y0,x1,y1 of the block in the packshot (pixels)
     thr      [lo, hi, blur]: the ink threshold. Default [0.40, 0.60, 0.6]. Condensed caps need a tighter cut: [0.50, 0.66, 0.42]
     xmin     (optional) ignore ink left of this packshot x (the box's own edge line)
-    band     (optional) [[x,y],[x,y],half_width]: the centre line of a line of text, so a box edge under it is not read as ink
+    band     [[x,y],[x,y],half_width]: the centre line of a line of text, so a box edge under it is not read as ink.
+             Optional, but required when the block has typeset
     typeset  (optional) {"text": "...", "lean": degrees}: re-set the block in type, on the baseline measured from the photo's ink.
              Use it when the packshot is too small to show the real letters. "lean" is the stem lean of the print in the photo
              (top to the right, in degrees; measured on a real line of the same box).
 """
 import argparse
 import json
+import os
 import sys
 
 import cv2
@@ -41,7 +43,10 @@ DEFAULT_THR = (0.40, 0.60, 0.6)
 
 
 def load_font(path, size, wght):
-    f = ImageFont.truetype(path, size)
+    try:
+        f = ImageFont.truetype(path, size)
+    except OSError:
+        sys.exit(f"Cannot read the font: {path}")
     try:
         f.set_variation_by_axes([wght])
     except OSError:  # a static font has no axes
@@ -58,6 +63,9 @@ class Box:
         self.font = cfg.get("font")
         self.wght = cfg.get("wght", 400)
         self.blocks = cfg["blocks"]
+        for i, b in enumerate(self.blocks):
+            if "typeset" in b and "band" not in b:
+                sys.exit(f"Block {i} has typeset but no band. A typeset block needs band.")
 
     def register(self, F):
         """Homography from the packshot to the render, from SIFT matches on the printed face only."""
@@ -69,16 +77,19 @@ class Box:
         sift = cv2.SIFT_create(nfeatures=4000)
         k1, d1 = sift.detectAndCompute(g1, m)
         k2, d2 = sift.detectAndCompute(g2, None)
+        if d1 is None or d2 is None:
+            sys.exit("No image features found in the packshot face or in the render. Check the face box and the render.")
         pairs = cv2.BFMatcher(cv2.NORM_L2).knnMatch(d1, d2, k=2)
-        good = [a for a, b in pairs if a.distance < 0.8 * b.distance]
+        good = [p[0] for p in pairs if len(p) == 2 and p[0].distance < 0.8 * p[1].distance]
         if len(good) < 8:
             sys.exit(f"Only {len(good)} feature matches between the packshot and the render. The render must show the printed face.")
         src = np.float32([k1[a.queryIdx].pt for a in good])
         dst = np.float32([k2[a.trainIdx].pt for a in good])
         H, inl = cv2.findHomography(src, dst, cv2.RANSAC, 6.0)
-        if H is None:
-            sys.exit("Could not fit a homography between the packshot and the render.")
-        print("matches", len(good), "inliers", int(inl.sum()))
+        n_in = 0 if inl is None else int(inl.sum())
+        if H is None or not np.isfinite(H).all() or n_in < max(8, len(good) // 3):
+            sys.exit(f"Could not fit the packshot to the render: {n_in} inliers of {len(good)} matches. The render must show the printed face at a similar angle.")
+        print("matches", len(good), "inliers", n_in)
         return H
 
     def ink_alpha(self, i, lo=None, hi=None, raw=False):
@@ -88,7 +99,9 @@ class Box:
         tlo, thi, tbl = b.get("thr", DEFAULT_THR)
         lo = tlo if lo is None else lo
         hi = thi if hi is None else hi
-        g = cv2.cvtColor(self.pack, cv2.COLOR_BGR2GRAY)[y0 - 12:y1 + 12, x0 - 12:x1 + 12].astype(np.float32)
+        ph, pw = self.pack.shape[:2]
+        cx0, cy0 = max(x0 - 12, 0), max(y0 - 12, 0)  # the crop stays inside the packshot; (cx0, cy0) is its origin
+        g = cv2.cvtColor(self.pack, cv2.COLOR_BGR2GRAY)[cy0:min(y1 + 12, ph), cx0:min(x1 + 12, pw)].astype(np.float32)
         g = cv2.resize(g, None, fx=K, fy=K, interpolation=cv2.INTER_CUBIC)
         bg = cv2.morphologyEx(g, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9 * K + 1, 9 * K + 1)))
         bg = cv2.GaussianBlur(bg, (0, 0), 6 * K)
@@ -97,12 +110,12 @@ class Box:
         if "band" in b:
             (ax, ay), (bx, by), hw = b["band"]
             m = np.zeros(g.shape, np.uint8)
-            p0 = (int((ax - (x0 - 12)) * K), int((ay - (y0 - 12)) * K))
-            p1 = (int((bx - (x0 - 12)) * K), int((by - (y0 - 12)) * K))
+            p0 = (int((ax - cx0) * K), int((ay - cy0) * K))
+            p1 = (int((bx - cx0) * K), int((by - cy0) * K))
             cv2.line(m, p0, p1, 255, int(2 * hw * K))
             m = cv2.GaussianBlur(m.astype(np.float32) / 255, (0, 0), 1.2 * K)
         if "xmin" in b:
-            m[:, :int((b["xmin"] - (x0 - 12)) * K)] = 0
+            m[:, :int((b["xmin"] - cx0) * K)] = 0
         d0 = d0 * m
         ref = np.percentile(d0[m > 0.5], 99.5)
         loc = cv2.dilate(d0, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (4 * K + 1, 4 * K + 1)))  # strongest ink within 4 px: each stroke is judged against its neighbours
@@ -113,7 +126,7 @@ class Box:
         a = a * a * (3 - 2 * a)
         if "typeset" in b and not raw:
             return self.typeset(i)
-        return a * m, (x0 - 12, y0 - 12)
+        return a * m, (cx0, cy0)
 
     def typeset(self, i):
         """Block i re-set in type, on the baseline measured from the photo's own ink."""
@@ -234,7 +247,8 @@ def run(cfg, src, dst, debug=None):
     inkc = np.median(F[sel], axis=0).astype(np.float32)
     A = cv2.GaussianBlur(amap, (0, 0), 0.45)[..., None] * 0.97
     res = np.clip(clean * (1 - A) + inkc * A, 0, 255).astype(np.uint8)
-    cv2.imwrite(dst, res, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    if not cv2.imwrite(dst, res, [cv2.IMWRITE_JPEG_QUALITY, 95]):
+        sys.exit(f"Cannot write the output: {dst}")
     if debug:
         cv2.imwrite(debug, np.hstack([cv2.cvtColor(near, cv2.COLOR_GRAY2BGR), cv2.cvtColor(kill, cv2.COLOR_GRAY2BGR)]))
     print(dst, "ink BGR", inkc.round(1).tolist())
@@ -249,6 +263,10 @@ def main():
     a = ap.parse_args()
     with open(a.config) as fh:
         cfg = json.load(fh)
+    here = os.path.dirname(os.path.abspath(a.config))
+    for k in ("packshot", "font"):  # relative paths in the config are read from the config's own folder
+        if cfg.get(k):
+            cfg[k] = os.path.join(here, cfg[k])
     run(cfg, a.render, a.out, a.debug)
 
 
