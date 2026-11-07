@@ -785,7 +785,7 @@ async function handleOne(env: Env, msg: RpcRequest): Promise<object | null> {
       return rpcResult(msg.id, {
         protocolVersion,
         capabilities: { tools: { listChanged: false }, prompts: { listChanged: false } },
-        serverInfo: { ...SERVER_INFO, icons: [{ src: `${new URL(env.PUBLIC_BASE_URL).origin}/icon.png`, mimeType: "image/png", sizes: ["512x512"] }] },
+        serverInfo: SERVER_INFO,
         instructions: INSTRUCTIONS,
       });
     }

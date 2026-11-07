@@ -3,7 +3,7 @@ import type { Env } from "../worker/env";
 import { handleMcp, TOOLS } from "../worker/mcp";
 import { validate } from "../worker/schema";
 
-const env = { PUBLIC_BASE_URL: "https://x.example" } as Env;
+const env = {} as Env;
 const post = (body: unknown) =>
   handleMcp(new Request("https://x/mcp", { method: "POST", body: JSON.stringify(body) }), env);
 
@@ -13,10 +13,6 @@ describe("mcp handler", () => {
     const j: any = await r.json();
     expect(j.result.protocolVersion).toBe("2025-06-18");
     expect(j.result.capabilities.tools).toBeDefined();
-  });
-  it("names the a11 icon in serverInfo", async () => {
-    const j: any = await (await post({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })).json();
-    expect(j.result.serverInfo.icons[0].src).toMatch(/^https:\/\/.+\/icon\.png$/);
   });
   it("returns 202 for a notification", async () => {
     const r = await post({ jsonrpc: "2.0", method: "notifications/initialized" });

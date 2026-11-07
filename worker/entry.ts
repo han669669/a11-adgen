@@ -27,8 +27,8 @@ const mcpHandler = {
 const defaultHandler = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const path = new URL(request.url).pathname;
-    const icon = request.method === "GET" ? iconResponse(path) : null;
-    if (icon) return icon;
+    const icon = request.method === "GET" || request.method === "HEAD" ? iconResponse(path) : null;
+    if (icon) return request.method === "HEAD" ? new Response(null, { status: icon.status, headers: icon.headers }) : icon;
     if (path === "/authorize" || path === "/authorize/signin") return handleAuthorize(request, env);
     return app.fetch(request, env);
   },
