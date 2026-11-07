@@ -39,11 +39,13 @@ export interface SubmitInput {
   numImages: number;
   /** Mask PNG URL: white = edit, black = keep (the food truth stage). */
   maskUrl?: string;
+  /** Render id chosen by the caller, so it can store data for the render before fal accepts it (food_fix paste plan). */
+  id?: string;
 }
 
 export async function submit(env: Env, input: SubmitInput) {
   const size = SIZES[input.kind];
-  const id = crypto.randomUUID();
+  const id = input.id ?? crypto.randomUUID();
   const usd = estimate(input.kind, input.numImages, input.referenceUrls.length);
   const prompt = `${input.prompt.trim()}\n\n${RENDER_SUFFIX}`;
   const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM renders WHERE batch = ?").bind(input.batch).first<{ n: number }>();
@@ -128,8 +130,16 @@ export async function check(env: Env, id: string) {
     if (!file.ok) continue;
     const key = `renders/${id}/${i + 1}.jpg`;
     const raw = await file.arrayBuffer();
-    // A food_fix result keeps the original pixels outside its boxes (food.ts).
-    const merged = row.kind === "final" ? await pasteBack(env, id, raw) : null;
+    // A food_fix result keeps the original outside its boxes (paste.ts). When the paste fails, the render fails:
+    // the raw fal image is never saved in its place.
+    let merged: ArrayBuffer | null = null;
+    if (row.kind === "final") {
+      try {
+        merged = await pasteBack(env, id, raw);
+      } catch (e) {
+        return fail(env, row, `paste-back failed: ${(e as Error).message}`);
+      }
+    }
     await env.MEDIA.put(key, merged ?? raw, {
       httpMetadata: { contentType: merged ? "image/jpeg" : (img.content_type ?? "image/jpeg") },
     });

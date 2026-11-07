@@ -13,16 +13,19 @@ export const pasteKey = (renderId: string) => `renders/${renderId}/paste.json`;
 
 /**
  * For a food_fix render: draw only the boxes of the new image onto the original final.
- * Returns the merged JPEG, or null when the render is not a food fix (no paste plan) or the sizes differ.
+ * Returns the merged JPEG (re-encoded at quality 95, so outside the boxes it is visually the original),
+ * or null when the render has no paste plan (not a food fix). Throws when a plan exists but the merge cannot run.
  */
 export async function pasteBack(env: Env, renderId: string, fixed: ArrayBuffer): Promise<ArrayBuffer | null> {
   const planObj = await env.MEDIA.get(pasteKey(renderId));
   if (!planObj) return null;
   const plan = JSON.parse(await new Response(planObj.body).text()) as PastePlan;
   const info = await env.IMAGES.info(new Blob([fixed]).stream());
-  if (!("width" in info) || info.width !== plan.width || info.height !== plan.height) return null;
+  if (!("width" in info) || info.width !== plan.width || info.height !== plan.height) {
+    throw new Error(`fal returned ${"width" in info ? `${info.width} x ${info.height}` : "an image without a size"}, the final is ${plan.width} x ${plan.height}.`);
+  }
   const source = await env.MEDIA.get(plan.source);
-  if (!source) return null;
+  if (!source) throw new Error(`No source image at ${plan.source}.`);
   let img = env.IMAGES.input(source.body);
   for (const b of plan.boxes) {
     const { x0, x1, y0, y1 } = boxPixels(plan.width, plan.height, b);
