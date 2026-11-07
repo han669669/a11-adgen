@@ -158,7 +158,7 @@ describe("batch flow", () => {
     const hook = got.ideas.find((i) => i.id === ideas[0]!.id)!;
     expect(hook.drafts.map((d) => d.key)).toEqual([keys[1], keys[2], keys[0]]);
     expect(hook.drafts[0]!).toMatchObject({ rank: 1, picked: true, reason: "clean jar" });
-    expect(got.picks).toEqual([{ key: keys[1], ideaId: ideas[0]!.id, note: "yes", finalRenderId: null }]);
+    expect(got.picks).toEqual([{ key: keys[1], ideaId: ideas[0]!.id, note: "yes", byOwner: true, finalRenderId: null }]);
     expect(got.kit?.logo.key).toMatch(/\/logo\.png$/);
   });
 
@@ -200,12 +200,26 @@ describe("batch flow", () => {
     expect((await batch.tasteLog(env)).picks).toEqual([]);
   });
 
+  it("saves ownerSaid as the pick's words and clears unfinished picks on an empty list", async () => {
+    const { env, raw } = makeEnv();
+    const { b, ideas } = await seed(env);
+    const keys = addDraft(raw, b.id, ideas[0]!.id, "88888888-8888-8888-8888-888888888888");
+    const tool = TOOLS.find((t) => t.name === "picks_save")!;
+    await tool.run(env, { batchId: b.id, picks: [{ key: keys[1], ownerSaid: "2" }] });
+    expect((await batch.tasteLog(env)).picks[0]).toMatchObject({ ownerSaid: "2", chosen: { key: keys[1] } });
+    expect((await batch.batchGet(env, b.id)).picks[0]).toMatchObject({ byOwner: true });
+    await batch.picksSave(env, b.id, []);
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM picks").get()).toEqual({ n: 0 });
+  });
+
   it("needs the owner's words for each pick on the MCP picks_save tool", () => {
     const tool = TOOLS.find((t) => t.name === "picks_save")!;
     const key = "renders/11111111-1111-1111-1111-111111111111/1.jpg";
     const args = { batchId: "11111111-1111-1111-1111-111111111111", picks: [{ key }] };
     expect(() => validate(tool.inputSchema as never, args)).toThrow();
     expect(() => validate(tool.inputSchema as never, { ...args, picks: [{ key, ownerSaid: "this one" }] })).not.toThrow();
+    expect(() => validate(tool.inputSchema as never, { ...args, picks: [{ key, ownerSaid: "2" }] })).not.toThrow();
+    expect(() => validate(tool.inputSchema as never, { ...args, picks: [{ key, ownerSaid: "   " }] })).toThrow();
   });
 
   it("refuses to rank or pick a key that is not a finished draft of the batch", async () => {

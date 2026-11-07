@@ -18,7 +18,8 @@ const FORMAT: Record<Idea["format"], string> = {
 
 /** The owner's saved picks only. Nothing is pre-selected: the critic's rank would anchor his taste. */
 function initialPicks(batch: Batch): Map<string, string> {
-  return new Map(batch.picks.map((p) => [p.key, p.note ?? ""]));
+  // Claude's older picks (byOwner false) are not his choice: they never pre-select.
+  return new Map(batch.picks.filter((p) => p.byOwner).map((p) => [p.key, p.note ?? ""]));
 }
 
 export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
@@ -68,6 +69,9 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
   const toSave = [...picks.keys()].filter((k) => !started.has(k));
   const ideas = batch.ideas.filter((i) => i.drafts.length > 0).sort((a, b) => Number(b.picked) - Number(a.picked) || a.n - b.n);
   const savedIdeas = new Set(batch.picks.map((p) => p.ideaId));
+  // The button works when the screen differs from what is saved, so a saved pick can also be cleared.
+  const savedKeys = new Set(batch.picks.filter((p) => p.byOwner && !p.finalRenderId).map((p) => p.key));
+  const dirty = toSave.length !== savedKeys.size || toSave.some((k) => !savedKeys.has(k));
 
   // One draft per idea: tapping another draft of the same idea swaps the pick.
   function toggle(idea: Idea, key: string) {
@@ -166,7 +170,7 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
           <p className="text-body text-muted-foreground">
             {`${picks.size} of ${ideas.length} picked.`}
           </p>
-          <Button disabled={toSave.length === 0} loading={busy} onClick={save}>
+          <Button disabled={!dirty} loading={busy} onClick={save}>
             Save my picks
           </Button>
         </div>

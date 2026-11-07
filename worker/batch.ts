@@ -313,7 +313,7 @@ export async function batchGet(env: Env, id: string) {
       `SELECT id, idea, kind, status, image_keys, composed_key, error, usd_est, created_at FROM renders WHERE batch = ? ORDER BY created_at LIMIT ${MAX_BATCH_RENDERS}`,
     ).bind(id).all<Record<string, any>>(),
     env.DB.prepare("SELECT render_key, idea_id, rank, reason FROM draft_ranks WHERE batch_id = ? LIMIT 200").bind(id).all<Record<string, any>>(),
-    env.DB.prepare("SELECT render_key, idea_id, note, final_render_id, created_at FROM picks WHERE batch_id = ? LIMIT 100").bind(id).all<Record<string, any>>(),
+    env.DB.prepare("SELECT render_key, idea_id, note, by_owner, final_render_id, created_at FROM picks WHERE batch_id = ? LIMIT 100").bind(id).all<Record<string, any>>(),
     latestKit(env, b.brand_id, b.kit_version),
   ]);
   const rankBy = new Map(ranks.results.map((r) => [r.render_key, r]));
@@ -357,7 +357,7 @@ export async function batchGet(env: Env, id: string) {
           composeError: r.composed_key?.startsWith("error:") ? r.composed_key.slice(6) : null,
         })),
     })),
-    picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, finalRenderId: p.final_render_id })),
+    picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, byOwner: p.by_owner === 1, finalRenderId: p.final_render_id })),
     drafting: renders.results.filter((r) => r.status === "queued").map((r) => r.id),
   };
 }

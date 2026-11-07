@@ -47,8 +47,8 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | 5 | Idea burst | CLAUDE writer | 20 to 30 ideas. Each = insight + visual idea + headline + funnel job. With results: 30% new angles, 50% big changes on winners, 20% small changes. With no results: all new. |
 | 6 | Idea pick | CLAUDE critic | A separate critic subagent (fresh context) picks 3: one per funnel stage (tof, mof, bof), all different enough for Meta. The option B test and the owner gate first (`docs/creative-playbook.md` §2, `docs/taste-seed.md` §2). No human. |
 | 7 | Drafts | PAID fal | 3 drafts per idea. `edit` endpoint, `quality: low`, 1024x1280, packshot and logo as references. |
-| 8 | Draft check | CLAUDE, CODE | Claude looks at each draft. Code compares the read text with the approved copy. One fix edit per idea when needed. The critic ranks the drafts. |
-| 9 | Final pick | CLAUDE critic | Claude picks one draft per picked idea against `docs/creative-playbook.md` §2 and starts the finals (`picks_save`, `final_render`). No human (D2, 07-11-2026). The owner can still pick on the board. |
+| 8 | Draft check | CLAUDE, CODE | Claude looks at each draft. Code compares the read text with the approved copy. One fix edit per idea when needed. The critic reads `taste_log`, then ranks the drafts blind (`drafts_rank`). |
+| 9 | Draft pick | HAN | Claude stops and shows the 3 drafts of each idea (chat or the board), with no rank. The owner picks 1 per idea, or none (D2, second change, 07-11-2026). Claude saves his pick with his words (`picks_save`) and starts the finals (`final_render`). |
 | 10 | Final | PAID fal | `edit`, `quality: high`, 1536x1920, with the chosen draft as a reference so the layout stays. Claude checks the final once. |
 | 11 | Pack | CODE, CLAUDE | Build the deliverable (§5). Publish the client link. |
 | 12 | Results | CLIENT, CLAUDE | The client uploads an Ads Manager screenshot or CSV in the portal (or sends it on WhatsApp; the owner drops it on the board). Claude reads CTR, CPC, spend per ad name. Baseline CTR comes from one screenshot at onboarding (D3). |
@@ -87,8 +87,8 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | Research | `exa_search`, `exa_contents`, `adlibrary_fetch` (later; paid, asks first) |
 | Ideas | `ideas_save`, `ideas_pick_save` |
 | Images | `render_drafts`, `render_edit`, `render_final`, `image_get` (returns the image) |
-| Human step | `final_picks_get` (reads the owner's picks from the board) |
-| Memory | `canon_get`, `canon_update`, `swipe_search`, `picks_get`, `results_get` |
+| Human step | `final_picks_get` (reads the owner's picks from the board), `picks_save` (saves his picks with his own words) |
+| Memory | `taste_log` (his picks and passes with the critic's rank), `canon_get`, `canon_update`, `swipe_search`, `picks_get`, `results_get` |
 | Ops | `batch_status`, `spend_get`, `pack_publish` |
 
 Prompts (slash commands): `/a11:brand`, `/a11:batch`, `/a11:redesign`, `/a11:final`, `/a11:results`, `/a11:learn`, `/a11:gold-test`. Each is resumable; state lives in D1.
