@@ -6,7 +6,7 @@ The design of `a11-adgen`, version 2 (2026-11-06 SGT). It includes the owner's d
 
 ## 1. The idea in one line
 
-Claude Code is the brain. Cloudflare is the hands. The owner touches nothing in a batch (D2, 07-11-2026). He judges the finished ads.
+Claude Code is the brain. Cloudflare is the hands. The owner picks 1 draft per idea in each batch (D2, second change, 07-11-2026) and judges the finished ads. He picks no ideas.
 
 ## 2. Parts
 
@@ -47,8 +47,8 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | 5 | Idea burst | CLAUDE writer | 20 to 30 ideas. Each = insight + visual idea + headline + funnel job. With results: 30% new angles, 50% big changes on winners, 20% small changes. With no results: all new. |
 | 6 | Idea pick | CLAUDE critic | A separate critic subagent (fresh context) picks 3: one per funnel stage (tof, mof, bof), all different enough for Meta. The option B test and the owner gate first (`docs/creative-playbook.md` §2, `docs/taste-seed.md` §2). No human. |
 | 7 | Drafts | PAID fal | 3 drafts per idea. `edit` endpoint, `quality: low`, 1024x1280, packshot and logo as references. |
-| 8 | Draft check | CLAUDE, CODE | Claude looks at each draft. Code compares the read text with the approved copy. One fix edit per idea when needed. The critic ranks the drafts. |
-| 9 | Final pick | CLAUDE critic | Claude picks one draft per picked idea against `docs/creative-playbook.md` §2 and starts the finals (`picks_save`, `final_render`). No human (D2, 07-11-2026). The owner can still pick on the board. |
+| 8 | Draft check | CLAUDE, CODE | Claude looks at each draft. Code compares the read text with the approved copy. One fix edit per idea when needed. The critic reads `taste_log`, then ranks the drafts blind (`drafts_rank`). |
+| 9 | Draft pick | HAN | Claude stops and shows the 3 drafts of each idea (chat or the board), with no rank. The owner picks 1 per idea, or none (D2, second change, 07-11-2026). Claude saves his pick with his words (`picks_save`) and starts the finals (`final_render`). |
 | 10 | Final | PAID fal | `edit`, `quality: high`, 1536x1920, with the chosen draft as a reference so the layout stays. Claude checks the final once. |
 | 11 | Pack | CODE, CLAUDE | Build the deliverable (§5). Publish the client link. |
 | 12 | Results | CLIENT, CLAUDE | The client uploads an Ads Manager screenshot or CSV in the portal (or sends it on WhatsApp; the owner drops it on the board). Claude reads CTR, CPC, spend per ad name. Baseline CTR comes from one screenshot at onboarding (D3). |
@@ -64,7 +64,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 
 **Gold set.** v1 marks and notes on about 200 ads (D5) become a frozen test set. Before a canon or prompt change ships, the critic re-ranks the gold set. Agreement with the owner's marks must not fall. It runs in Claude Code, so it costs no API money.
 
-**Signal check.** With one human step, the owner's pick is the main taste signal. The critic's pre-selection must not become a rubber stamp: log how often the owner changes it. A low change rate with good client results is the target. A low change rate with bad results means the board hides the bad drafts; then show more.
+**Signal check.** With one human step, the owner's pick is the main taste signal. The critic's rank is blind (the owner sees it only after he picks), so it cannot become a rubber stamp. `picks_save` and `taste_log` log how often his pick is the critic's rank 1. A low change rate with good client results is the target. A low change rate with bad results means the board hides the bad drafts; then show more.
 
 ## 5. Deliverable (weekly pack)
 
@@ -87,8 +87,8 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | Research | `exa_search`, `exa_contents`, `adlibrary_fetch` (later; paid, asks first) |
 | Ideas | `ideas_save`, `ideas_pick_save` |
 | Images | `render_drafts`, `render_edit`, `render_final`, `image_get` (returns the image) |
-| Human step | `final_picks_get` (reads the owner's picks from the board) |
-| Memory | `canon_get`, `canon_update`, `swipe_search`, `picks_get`, `results_get` |
+| Human step | `picks_save` (saves the owner's draft picks with his own words; the board saves the same picks) |
+| Memory | `taste_log` (his picks and passes with the critic's rank), `canon_get`, `canon_update`, `swipe_search`, `picks_get`, `results_get` |
 | Ops | `batch_status`, `spend_get`, `pack_publish` |
 
 Prompts (slash commands): `/a11:brand`, `/a11:batch`, `/a11:redesign`, `/a11:final`, `/a11:results`, `/a11:learn`, `/a11:gold-test`. Each is resumable; state lives in D1.

@@ -108,25 +108,22 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
     let m = path.match(new RegExp(`^/api/batches/(${UUID})$`));
     if (m && method === "GET") return json(await batch.batchGet(env, m[1]!));
 
-    // The one human step (D2): save the owner's picks, then start their high finals.
-    m = path.match(new RegExp(`^/api/batches/(${UUID})/render$`));
+    // The one human step: the owner picks 1 draft per idea. This only saves the picks. Claude then runs the final
+    // (house recipe, creative-playbook §7). Note: the board's refresh still draws the logo on any finished final, so a raw
+    // first final can show composed before its finish pass. Claude's compose_final of the verified key is the newest and wins.
+    m = path.match(new RegExp(`^/api/batches/(${UUID})/picks$`));
     if (m && method === "POST") {
       const b = await body(request);
-      const picks = Array.isArray(b.picks) ? b.picks : [];
-      if (picks.length === 0 || picks.length > 8) return fail(400, "Pick 1 to 8 drafts.");
+      // An empty list clears the picks that have no final yet, so a missing or misnamed field must not look like one.
+      if (!Array.isArray(b.picks)) return fail(400, "Send picks as a list.");
+      const picks = b.picks;
+      if (picks.length > 8) return fail(400, "Pick 0 to 8 drafts (none clears the picks that have no final yet).");
       const clean = picks.map((p: any) => {
         if (typeof p?.key !== "string" || !DRAFT_KEY.test(p.key)) throw new AuthError("Bad draft key.", 400);
         const note = typeof p.note === "string" ? p.note.slice(0, 600) : undefined;
         return { key: p.key, note };
       });
-      await batch.picksSave(env, m[1]!, clean);
-      const started = await Promise.allSettled(clean.map((p: { key: string }) => batch.finalRender(env, m![1]!, p.key)));
-      return json({
-        results: started.map((r, i) => ({
-          key: clean[i]!.key,
-          ...(r.status === "fulfilled" ? { ok: true, render: r.value } : { ok: false, error: String((r.reason as Error)?.message ?? r.reason) }),
-        })),
-      });
+      return json(await batch.picksSave(env, m[1]!, clean));
     }
 
     m = path.match(new RegExp(`^/api/renders/(${UUID})/refresh$`));

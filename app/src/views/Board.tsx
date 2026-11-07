@@ -15,18 +15,11 @@ const FORMAT: Record<Idea["format"], string> = {
   usvsthem: "Us vs Them",
   offer: "The Offer",
 };
-const FINAL_USD = 0.08;
-const MAX_RENDER = 8; // the render API takes 1 to 8 picks per tap
 
-/** The first choice: the owner's saved picks, else the critic's top draft for each picked idea (D2). */
+/** The owner's saved picks only. Nothing is pre-selected: the critic's rank would anchor his taste. */
 function initialPicks(batch: Batch): Map<string, string> {
-  if (batch.picks.length > 0) return new Map(batch.picks.map((p) => [p.key, p.note ?? ""]));
-  const out = new Map<string, string>();
-  for (const idea of batch.ideas) {
-    const top = idea.picked ? idea.drafts.find((d) => d.rank === 1) : undefined;
-    if (top) out.set(top.key, "");
-  }
-  return out;
+  // Claude's older picks (byOwner false) are not his choice: they never pre-select.
+  return new Map(batch.picks.filter((p) => p.byOwner).map((p) => [p.key, p.note ?? ""]));
 }
 
 export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
@@ -73,30 +66,33 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
   if (!batch) return <p className="text-body text-muted-foreground">Loading…</p>;
 
   const started = new Set(batch.picks.filter((p) => p.finalRenderId).map((p) => p.key));
-  const toRender = [...picks.keys()].filter((k) => !started.has(k));
+  const toSave = [...picks.keys()].filter((k) => !started.has(k));
   const ideas = batch.ideas.filter((i) => i.drafts.length > 0).sort((a, b) => Number(b.picked) - Number(a.picked) || a.n - b.n);
+  const savedIdeas = new Set(batch.picks.map((p) => p.ideaId));
+  // The button works when the screen differs from what is saved, so a saved pick can also be cleared.
+  const savedKeys = new Set(batch.picks.filter((p) => p.byOwner && !p.finalRenderId).map((p) => p.key));
+  const savedNotes = new Map(batch.picks.map((p) => [p.key, p.note ?? ""]));
+  const dirty = toSave.length !== savedKeys.size || toSave.some((k) => !savedKeys.has(k) || (picks.get(k) ?? "") !== (savedNotes.get(k) ?? ""));
 
-  function toggle(key: string) {
-    if (started.has(key)) return;
+  // One draft per idea: tapping another draft of the same idea swaps the pick.
+  function toggle(idea: Idea, key: string) {
+    if (idea.drafts.some((d) => started.has(d.key))) return;
     setPicks((prev) => {
       const next = new Map(prev);
-      if (next.has(key)) next.delete(key);
-      else if ([...next.keys()].filter((k) => !started.has(k)).length < MAX_RENDER) next.set(key, "");
+      const had = next.has(key);
+      for (const d of idea.drafts) next.delete(d.key);
+      if (!had) next.set(key, "");
       return next;
     });
   }
 
-  async function render() {
+  // Saves the picks only. Claude starts the finals (the house recipe), so a final never skips its finish pass.
+  async function save() {
     setBusy(true);
     setError(null);
     try {
-      const res = await api<{ results: { key: string; ok: boolean; error?: string }[] }>(`/api/batches/${id}/render`, {
-        body: { picks: toRender.map((key) => ({ key, note: picks.get(key) || undefined })) },
-      });
-      const failed = res.results.filter((r) => !r.ok);
-      if (failed.length) setError(failed.map((f) => f.error).join(" "));
+      await api(`/api/batches/${id}/picks`, { body: { picks: toSave.map((key) => ({ key, note: picks.get(key) || undefined })) } });
       await load(false);
-      onSpend();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -110,7 +106,7 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
         <p className="text-caption uppercase tracking-wide text-muted-foreground">{batch.brand.name}</p>
         <h1 className="text-display font-semibold tracking-tight">{batch.label}</h1>
         <p className="mt-1 text-body text-muted-foreground">
-          Tap the drafts to render at high quality. The critic's top draft for each idea is already chosen.
+          Tap the one draft you like best for each idea. Tap it again to undo. Claude's own ranking shows only after you save, so it does not steer you.
         </p>
       </header>
 
@@ -127,14 +123,15 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
             </div>
             <p className="mb-3 max-w-2xl text-body text-muted-foreground">{idea.insight}</p>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {idea.drafts.map((d) => {
+              {[...idea.drafts].sort((x, y) => x.key.localeCompare(y.key, undefined, { numeric: true })).map((d) => {
                 const on = picks.has(d.key);
-                const locked = started.has(d.key);
+                const locked = idea.drafts.some((x) => started.has(x.key));
+                const revealed = savedIdeas.has(idea.id);
                 return (
                   <figure key={d.key} className="flex flex-col gap-2">
                     <button
                       type="button"
-                      onClick={() => toggle(d.key)}
+                      onClick={() => toggle(idea, d.key)}
                       aria-pressed={on}
                       className={`relative overflow-hidden rounded-lg border-2 transition-colors ${on ? "border-foreground" : "border-transparent"} ${locked ? "cursor-default" : ""}`}
                     >
@@ -143,10 +140,10 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
                         <span className="pointer-events-none rounded-md bg-background/90 px-1.5 py-0.5">
                           <Checkbox checked={on} tabIndex={-1} aria-hidden />
                         </span>
-                        {d.rank && <span className="rounded-md bg-background/90 px-1.5 py-0.5 text-caption font-medium">#{d.rank}</span>}
+                        {revealed && d.rank && <span className="rounded-md bg-background/90 px-1.5 py-0.5 text-caption font-medium">#{d.rank}</span>}
                       </span>
                     </button>
-                    {d.reason && <figcaption className="text-caption text-muted-foreground">{d.reason}</figcaption>}
+                    {revealed && d.reason && <figcaption className="text-caption text-muted-foreground">{d.reason}</figcaption>}
                     {on && !locked && (
                       <Textarea
                         placeholder="Note for the final (optional)"
@@ -172,10 +169,10 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
         )}
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
           <p className="text-body text-muted-foreground">
-            {toRender.length === 0 ? "Nothing new to render." : `${toRender.length} final${toRender.length > 1 ? "s" : ""}, about US$${(toRender.length * FINAL_USD).toFixed(2)}`}
+            {`${picks.size} of ${ideas.length} picked.`}
           </p>
-          <Button disabled={toRender.length === 0} loading={busy} onClick={render}>
-            Render
+          <Button disabled={!dirty} loading={busy} onClick={save}>
+            Save my picks
           </Button>
         </div>
       </div>

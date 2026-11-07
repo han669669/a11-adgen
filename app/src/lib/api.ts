@@ -54,7 +54,7 @@ export interface Batch {
   status: string;
   brand: { slug: string; name: string; kitVersion: number };
   ideas: Idea[];
-  picks: { key: string; ideaId: string; note: string | null; finalRenderId: string | null }[];
+  picks: { key: string; ideaId: string; note: string | null; byOwner: boolean; finalRenderId: string | null }[];
 }
 export interface BatchRow {
   id: string;
