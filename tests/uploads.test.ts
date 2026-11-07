@@ -77,6 +77,21 @@ describe("client results upload", () => {
     expect((await call(env, "uploads_get", { brand: "won-gi", includeDone: true })).files[0].done).toBe(true);
   });
 
+  it("accepts a JPEG and a WebP by their bytes and stores them with the right kind and extension", async () => {
+    const { env, store } = await makeEnv();
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1]);
+    const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 4, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x20]);
+    expect((await send(env, new Blob([jpeg], { type: "image/jpeg" }), "a.jpg")).status).toBe(303);
+    expect((await send(env, new Blob([webp], { type: "image/webp" }), "b.webp")).status).toBe(303);
+    const g = await call(env, "uploads_get", { brand: "won-gi" });
+    expect(g.files).toHaveLength(2);
+    expect(g.files.every((f: any) => f.kind === "image")).toBe(true);
+    const keys = g.files.map((f: any) => f.imageKey as string).sort();
+    expect(keys.map((k: string) => k.split(".").pop())).toEqual(["jpg", "webp"]);
+    expect(store.get(keys[0]!)?.type).toBe("image/jpeg");
+    expect(store.get(keys[1]!)?.type).toBe("image/webp");
+  });
+
   it("saves a CSV and shows its text to the owner", async () => {
     const { env } = await makeEnv();
     expect((await send(env, new Blob([CSV], { type: "text/csv" }), "../../etc/ads.csv")).status).toBe(303);
