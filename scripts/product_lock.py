@@ -84,8 +84,11 @@ def swap(a):
     H, W = arr.shape[:2]
     if not (0 <= ox0 < ox1 <= W and 0 <= otop < obase <= H):
         sys.exit(f"--old {a.old} is outside the scene ({W}x{H}) or not x0<x1, top<base")
-    cx = (ox0 + ox1) / 2
-    if a.lower_only:
+    cx = a.cx if a.cx is not None else (ox0 + ox1) / 2
+    if a.scale is not None:  # same scale for pieces that must keep their real size next to each other (a jar and its cap)
+        scale = a.scale
+        piece = pack.crop((x0 - PAD, y0 - PAD, x1 + PAD, y1 + PAD))
+    elif a.lower_only:
         if a.band_top is None:
             sys.exit("--lower-only needs --band-top (y of the label's top band in the packshot)")
         scale = (ox1 - ox0) / (x1 - x0 + 2 * PAD)
@@ -117,9 +120,47 @@ def swap(a):
     print(f"{a.out}: pasted {piece.width}x{piece.height}px at x={round(cx - piece.width / 2)} y={ytop}")
 
 
+def pad45(a):
+    """Pad a square packshot to 4:5 (the model edits 4:5 only) by repeating its edge rows, so its pixels keep their x and shift down."""
+    im = np.asarray(Image.open(a.packshot).convert("RGB"))
+    h, w = im.shape[:2]
+    extra = round(w * 5 / 4) - h
+    if extra < 0 or extra % 2:
+        sys.exit(f"packshot {w}x{h}: cannot pad to 4:5 with equal rows")
+    Image.fromarray(np.pad(im, ((extra // 2, extra // 2), (0, 0), (0, 0)), mode="edge")).save(a.out, quality=95)
+    print(f"{a.out}: padded {extra // 2} px at the top and bottom, size {w}x{h + extra}; packshot y + {extra // 2} = padded y")
+
+
+def open_source(a):
+    """Build the source for an OPEN product from a model edit of the padded packshot (cap removed, same framing).
+    The model gives the open neck at the packshot's own camera angle. Everything from --real-from down is the real photo again
+    (the cut hides inside the label's solid top band), and one strip of repeated threads is added so the neck reaches its true height."""
+    pad = Image.open(a.padded).convert("RGB")
+    edit = Image.open(a.edit).convert("RGB").resize(pad.size, Image.LANCZOS)
+    E, P = np.asarray(edit).copy(), np.asarray(pad)
+    E[a.real_from:] = P[a.real_from:]
+    s0, s1 = ints(a.strip, 2)
+    strip = E[s0:s1 + 1].copy()
+    n = strip.shape[0]
+    ext = np.concatenate([E[:s1 + 1], strip, E[s1 + 1:]], axis=0)[n:]  # the top n rows are plain backdrop: the base keeps its y
+    Image.fromarray(ext).save(a.out, quality=95)
+    print(f"{a.out}: neck extended by {n} px; the rim moved up {n} px; the box top is the old rim y minus {n}")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
+    d = sub.add_parser("pad45", help="pad a square packshot to 4:5 for a model edit")
+    d.add_argument("--packshot", required=True)
+    d.add_argument("--out", required=True)
+    d.set_defaults(fn=pad45)
+    o = sub.add_parser("open-source", help="real photo + a model-drawn open neck at the same camera angle (a cap-off product)")
+    o.add_argument("--padded", required=True, help="the padded packshot that was sent to the model")
+    o.add_argument("--edit", required=True, help="the model's edit of it (cap off, same framing)")
+    o.add_argument("--real-from", type=int, required=True, help="padded y inside the label's top band: from here down the real photo is used")
+    o.add_argument("--strip", required=True, help="y0,y1 of a strip of the neck's threads to repeat (a whole number of thread periods)")
+    o.add_argument("--out", required=True)
+    o.set_defaults(fn=open_source)
     s = sub.add_parser("skeleton")
     s.add_argument("--packshot", required=True)
     s.add_argument("--box", required=True, help="x0,y0,x1,y1 of the product in the packshot")
@@ -137,6 +178,8 @@ def main():
     w.add_argument("--box", required=True)
     w.add_argument("--scene", required=True)
     w.add_argument("--old", required=True, help="x0,x1,top,base of the old product in the scene")
+    w.add_argument("--scale", type=float, help="paste at this scale (packshot pixels to scene pixels) instead of fitting --old")
+    w.add_argument("--cx", type=float, help="centre x of the pasted piece (default: the centre of --old)")
     w.add_argument("--lower-only", action="store_true")
     w.add_argument("--band-top", type=int, help="y of the label's top band in the packshot (with --lower-only)")
     w.add_argument("--out", required=True)
