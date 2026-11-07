@@ -12,7 +12,7 @@ describe("isPublicHost", () => {
     for (const h of ["localhost", "intranet", "printer.local", "db.internal", "nas.lan", "x.home", "app.corp", "a.localhost", "LOCALHOST", "localhost."]) expect(isPublicHost(h), h).toBe(false);
   });
   it("refuses IPv6 loopback, unique-local, link-local and mapped addresses; accepts a public one", () => {
-    for (const h of ["[::1]", "::1", "[::]", "[fd12:3456::1]", "[fc00::1]", "[fe80::1]", "[fe90::1]", "[::ffff:127.0.0.1]"]) expect(isPublicHost(h), h).toBe(false);
+    for (const h of ["[::1]", "::1", "[::]", "[fd12:3456::1]", "[fc00::1]", "[fe80::1]", "[fe90::1]", "[::ffff:127.0.0.1]", "[::127.0.0.1]", "::7f00:1", "[::a00:1]", "[ff02::1]", "[ff05::2]"]) expect(isPublicHost(h), h).toBe(false);
     expect(isPublicHost("[2606:4700:4700::1111]")).toBe(true);
   });
 });

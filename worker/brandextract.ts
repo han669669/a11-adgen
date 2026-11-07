@@ -69,8 +69,8 @@ const top = <T extends string>(counts: Map<T, number>, n: number, boost?: T | nu
 
 const LOGOS_MAX = 6;
 
-/** live: an image answered. dead: an error status or a reply that is not an image. unknown: no clear answer (a timeout keeps the logo). */
-async function probeLogo(url: string, signal: AbortSignal): Promise<"live" | "dead" | "unknown"> {
+/** live: a PNG, JPEG or WebP answered. svg: an SVG file answered (brand_save refuses SVG). dead: an error status or a reply that is not an image. unknown: no clear answer (a timeout keeps the logo). */
+async function probeLogo(url: string, signal: AbortSignal): Promise<"live" | "svg" | "dead" | "unknown"> {
   let at = url;
   try {
     for (let hop = 0; hop <= REDIRECTS; hop++) {
@@ -84,7 +84,8 @@ async function probeLogo(url: string, signal: AbortSignal): Promise<"live" | "de
         continue;
       }
       if (!res.ok) return "dead";
-      return contentType(res).startsWith("image/") ? "live" : "dead";
+      const type = contentType(res);
+      return type.includes("svg") ? "svg" : type.startsWith("image/") ? "live" : "dead";
     }
     return "unknown";
   } catch {
@@ -175,18 +176,27 @@ export async function brandExtract(input: { url: string }) {
     else inlineSvgLogo = true;
   }
   addLogo(organizationLogo(html, base), "organization");
-  if (!logoCandidates.length) {
+  // Each logo file must still answer with a raster image. A dead file is left out; an SVG file is left out and counted (brand_save refuses SVG); a timeout keeps it.
+  const probeSignal = AbortSignal.timeout(10_000);
+  let deadLogos = 0;
+  let svgLogos = 0;
+  const probe = async (list: typeof logoCandidates) => {
+    const states = await Promise.all(list.map((c) => probeLogo(c.url, probeSignal)));
+    deadLogos += states.filter((s) => s === "dead").length;
+    svgLogos += states.filter((s) => s === "svg").length;
+    return list.filter((_, i) => states[i] === "unknown" || states[i] === "live");
+  };
+  let logos = await probe(logoCandidates.slice(0, LOGOS_MAX));
+  if (!logos.length) {
+    // Nothing usable from the header or the site data (or every file was dead): look for a logo-named image elsewhere on the page.
+    const before = logoCandidates.length; // addLogo skips a file already listed, so what it adds is new
     for (const t of tags("img")) {
       const src = attr(t, "src") ?? attr(t, "data-src");
       if (src && /logo/i.test(`${src} ${attr(t, "alt") ?? ""} ${attr(t, "class") ?? ""} ${attr(t, "id") ?? ""}`)) addLogo(src, "guess");
-      if (logoCandidates.length >= 3) break;
+      if (logoCandidates.length - before >= 3) break;
     }
+    logos = await probe(logoCandidates.slice(before));
   }
-  // Each logo file must still answer with an image. A dead file is left out; a timeout keeps it.
-  const probeSignal = AbortSignal.timeout(10_000);
-  const states = await Promise.all(logoCandidates.slice(0, LOGOS_MAX).map((c) => probeLogo(c.url, probeSignal)));
-  const deadLogos = logoCandidates.slice(0, LOGOS_MAX).filter((_, i) => states[i] === "dead").length;
-  const logos = logoCandidates.slice(0, LOGOS_MAX).filter((_, i) => states[i] !== "dead");
 
   const sheets = (await Promise.all(sheetUrls.map((u) => fetchText(u, CSS_MAX, /^text\/css|^text\/plain/)))).filter((x): x is { url: string; text: string } => !!x);
   const inline = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]!);
@@ -224,7 +234,7 @@ export async function brandExtract(input: { url: string }) {
 
   const warnings: string[] = [];
   if (!cssChromatic) warnings.push("No brand colours found in the CSS. The page may build its styles with script, or use rgb() or hsl() colours. Take the colours from the logo and the packshot instead.");
-  if (!logos.length) warnings.push(inlineSvgLogo ? "The header logo is an inline SVG, so there is no file to fetch. Ask the owner for the logo file." : "No logo found in the page header or the site data. Ask the owner for the logo file.");
+  if (!logos.length) warnings.push(svgLogos && !inlineSvgLogo ? "The logo the site names is an SVG file, and brand_save needs a PNG or WebP file. Ask the owner for one." : inlineSvgLogo ? "The header logo is an inline SVG, so there is no file to fetch. Ask the owner for the logo file." : "No logo found in the page header or the site data. Ask the owner for the logo file.");
   else if (logos.every((l) => l.kind === "guess")) warnings.push("These logos are guesses: no logo was found in the header. Look at each one before you use it: a press or partner logo looks the same.");
   if (deadLogos) warnings.push(`${deadLogos} logo file(s) the page names did not answer with an image and were left out.`);
   if (inlineSvgLogo && logos.length) warnings.push("The header logo is an inline SVG (no file). The logos listed are other files the site names: check that they are the brand's own.");
@@ -242,7 +252,7 @@ export async function brandExtract(input: { url: string }) {
     fonts: top(fonts, 6).map(([name, uses]) => ({ name, uses })),
     logoCandidates: logos,
     inlineSvgLogo,
-    missing: [...(logos.length ? [] : ["logo"]), ...(cssChromatic >= 2 ? [] : ["colours"]), ...(fonts.size ? [] : ["fonts"])],
+    missing: [...(logos.length ? [] : ["logo"]), ...(cssChromatic ? [] : ["colours"]), ...(fonts.size ? [] : ["fonts"])],
     icons: icons.slice(0, 6),
     ogImage,
     stylesheetsRead: sheets.length,

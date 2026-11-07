@@ -136,3 +136,32 @@ test("fileKey: one key per image file, whatever the size query says", () => {
   expect(fileKey("https://cdn.example/a/Logo.png?width=500")).toBe(fileKey("https://CDN.example/a/logo.png?width=600"));
   expect(fileKey("https://cdn.example/a/logo.png")).not.toBe(fileKey("https://cdn.example/a/other.png"));
 });
+
+describe("cubic review fixes", () => {
+  const page = "https://brand.example/";
+  test("a decorative SVG before the wordmark does not hide the wordmark image", () => {
+    // An icon-sized SVG is skipped; the wordmark image after it is found, with no alt text to help (the old code looked at the first drawable only).
+    const icon = `<header><a href="/"><svg viewBox="0 0 24 24"><path d="M0 0h9v9z"/></svg><img src="/brand/wordmark.png"></a></header>`;
+    expect(headerLogos(icon, page, "Brand")).toEqual([{ kind: "img", url: "https://brand.example/brand/wordmark.png" }]);
+    // A large SVG that draws itself is the logo, and still comes first.
+    const big = `<header><a href="/"><svg viewBox="0 0 400 400"><path d="M0 0h400v400z"/></svg><img src="/brand/wordmark.png"></a></header>`;
+    expect(headerLogos(big, page, "Brand")).toEqual([{ kind: "svg" }]);
+  });
+  test("an SVG that uses a sprite file is not a logo", () => {
+    const html = `<header><a href="/"><svg viewBox="0 0 100 100"><use href="/icons.svg#menu"/></svg></a></header>`;
+    expect(headerLogos(html, page, "Brand")).toEqual([]);
+  });
+  test("an icon named in an image title or test id, or an SVG title, is not a logo", () => {
+    expect(isUiIconImg(`<img title="Search" src="/a.png">`, "https://x.test/a.png")).toBe(true);
+    expect(isUiIconImg(`<img data-testid="cart-icon" src="/a.png">`, "https://x.test/a.png")).toBe(true);
+    expect(isUiIconSvg(`<svg viewBox="0 0 100 100"><title>Shopping cart</title><path d="M0 0h9v9z"/></svg>`)).toBe(true);
+    expect(isUiIconSvg(`<svg viewBox="0 0 100 100"><title>Brand logo</title><path d="M0 0h9v9z"/></svg>`)).toBe(false);
+  });
+  test("JSON-LD: contentUrl is read, and a later Organization with the logo is not skipped", () => {
+    const ld = (v: unknown) => `<script type="application/ld+json">${JSON.stringify(v)}</script>`;
+    expect(organizationLogo(ld({ "@type": "Organization", logo: { "@type": "ImageObject", contentUrl: "/c.png" } }), page)).toBe("https://brand.example/c.png");
+    const graph = ld({ "@graph": [{ "@type": "Organization", name: "Fox" }, { "@type": "Organization", logo: "/second.png" }] });
+    expect(organizationLogo(graph, page)).toBe("https://brand.example/second.png");
+    expect(siteName(graph)).toBe("Fox");
+  });
+});
