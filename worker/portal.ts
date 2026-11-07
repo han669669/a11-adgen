@@ -1,14 +1,11 @@
 import type { Env } from "./env";
+import { FONT_PATH } from "./font";
 import { packByToken, type PackContent } from "./pack";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
-const STAGE: Record<string, [string, string]> = {
-  tof: ["Top of funnel", "For people who have not met the brand yet."],
-  mof: ["Middle of funnel", "For people who know the brand and are choosing."],
-  bof: ["Bottom of funnel", "For people who are ready to buy."],
-};
-const PAGE_CSP = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+const STAGE: Record<string, string> = { tof: "Top of funnel", mof: "Middle of funnel", bof: "Bottom of funnel" };
+const PAGE_CSP = "default-src 'none'; img-src 'self'; font-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const PRIVATE = {
   "cache-control": "private, no-store",
   "referrer-policy": "no-referrer",
@@ -16,45 +13,51 @@ const PRIVATE = {
   "x-content-type-options": "nosniff",
 };
 
-const CSS = `*{box-sizing:border-box}html{scroll-behavior:smooth}body{font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:#faf7f2;color:#2b1d14}body:has(.lb:target){overflow:hidden}
-main{max-width:960px;margin:0 auto;padding:32px 16px 72px}
-h1{font-size:2rem;line-height:1.2;margin:0 0 8px}h2{font-size:1.3rem;margin:48px 0 8px}h3{margin:0 0 4px;font-size:1.2rem;line-height:1.3}
-.muted{color:#6b5a4d}.lead{font-size:1.1rem;max-width:60ch}
-.steps{padding-left:1.2em;margin:8px 0}.steps li{margin:4px 0}
-.ad{display:grid;grid-template-columns:minmax(0,320px) minmax(0,1fr);gap:24px;margin:24px 0;padding:20px;background:#fff;border-radius:14px;box-shadow:0 1px 3px rgba(43,29,20,.08);scroll-margin-top:16px}
-.ad img{width:100%;height:auto;border-radius:8px;display:block}
-.pic{display:block;position:relative;cursor:zoom-in;border-radius:8px;overflow:hidden}.pic img{transition:transform .25s}.pic:hover img{transform:scale(1.02)}
-.pic span{position:absolute;right:8px;bottom:8px;padding:3px 10px;border-radius:99px;background:rgba(43,29,20,.75);color:#fff;font-size:.8rem}
+// The page has no script (CSP). The enlarged view is CSS only: a link to #view-N shows the box (:target), and the slides sit in a
+// horizontal scroll-snap row, so a touch swipe moves between ads and the arrows do the same with a mouse.
+const CSS = `@font-face{font-family:"Plus Jakarta Sans";src:url(${FONT_PATH}) format("woff2");font-weight:200 800;font-display:swap}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{font:16px/1.6 "Plus Jakarta Sans",system-ui,sans-serif;margin:0;background:#faf7f2;color:#2b1d14}body:has(.slide:target){overflow:hidden}
+main{max-width:1000px;margin:0 auto;padding:20px 16px 64px}
+.top{margin:0 0 4px;font-size:.9rem;font-weight:400;line-height:1.6}.lead{font-size:1.1rem;max-width:60ch;margin-top:48px}.top span,.muted{color:#6b5a4d}
+h2{font-size:1.3rem;margin:48px 0 8px}h3{margin:0 0 4px;font-size:1.15rem;line-height:1.3}
+.ad{display:grid;grid-template-columns:minmax(0,380px) minmax(0,1fr);gap:28px;margin:16px 0;padding:16px;background:#fff;border-radius:12px;scroll-margin-top:12px}
+.pic{display:block;position:relative;cursor:zoom-in;border-radius:8px;overflow:hidden}.pic img{width:100%;height:auto;display:block}
+.zoom{position:absolute;right:10px;bottom:10px;width:34px;height:34px;border-radius:99px;background:rgba(255,255,255,.92);display:flex;align-items:center;justify-content:center}
 .tag{display:inline-block;font-size:.8rem;padding:2px 10px;border-radius:99px;background:#efe6da}
-.btn{display:inline-block;margin:8px 8px 0 0;padding:9px 16px;border-radius:8px;background:#2b1d14;color:#fff;text-decoration:none;font-size:.9rem}
-.opt{margin:6px 0;padding:10px 12px;border-radius:8px;background:#faf7f2}.opt b{display:block;font-size:.75rem;letter-spacing:.04em;text-transform:uppercase;color:#6b5a4d}
-.label{margin:18px 0 4px;font-weight:600}.label small{font-weight:400;color:#6b5a4d}
-.plan p{margin:0 0 20px;font-size:1.05rem;max-width:60ch}
-.glance a{color:inherit}
-table{border-collapse:collapse;width:100%;font-size:.9rem;background:#fff;border-radius:8px}td,th{text-align:left;padding:8px 10px;border-bottom:1px solid #e6dccd;vertical-align:top}
-code{font-size:.85rem;background:#efe6da;padding:1px 5px;border-radius:4px;word-break:break-all}
-.lb{display:none;position:fixed;inset:0;z-index:10;background:rgba(20,12,7,.97);align-items:center;justify-content:center;animation:fade .2s}
-.lb:target{display:flex}.lb .bg{position:absolute;inset:0;cursor:zoom-out}
-.lb img{position:relative;max-width:100vw;max-height:100vh;max-height:100dvh;width:auto;height:auto;object-fit:contain;box-shadow:0 8px 40px rgba(0,0,0,.5)}
-.lb .x,.lb .nav,.lb .dl{position:absolute;z-index:1;color:#fff;text-decoration:none;background:rgba(255,255,255,.14);backdrop-filter:blur(6px);border-radius:99px;line-height:1}
-.lb .x{top:12px;right:12px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-size:1.6rem}
-.lb .nav{top:50%;width:44px;height:44px;margin-top:-22px;display:flex;align-items:center;justify-content:center;font-size:1.6rem}
-.lb .prev{left:12px}.lb .next{right:12px}
-.lb .dl{bottom:16px;left:50%;transform:translateX(-50%);padding:11px 18px;font-size:.9rem}
-.lb .x:hover,.lb .nav:hover,.lb .dl:hover{background:rgba(255,255,255,.28)}
-.foot{margin-top:56px;font-size:.9rem}
+.btn{display:inline-block;margin:10px 8px 0 0;padding:9px 16px;border-radius:8px;background:#2b1d14;color:#fff;text-decoration:none;font-size:.9rem;font-weight:600}
+.label{margin:18px 0 4px;font-weight:700}.label small{font-weight:400;color:#6b5a4d}
+.ad p:not(.label){margin:0 0 6px}
+code{font:inherit;font-weight:600;background:#efe6da;padding:1px 6px;border-radius:4px;word-break:break-all}
+.plan{margin:12px 0 0;padding-left:1.3em;max-width:60ch}.plan li{margin:0 0 18px;padding-left:4px;font-size:1.05rem}
+.steps{padding-left:1.4em;margin:8px 0}.steps li{margin:4px 0}
+table{border-collapse:collapse;width:100%;font-size:.9rem;background:#fff;border-radius:8px}td,th{text-align:left;padding:8px 10px;border-bottom:1px solid #e6dccd;vertical-align:top;overflow-wrap:anywhere}
+a{color:inherit}
+.foot{margin-top:48px;font-size:.85rem}
+.lb{display:none;position:fixed;inset:0;z-index:10;background:#140c07;animation:fade .2s}.lb:has(.slide:target){display:block}
+.track{display:flex;height:100%;overflow-x:auto;overflow-y:hidden;overscroll-behavior:contain;scroll-snap-type:x mandatory;scroll-behavior:smooth;scrollbar-width:none}.track::-webkit-scrollbar{display:none}
+.slide{position:relative;flex:0 0 100%;height:100%;scroll-snap-align:center;scroll-snap-stop:always;outline:none}
+.slide .bg{position:absolute;inset:0;cursor:zoom-out}
+.slide img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none}
+.slide .x,.slide .nav,.slide .dl,.slide .count{position:absolute;z-index:1;color:#fff;text-decoration:none;background:rgba(20,12,7,.62);border-radius:99px;line-height:1}
+.slide .x{top:12px;right:12px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-size:1.6rem}
+.slide .count{top:20px;left:16px;padding:6px 12px;font-size:.85rem;font-weight:600}
+.slide .nav{display:none;top:50%;width:48px;height:48px;margin-top:-24px;align-items:center;justify-content:center;font-size:1.8rem}
+.slide .prev{left:16px}.slide .next{right:16px}
+.slide .dl{bottom:16px;left:50%;transform:translateX(-50%);padding:11px 18px;font-size:.9rem;font-weight:600;white-space:nowrap}
+@media(hover:hover) and (pointer:fine){.slide .nav{display:flex}.slide .x:hover,.slide .nav:hover,.slide .dl:hover{background:rgba(20,12,7,.85)}}
 @keyframes fade{from{opacity:0}to{opacity:1}}
-@media(max-width:640px){.ad{grid-template-columns:1fr;padding:16px}h1{font-size:1.6rem}.lb .nav{top:auto;bottom:16px;margin:0}.lb .dl{bottom:72px}}
-@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.lb{animation:none}.pic img{transition:none}}`;
+@media(max-width:700px){.ad{grid-template-columns:1fr;gap:16px;padding:12px}}
+@media(prefers-reduced-motion:reduce){html,.track{scroll-behavior:auto}.lb{animation:none}}`;
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-/** Options the client can pick from: "Option A", "Option B". */
+/** Choices the client can pick from: "A.", "B.". */
 function options(items: string[]): string {
-  return items.map((t, i) => `<div class="opt"><b>Option ${String.fromCharCode(65 + i)}</b>${esc(t)}</div>`).join("");
+  return items.map((t, i) => `<p><b>${String.fromCharCode(65 + i)}.</b> ${esc(t)}</p>`).join("");
 }
 
-/** One sentence per line, with space between. A new line in the text also starts a new line. */
+/** One sentence per line. A new line in the text also starts a new line. */
 export function sentences(text: string): string[] {
   return text
     .split(/\n+/)
@@ -65,33 +68,31 @@ export function sentences(text: string): string[] {
 
 const link = (url: string) => (/^https?:\/\//i.test(url) ? `<a href="${esc(url)}" rel="noopener noreferrer" target="_blank">${esc(url.replace(/^https?:\/\/(www\.)?/i, ""))}</a>` : esc(url));
 
+const ZOOM = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#2b1d14" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2H14v4.5M6.5 14H2V9.5M14 2L9 7M2 14l5-5"/></svg>`;
+
 /** The pack page for a client. Every value is escaped: the copy can carry text that came from the web. */
 export function renderPack(token: string, title: string, c: PackContent): string {
   const version = /\bv(\d+)$/.exec(title)?.[1];
   const n = c.ads.length;
-  const glance = c.ads
-    .map((a, i) => `<tr><td>${i + 1}</td><td>${esc((STAGE[a.stage] ?? [a.stage])[0]!)}</td><td><a href="#ad-${i + 1}">${esc(a.headline)}</a></td></tr>`)
-    .join("");
   const ads = c.ads
     .map((a, i) => {
       const base = `/c/${token}/ad/${i + 1}`;
-      const [stage, who] = STAGE[a.stage] ?? [a.stage, ""];
-      return `<section class="ad" id="ad-${i + 1}"><div><a class="pic" href="#view-${i + 1}" aria-label="Enlarge ad ${i + 1}"><img src="${base}.jpg" alt="${esc(a.headline)}" loading="lazy"><span>Tap to enlarge</span></a>
+      return `<section class="ad" id="ad-${i + 1}"><div><a class="pic" href="#view-${i + 1}" aria-label="Enlarge ad ${i + 1}"><img src="${base}.jpg" alt="${esc(a.headline)}"${i === 0 ? "" : ' loading="lazy"'}><span class="zoom">${ZOOM}</span></a>
 <a class="btn" href="${base}.jpg" download="${esc(a.name)}.jpg">Download JPEG</a><a class="btn" href="${base}.png" download="${esc(a.name)}.png">Download PNG</a></div>
-<div><p class="muted" style="margin:0">Ad ${i + 1} of ${n}</p><h3>${esc(a.headline)}</h3><p style="margin:4px 0 0"><span class="tag">${esc(stage)}</span> <span class="muted">${esc(who)}</span></p>
+<div><h3>${esc(a.headline)}</h3><p><span class="tag">${esc(STAGE[a.stage] ?? a.stage)}</span></p>
+<p class="label">Ad name <small>Paste it into Ads Manager exactly. It lets us match your results to this ad.</small></p><p><code>${esc(a.name)}</code></p>
 <p class="label">Text above the picture <small>Pick one. The first 125 characters show before "See more".</small></p>${options(a.primaryTexts)}
 <p class="label">Headline <small>Pick one.</small></p>${options(a.headlines)}
-<p class="label">Description and button</p><div class="opt"><b>Description</b>${esc(a.description)}</div><div class="opt"><b>Button</b>${esc(cap(a.cta.replace(/_/g, " ").toLowerCase()))}</div>
-<p class="label">Ad name <small>Paste it into Ads Manager exactly. It lets us match your results to this ad.</small></p><p style="margin:0"><code>${esc(a.name)}</code></p>
-<p class="label">Why we made this ad</p><p style="margin:0">${esc(a.why)}</p></div></section>`;
+<p class="label">Description and button</p><p>${esc(a.description)}</p><p>Button: ${esc(cap(a.cta.replace(/_/g, " ").toLowerCase()))}</p>
+<p class="label">Why we made this ad</p><p>${esc(a.why)}</p></div></section>`;
     })
     .join("");
-  const boxes = c.ads
+  const slides = c.ads
     .map((a, i) => {
       const base = `/c/${token}/ad/${i + 1}`;
       const prev = i > 0 ? `<a class="nav prev" href="#view-${i}" aria-label="Previous ad">&#8249;</a>` : "";
       const next = i < n - 1 ? `<a class="nav next" href="#view-${i + 2}" aria-label="Next ad">&#8250;</a>` : "";
-      return `<div class="lb" id="view-${i + 1}" role="dialog" aria-modal="true" aria-label="Ad ${i + 1} full size" tabindex="-1"><a class="x" href="#ad-${i + 1}" aria-label="Close">&times;</a><a class="bg" href="#ad-${i + 1}" aria-label="Close" tabindex="-1"></a><img src="${base}.jpg" alt="${esc(a.headline)}" loading="lazy">${prev}${next}<a class="dl" href="${base}.jpg" download="${esc(a.name)}.jpg">Download JPEG</a></div>`;
+      return `<div class="slide" id="view-${i + 1}" role="dialog" aria-modal="true" aria-label="Ad ${i + 1} of ${n}, full size" tabindex="-1"><a class="bg" href="#ad-${i + 1}" aria-label="Close" tabindex="-1"></a><img src="${base}.jpg" alt="${esc(a.headline)}" loading="lazy"><a class="x" href="#ad-${i + 1}" aria-label="Close">&times;</a>${n > 1 ? `<span class="count">${i + 1} / ${n}</span>` : ""}${prev}${next}<a class="dl" href="${base}.jpg" download="${esc(a.name)}.jpg">Download JPEG</a></div>`;
     })
     .join("");
   const facts = c.factCheck.length
@@ -100,13 +101,12 @@ export function renderPack(token: string, title: string, c: PackContent): string
         .join("")}</table>`
     : "";
   const heading = `${c.brand}: ad pack`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${esc(heading)}${version ? ` v${version}` : ""}</title><style>${CSS}</style></head><body><main>
-<h1>${esc(heading)}</h1><p class="muted">${version ? `Version ${esc(version)}. ` : ""}${n} static ${n === 1 ? "ad" : "ads"}, 4:5, ready to upload to Meta.</p>
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${esc(heading)}${version ? ` v${version}` : ""}</title><link rel="preload" href="${FONT_PATH}" as="font" type="font/woff2" crossorigin><style>${CSS}</style></head><body><main>
+<h1 class="top"><b>${esc(c.brand)}</b>${version ? ` <span>Version ${esc(version)}</span>` : ""}</h1>${ads}
 <p class="lead">Your ads are ready. Each one has the picture, the words to paste into Meta, and the reason we made it. Tap any picture to see it full size.</p>
-<ol class="steps"><li>Download the picture.</li><li>Paste the text into Meta Ads Manager.</li><li>Copy the ad name exactly.</li><li>Follow the launch plan at the bottom.</li></ol>
-<table class="glance"><tr><th>Ad</th><th>Stage</th><th>Headline</th></tr>${glance}</table>${ads}
-<h2>Launch plan</h2><p class="muted">What to do after you upload.</p><div class="plan">${sentences(c.launchPlan).map((x) => `<p>${esc(x)}</p>`).join("")}</div>${c.healthNote ? `<p>${esc(c.healthNote)}</p>` : ""}${facts}
-<p class="foot muted">This page is private. Only people with this link can see it.</p>${boxes}
+<ol class="steps"><li>Download the picture.</li><li>Paste the text into Meta Ads Manager.</li><li>Copy the ad name exactly.</li><li>Follow the launch plan below.</li></ol>
+<h2 style="margin-top:32px">Launch plan</h2><ul class="plan">${sentences(c.launchPlan).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>${c.healthNote ? `<p>${esc(c.healthNote)}</p>` : ""}${facts}
+<p class="foot muted">This page is private. Only people with this link can see it.</p><div class="lb" aria-label="Ads, full size"><div class="track">${slides}</div></div>
 </main></body></html>`;
 }
 
