@@ -259,6 +259,9 @@ export async function goldScore(env: Env, a: { note: string; answers: { id: stri
   const truth = new Map(marks.results.map((m) => [m.id, m.mark]));
   const unknown = ids.filter((id) => !truth.has(id));
   if (unknown.length) throw new InputError(`Not gold items: ${unknown.slice(0, 3).join(", ")}.`);
+  // A run must cover the whole gold set, or the guard could pass on an easy subset. Ids are unique and all known, so equal counts mean full cover.
+  const total = (await env.DB.prepare("SELECT COUNT(*) AS n FROM gold_items").first<{ n: number }>())?.n ?? 0;
+  if (ids.length !== total) throw new InputError(`Answer every gold item: the set has ${total} and you sent ${ids.length}.`);
   const agreed = a.answers.filter((x) => truth.get(x.id) === x.mark).length;
   const useAgreed = a.answers.filter((x) => x.mark === "use" && truth.get(x.id) === "use").length;
   const useTruth = a.answers.filter((x) => truth.get(x.id) === "use").length;

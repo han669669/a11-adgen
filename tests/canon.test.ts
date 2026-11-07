@@ -230,11 +230,11 @@ describe("gold set", () => {
     expect((await canon.goldGet(env, {})).total).toBe(4);
   });
 
-  it("takes a full run of up to 500 answers in one call", () => {
+  it("takes a full run of up to 2000 answers in one call", () => {
     const t = TOOLS.find((x) => x.name === "gold_score")!;
-    const answers = Array.from({ length: 200 }, (_, i) => ({ id: `00000000-0000-0000-0000-${String(i).padStart(12, "0")}`, mark: "use" }));
+    const answers = Array.from({ length: 2000 }, (_, i) => ({ id: `00000000-0000-0000-0000-${String(i).padStart(12, "0")}`, mark: "use" }));
     expect(() => validate(t.inputSchema, { note: "full run", answers })).not.toThrow();
-    expect(() => validate(t.inputSchema, { note: "too many", answers: Array.from({ length: 501 }, () => answers[0]) })).toThrow();
+    expect(() => validate(t.inputSchema, { note: "too many", answers: [...answers, answers[0]] })).toThrow();
     expect(() => validate(TOOLS.find((x) => x.name === "gold_get")!.inputSchema, { limit: 500 })).not.toThrow();
   });
 
@@ -257,6 +257,9 @@ describe("gold set", () => {
     raw.prepare("INSERT INTO gold_runs (note, n, agreed, at) VALUES ('old run', 264, 185, 'then')").run();
     const [run] = (await canon.goldRuns(env)).runs;
     expect(run).toMatchObject({ note: "old run", agreement: 0.701 });
+    expect(run).not.toHaveProperty("baseline");
+    expect(run).not.toHaveProperty("useRecall");
+    expect(run).not.toHaveProperty("passRecall");
     expect(run).not.toHaveProperty("balancedAccuracy");
     await canon.goldImport(env, [{ label: "a", mark: "use" }, { label: "b", mark: "pass" }]);
     const answers = (await canon.goldGet(env, {})).items.map((i) => ({ id: i.id as string, mark: "pass" as const }));
@@ -269,6 +272,14 @@ describe("gold set", () => {
     const id = ((await canon.goldGet(env, {})).items[0]!.id) as string;
     await expect(canon.goldScore(env, { note: "x y z", answers: [{ id: "11111111-1111-1111-1111-111111111111", mark: "use" }] })).rejects.toThrow(/Not gold items/);
     await expect(canon.goldScore(env, { note: "x y z", answers: [{ id, mark: "use" }, { id, mark: "pass" }] })).rejects.toThrow(/once/);
+  });
+
+  it("refuses a run that does not answer every gold item", async () => {
+    const { env } = makeEnv();
+    await canon.goldImport(env, items);
+    const g = (await canon.goldGet(env, {})).items;
+    await expect(canon.goldScore(env, { note: "easy subset", answers: [{ id: g[0]!.id as string, mark: "pass" }] })).rejects.toThrow(/Answer every gold item: the set has 3 and you sent 1/);
+    expect((await canon.goldRuns(env)).runs).toHaveLength(0);
   });
 
   it("pages the gold set in a fixed order", async () => {

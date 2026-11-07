@@ -534,7 +534,7 @@ export const TOOLS: Tool[] = [
         answers: {
           type: "array",
           minItems: 1,
-          maxItems: 500,
+          maxItems: 2000,
           items: {
             type: "object",
             properties: { id: { type: "string", pattern: "^[0-9a-f-]{36}$" }, mark: { type: "string", enum: ["use", "pass"] } },
