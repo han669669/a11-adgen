@@ -1,13 +1,12 @@
 import { brandBySlug } from "./brand";
 import type { Env } from "./env";
-import { readCapped, TooLargeError } from "./images";
 import { InputError } from "./schema";
 import { packByToken } from "./pack";
 
 const now = () => new Date().toISOString();
 
-/** The largest file the portal takes. It equals the limit of image_get, so the owner can always look at an uploaded image. */
-export const UPLOAD_MAX_BYTES = 3_000_000;
+/** The largest file the portal takes (owner, 2026-11-07: 30 MB at most). image_get shows a larger image reduced, because MCP carries 3 MB. */
+export const UPLOAD_MAX_BYTES = 30_000_000;
 /** One pack link takes at most this many files in 24 hours. A leaked link cannot fill the bucket. */
 export const UPLOADS_PER_DAY = 5;
 /** Form fields and boundaries around the file. */
@@ -22,17 +21,28 @@ const IMAGE_TYPES: { type: string; ext: string; is: (b: Uint8Array) => boolean }
   { type: "image/webp", ext: "webp", is: (b) => b.length > 12 && String.fromCharCode(...b.slice(0, 4)) === "RIFF" && String.fromCharCode(...b.slice(8, 12)) === "WEBP" },
 ];
 
-/** What the file really is, from its bytes (the browser's type and the file name are not trusted). CSV: valid UTF-8 text with no control characters but tab and new lines. */
-function sniff(bytes: Uint8Array): { kind: "image" | "csv"; type: string; ext: string } | null {
-  const img = IMAGE_TYPES.find((t) => t.is(bytes));
+const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+const CHUNK = 1_048_576;
+
+/** What the file really is, from its bytes (the browser's type and the file name are not trusted). CSV: valid UTF-8 text with no control characters but tab and new lines, checked in 1 MB pieces so a big file is never held as text. */
+async function sniff(file: Blob): Promise<{ kind: "image" | "csv"; type: string; ext: string } | null> {
+  const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  const img = IMAGE_TYPES.find((t) => t.is(head));
   if (img) return { kind: "image", type: img.type, ext: img.ext };
+  const dec = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
+  let delimiter = false;
+  let newline = false;
   try {
-    const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
-    if (!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text) && /[,;\t]/.test(text) && /\n/.test(text)) return { kind: "csv", type: "text/csv", ext: "csv" };
+    for (let at = 0; at < file.size; at += CHUNK) {
+      const text = dec.decode(await file.slice(at, at + CHUNK).arrayBuffer(), { stream: at + CHUNK < file.size });
+      if (CONTROL.test(text)) return null;
+      delimiter ||= /[,;\t]/.test(text);
+      newline ||= text.includes("\n");
+    }
   } catch {
-    // not text
+    return null; // not UTF-8 text
   }
-  return null;
+  return delimiter && newline ? { kind: "csv", type: "text/csv", ext: "csv" } : null;
 }
 
 /** A file name safe to show: letters, digits and . _ - only. It is data, never a path. */
@@ -43,38 +53,32 @@ export async function uploadAdd(env: Env, request: Request, token: string): Prom
   if (request.headers.get("sec-fetch-site") === "cross-site") return { ok: false, status: 403, message: "Not allowed." };
   const pack = await packByToken(env, token);
   if (!pack) return { ok: false, status: 404, message: "Not found." };
-  const tooBig = { ok: false as const, status: 413, message: "That file is too big. Please send one under 3 MB." };
+  const tooBig = { ok: false as const, status: 413, message: "That file is too big. Please send one under 30 MB." };
   const ct = request.headers.get("content-type") ?? "";
   if (!/^multipart\/form-data\s*;/i.test(ct)) return { ok: false, status: 400, message: "Choose a file first." };
-  if (Number(request.headers.get("content-length") ?? 0) > UPLOAD_MAX_BYTES + FORM_OVERHEAD) return tooBig;
-  // Stops reading at the cap, so a body of unknown length is not buffered whole.
-  let body: Uint8Array;
-  try {
-    body = await readCapped(request, "The file", UPLOAD_MAX_BYTES + FORM_OVERHEAD);
-  } catch (e) {
-    if (e instanceof TooLargeError) return tooBig;
-    throw e;
-  }
+  // The length must be declared: the edge ends the body at that length, so the limit holds without reading it into memory first.
+  const length = Number(request.headers.get("content-length"));
+  if (!Number.isInteger(length) || length <= 0) return { ok: false, status: 411, message: "Please use a normal browser to send the file." };
+  if (length > UPLOAD_MAX_BYTES + FORM_OVERHEAD) return tooBig;
   let form: FormData;
   try {
-    form = await new Response(body, { headers: { "content-type": ct } }).formData();
+    form = await request.formData();
   } catch {
     return { ok: false, status: 400, message: "Choose a file first." };
   }
   const file = form.get("file");
   if (!(file instanceof File) || file.size === 0) return { ok: false, status: 400, message: "Choose a file first." };
   if (file.size > UPLOAD_MAX_BYTES) return tooBig;
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const kind = sniff(bytes);
+  const kind = await sniff(file);
   if (!kind) return { ok: false, status: 415, message: "Please send a screenshot (PNG, JPG or WebP) or a CSV file." };
   const id = crypto.randomUUID();
   const key = `uploads/${pack.id}/${id}.${kind.ext}`;
-  await env.MEDIA.put(key, bytes, { httpMetadata: { contentType: kind.type } });
+  await env.MEDIA.put(key, file, { httpMetadata: { contentType: kind.type } });
   // One statement: the count and the insert cannot be split by a second request.
   const since = new Date(Date.now() - 86_400_000).toISOString();
   const r = await env.DB.prepare(
     "INSERT INTO uploads (id, pack_id, r2_key, kind, bytes, file_name, created_at) SELECT ?, ?, ?, ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM uploads WHERE pack_id = ? AND created_at > ?) < ?",
-  ).bind(id, pack.id, key, kind.kind, bytes.length, cleanName(file.name), now(), pack.id, since, UPLOADS_PER_DAY).run();
+  ).bind(id, pack.id, key, kind.kind, file.size, cleanName(file.name), now(), pack.id, since, UPLOADS_PER_DAY).run();
   if (!r.meta.changes) {
     await env.MEDIA.delete(key); // nothing points to it
     return { ok: false, status: 429, message: "That is a lot of files for one day. Please try again tomorrow." };
@@ -93,7 +97,7 @@ interface Row {
   version: number;
 }
 
-/** The client's uploaded files for a brand, oldest first (the order to read them). A CSV comes as text; an image as a key for image_get. */
+/** The client's uploaded files for a brand, oldest first (the order to read them). A CSV comes as text (the first 100,000 bytes); an image as a key for image_get (a big one is shown reduced). */
 export async function uploadsGet(env: Env, input: { brand: string; includeDone?: boolean; limit?: number }) {
   const b = await brandBySlug(env, input.brand);
   const rows = await env.DB.prepare(
@@ -106,10 +110,9 @@ export async function uploadsGet(env: Env, input: { brand: string; includeDone?:
     let csv: string | undefined;
     let truncated = false;
     if (r.kind === "csv") {
-      const obj = await env.MEDIA.get(r.r2_key);
-      const text = obj ? await obj.text() : "";
-      truncated = text.length > CSV_READ_MAX;
-      csv = text.slice(0, CSV_READ_MAX);
+      const obj = await env.MEDIA.get(r.r2_key, { range: { offset: 0, length: CSV_READ_MAX } });
+      csv = obj ? (await obj.text()).slice(0, CSV_READ_MAX) : "";
+      truncated = r.bytes > CSV_READ_MAX;
     }
     files.push({
       id: r.id,

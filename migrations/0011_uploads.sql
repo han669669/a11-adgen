@@ -6,7 +6,7 @@ CREATE TABLE uploads (
   pack_id TEXT NOT NULL REFERENCES packs(id),
   r2_key TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('image', 'csv')),
-  bytes INTEGER NOT NULL CHECK (bytes BETWEEN 1 AND 3000000),
+  bytes INTEGER NOT NULL CHECK (bytes BETWEEN 1 AND 30000000),
   file_name TEXT NOT NULL,
   created_at TEXT NOT NULL,
   done_at TEXT                    -- NULL until the owner has saved the numbers from this file

@@ -18,11 +18,13 @@ const CSV = "Ad name,Impressions,Clicks\na11_W45_wongi_b01_tof_c01_v1,2000,60\n"
 async function makeEnv() {
   const store = new Map<string, { bytes: Uint8Array; type?: string }>();
   const MEDIA = {
-    put: async (k: string, v: Uint8Array, o: { httpMetadata?: { contentType?: string } }) => void store.set(k, { bytes: v, type: o.httpMetadata?.contentType }),
+    put: async (k: string, v: Blob | Uint8Array, o: { httpMetadata?: { contentType?: string } }) =>
+      void store.set(k, { bytes: v instanceof Blob ? new Uint8Array(await v.arrayBuffer()) : v, type: o.httpMetadata?.contentType }),
     delete: async (k: string) => void store.delete(k),
-    get: async (k: string) => {
+    get: async (k: string, opts?: { range?: { offset: number; length: number } }) => {
       const o = store.get(k);
-      return o ? { size: o.bytes.length, httpMetadata: { contentType: o.type }, text: async () => new TextDecoder().decode(o.bytes), arrayBuffer: async () => o.bytes.buffer } : null;
+      const bytes = o && opts?.range ? o.bytes.slice(opts.range.offset, opts.range.offset + opts.range.length) : o?.bytes;
+      return o && bytes ? { size: o.bytes.length, httpMetadata: { contentType: o.type }, body: "stream", text: async () => new TextDecoder().decode(bytes), arrayBuffer: async () => bytes.buffer } : null;
     },
   };
   const IMAGES = { input: () => ({ transform: () => IMAGES.input(), output: async () => ({ response: () => new Response("png-bytes") }) }) };
@@ -43,10 +45,13 @@ async function makeEnv() {
 }
 
 const uploadKeys = (store: Map<string, unknown>) => [...store.keys()].filter((k) => k.startsWith("uploads/"));
-const send = (env: Env, file: Blob | null, name = "shot.png", headers: Record<string, string> = {}, token = TOKEN) => {
+/** A browser sends the length of a form body. The test builds the same bytes and header. */
+const send = async (env: Env, file: Blob | null, name = "shot.png", headers: Record<string, string> = {}, token = TOKEN) => {
   const fd = new FormData();
   if (file) fd.append("file", file, name);
-  return worker.fetch(new Request(`https://w/c/${token}/upload`, { method: "POST", body: fd, headers }), env);
+  const packed = new Response(fd);
+  const body = await packed.arrayBuffer();
+  return worker.fetch(new Request(`https://w/c/${token}/upload`, { method: "POST", body, headers: { "content-type": packed.headers.get("content-type")!, "content-length": String(body.byteLength), ...headers } }), env);
 };
 const call = async (env: Env, name: string, args: object) => {
   const t = TOOLS.find((x) => x.name === name)!;
@@ -99,11 +104,28 @@ describe("client results upload", () => {
     expect((await send(env, new Blob([PNG]))).status).toBe(404);
   });
 
-  it("stops a body of unknown length at the cap", async () => {
+  it("asks for a declared length, and refuses a declared length over the cap before it reads the body", async () => {
     const { env } = await makeEnv();
-    const big = new ReadableStream<Uint8Array>({ pull: (c) => c.enqueue(new Uint8Array(1_000_000)) });
-    const r = await worker.fetch(new Request(`https://w/c/${TOKEN}/upload`, { method: "POST", body: big, duplex: "half", headers: { "content-type": "multipart/form-data; boundary=x" } } as RequestInit & { duplex: string }), env);
-    expect(r.status).toBe(413);
+    const noLength = new ReadableStream<Uint8Array>({ pull: (c) => c.enqueue(new Uint8Array(1_000_000)) });
+    const r = await worker.fetch(new Request(`https://w/c/${TOKEN}/upload`, { method: "POST", body: noLength, duplex: "half", headers: { "content-type": "multipart/form-data; boundary=x" } } as RequestInit & { duplex: string }), env);
+    expect(r.status).toBe(411);
+    const big = await worker.fetch(new Request(`https://w/c/${TOKEN}/upload`, { method: "POST", body: "x", headers: { "content-type": "multipart/form-data; boundary=x", "content-length": String(UPLOAD_MAX_BYTES * 2) } }), env);
+    expect(big.status).toBe(413);
+  });
+
+  it("takes a big screenshot (up to 30 MB) and a CSV bigger than one 1 MB piece", async () => {
+    const { env } = await makeEnv();
+    const big = new Uint8Array(12_000_000);
+    big.set(PNG);
+    expect((await send(env, new Blob([big], { type: "image/png" }), "big.png")).status).toBe(303);
+    const row = "a11_W45_wongi_b01_tof_c01_v1,2000,60,Café €\n";
+    const csv = "Ad name,Impressions,Clicks,Note\n" + row.repeat(60_000);
+    expect(csv.length).toBeGreaterThan(2_000_000);
+    expect((await send(env, new Blob([csv], { type: "text/csv" }), "big.csv")).status).toBe(303);
+    const g = await call(env, "uploads_get", { brand: "won-gi" });
+    expect(g.files.map((f: { kind: string }) => f.kind)).toEqual(["image", "csv"]);
+    expect(g.files[1]).toMatchObject({ truncated: true });
+    expect(g.files[1].csv.length).toBeLessThanOrEqual(100_000);
   });
 
   it("takes only a few files per link per day and removes the extra file from R2", async () => {
@@ -131,6 +153,23 @@ describe("client results upload", () => {
     const t = TOOLS.find((x) => x.name === "image_get")!;
     const r = await t.run(env, validate(t.inputSchema, { key }));
     expect(r.content[1]).toEqual({ type: "text", text: key });
+  });
+
+  it("image_get shows an upload over 3 MB reduced, and still refuses a big image that is not an upload", async () => {
+    const { env, store } = await makeEnv();
+    const big = new Uint8Array(5_000_000);
+    big.set(PNG);
+    await send(env, new Blob([big], { type: "image/png" }));
+    const key = (await call(env, "uploads_get", { brand: "won-gi" })).files[0].imageKey;
+    const seen: unknown[] = [];
+    const IMAGES = { input: () => ({ transform: (o: unknown) => (seen.push(o), IMAGES.input()), output: async (o: unknown) => (seen.push(o), { response: () => new Response("small-jpeg") }) }) };
+    const t = TOOLS.find((x) => x.name === "image_get")!;
+    const r = await t.run({ ...env, IMAGES } as unknown as Env, validate(t.inputSchema, { key }));
+    expect(r.content[0]).toMatchObject({ type: "image", mimeType: "image/jpeg" });
+    expect(seen).toEqual([{ width: 2000, fit: "scale-down" }, { format: "image/jpeg", quality: 80 }]);
+    const render = "renders/11111111-1111-4111-8111-111111111111/1.jpg";
+    store.set(render, { bytes: big, type: "image/jpeg" });
+    await expect(t.run(env, validate(t.inputSchema, { key: render }))).rejects.toThrow("the limit is");
   });
 
   it("the results prompt reads the uploads before it reads the numbers", () => {

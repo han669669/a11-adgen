@@ -870,10 +870,19 @@ export const TOOLS: Tool[] = [
     run: async (env, a) => {
       const obj = await env.MEDIA.get(a.key);
       if (!obj) throw new Error(`No image at ${a.key}.`);
-      if (obj.size > MAX_IMAGE_BYTES) throw new Error(`Image is ${obj.size} bytes; the limit is ${MAX_IMAGE_BYTES}.`);
+      let data: ArrayBuffer;
+      let mimeType = obj.httpMetadata?.contentType ?? "image/jpeg";
+      if (obj.size <= MAX_IMAGE_BYTES) data = await obj.arrayBuffer();
+      else if (a.key.startsWith("uploads/")) {
+        // A client's upload can be up to 30 MB. MCP carries 3 MB, so it is shown reduced (2000 px wide, JPEG). The stored file is not changed.
+        const small = await env.IMAGES.input(obj.body).transform({ width: 2000, fit: "scale-down" }).output({ format: "image/jpeg", quality: 80 });
+        data = await small.response().arrayBuffer();
+        mimeType = "image/jpeg";
+        if (data.byteLength > MAX_IMAGE_BYTES) throw new Error(`Image is ${obj.size} bytes and still ${data.byteLength} reduced; the limit is ${MAX_IMAGE_BYTES}.`);
+      } else throw new Error(`Image is ${obj.size} bytes; the limit is ${MAX_IMAGE_BYTES}.`);
       return {
         content: [
-          { type: "image", data: toBase64(await obj.arrayBuffer()), mimeType: obj.httpMetadata?.contentType ?? "image/jpeg" },
+          { type: "image", data: toBase64(data), mimeType },
           // An upload is the client's private file: it has no public URL.
           { type: "text", text: a.key.startsWith("uploads/") ? a.key : fal.mediaUrl(env, a.key) },
         ],
