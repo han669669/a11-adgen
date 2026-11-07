@@ -60,7 +60,7 @@ The business: a11studio.pro sells 16 static ads per month (4 per week) for S$2,8
 | Frontend | Vite + React + TypeScript SPA, Tailwind v4, shadcn/ui, Fluid Functionalism (`npx shadcn@latest registry add @fluid`, Radix flavour; needs Inter with the `opsz` axis) |
 | Auth | Email + password. Only allow-listed emails can sign up. |
 | Backend | Cloudflare only: Workers (API + static assets), D1, R2, Workflows, Browser Rendering, Cron Triggers, Images, Workers Logs. No Convex. |
-| MCP | Remote MCP server on Workers, hand-written (`worker/mcp.ts`: stateless Streamable HTTP, JSON responses, tools only). No Agents SDK or MCP SDK: they made the bundle 1.2 MB. Phase 1 adds OAuth 2.1 (`@cloudflare/workers-oauth-provider`, if its size allows). |
+| MCP | Remote MCP server on Workers, hand-written (`worker/mcp.ts`: stateless Streamable HTTP, JSON responses, tools and prompts). No Agents SDK or MCP SDK: they made the bundle 1.2 MB. OAuth 2.1 comes from `@cloudflare/workers-oauth-provider` in `worker/entry.ts` (the Worker entry; the app is `worker/index.ts`); the bundle is about 225 KB. |
 | Research | Exa (`/search`, `/contents`; Websets later for prospecting). |
 | Images | fal.ai `openai/gpt-image-2.5/sunburst/edit` and `/text-to-image`. Drafts `quality: low` at 1024x1280. Finals `quality: high` at 1536x1920. 4:5 only. |
 

@@ -1,5 +1,11 @@
+import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
+
 export interface Env {
   DB: D1Database;
+  /** KV for the MCP OAuth login (clients, grants, tokens as hashes). Free plan. */
+  OAUTH_KV: KVNamespace;
+  /** Set by the OAuth provider on the requests it passes to the app. */
+  OAUTH_PROVIDER: OAuthHelpers;
   MEDIA: R2Bucket;
   IMAGES: ImagesBinding;
   /**

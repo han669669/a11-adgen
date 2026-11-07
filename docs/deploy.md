@@ -6,12 +6,12 @@ There is no Cloudflare API token in the session (owner decision). Deploys go thr
 
 The steps below are for the live Worker `a11adgen` (D1 `a11adgen-db`, R2 `a11adgen-assets`), and only from `main` after a merge. For a branch, use the same steps with the preview targets in "Preview deploy" below. Never the live ones.
 
-1. Build: `npx wrangler deploy --dry-run --minify --outdir .wrangler/dry`. Note the SHA-256 of `.wrangler/dry/index.js`.
+1. Build: `npx wrangler deploy --dry-run --minify --outdir .wrangler/dry`. Note the SHA-256 of `.wrangler/dry/entry.js` (the Worker entry is `worker/entry.ts`).
 2. Stage: `PUT /admin/stage/<name>.js` on the target Worker, with the `/mcp` bearer token and the bundle as the body. It saves `deploy/<name>.js` in that Worker's R2 bucket. Stage each new SQL file in `migrations/` the same way.
 3. D1 migrations, before the new code goes live (the code may need the new tables): in the connector, read each staged SQL file, check its SHA-256, run it with the D1 query API on the target database, then insert its name into `d1_migrations`. Skip a file already listed there.
 4. Deploy with the connector: read `deploy/<name>.js` from the target bucket, check its SHA-256 against step 1, then `PUT /accounts/{id}/workers/scripts/<worker>` (multipart): upload the bundle as a JavaScript module part named `index.js` (`application/javascript+module`) and set metadata `main_module` to `index.js`, with:
    - `compatibility_date` `2026-10-20`, `compatibility_flags` `["nodejs_compat"]`;
-   - the bindings in `wrangler.jsonc` (including `{ "type": "images", "name": "IMAGES" }`), plus `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256` as `plain_text` (hashes only; not in `wrangler.jsonc`);
+   - the bindings in `wrangler.jsonc` (including `{ "type": "images", "name": "IMAGES" }` and the KV namespace `OAUTH_KV`: live `a11adgen-oauth` `e29131310aa446489fa715d74e1c35ff`, preview `a11adgen-preview-oauth` `830b5d7881a049fb8712411763495000`), plus `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256` as `plain_text` (hashes only; not in `wrangler.jsonc`);
    - `keep_bindings: ["secret_text"]`, so the owner's `FAL_KEY`, `EXA_API_KEY` and `ALLOWED_EMAILS` stay.
 5. Web app: `npm run build:app`, then `PUT /admin/app/<path>` on the target Worker (same bearer token) for each file in `dist/app`, `index.html` last. It saves to `app/` in that Worker's bucket, and the Worker serves the app from there. Old hashed files in `app/assets/` can stay; `index.html` points to the new ones.
 6. Smoke test: `spend_get` through `/mcp`, `/api/me` (401 without a session), and one call of each changed tool.

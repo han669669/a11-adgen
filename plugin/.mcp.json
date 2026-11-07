@@ -2,8 +2,7 @@
   "mcpServers": {
     "a11": {
       "type": "http",
-      "url": "https://a11adgen.gamingcomputing.workers.dev/mcp",
-      "headers": { "Authorization": "Bearer ${A11_MCP_TOKEN}" }
+      "url": "https://a11adgen.gamingcomputing.workers.dev/mcp"
     }
   }
 }
