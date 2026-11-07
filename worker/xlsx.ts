@@ -1,16 +1,18 @@
 /**
- * Read an .xlsx file (a zip of XML files) and give its first sheet as CSV text.
+ * Read an .xlsx file (a zip of XML files) and give its sheets as CSV text.
  * No dependency. A client sends the file, so every read is bounded: a zip bomb is stopped by a cap on the unpacked size of each part.
  * A Google Sheet downloaded as Excel is an .xlsx file too.
  */
 
-/** The most unpacked bytes the Worker reads from the data parts (the sheet and the shared strings). A results export is far smaller. */
+/** The most unpacked bytes the Worker reads from the data parts (all the sheet files together, and the shared strings). A results export is far smaller. */
 const PART_MAX = 10_000_000;
 /** The same, for the small parts that describe the file (the workbook, its links and the styles). */
 const META_MAX = 1_000_000;
 /** The CSV text stops here. The owner's tool reads only the first 100,000 bytes anyway. */
 const CSV_MAX = 2_000_000;
 const MAX_COLUMNS = 2_000;
+/** The most sheets read from one workbook. */
+const MAX_SHEETS = 30;
 
 export class XlsxError extends Error {}
 
@@ -199,33 +201,36 @@ const columnOf = (ref: string) => {
   return n - 1;
 };
 
-/** The first sheet of an .xlsx file as CSV text (formulas give their last saved value, dates give yyyy-mm-dd). */
-export async function xlsxToCsv(file: Blob): Promise<{ csv: string; sheet: string }> {
-  const zip = await listZip(file);
-  if (!zip?.get("xl/workbook.xml")) throw new XlsxError("broken");
-  const part = async (name: string, max?: number) => {
-    const e = zip.get(name);
-    return e ? readPart(file, e, max) : undefined;
-  };
-  const workbook = (await part("xl/workbook.xml", META_MAX))!;
-  const first = elements(workbook, "sheet", false).next().value?.attrs;
-  const rid = first && (attr(first, "r:id") ?? attr(first, "id"));
-  let path: string | undefined;
-  if (rid) {
-    const rels = (await part("xl/_rels/workbook.xml.rels", META_MAX)) ?? "";
-    for (const rel of elements(rels, "Relationship", false)) {
-      if (attr(rel.attrs, "Id") === rid) {
-        const target = attr(rel.attrs, "Target") ?? "";
-        path = target.startsWith("/") ? target.slice(1) : `xl/${target}`;
-      }
-    }
+/** A sheet name as one safe heading line (no line breaks or control characters, not too long). */
+const headingName = (name: string) => unxml(name).replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, 100) || "Sheet";
+
+/** The sheets of a workbook, in order, with the path of each sheet's file. A hidden sheet is left out. */
+async function listSheets(zip: Map<string, ZipEntry>, workbook: string, rels: () => Promise<string>): Promise<{ name: string; path: string }[]> {
+  const targets = new Map<string, string>();
+  const relsXml = await rels();
+  for (const rel of elements(relsXml, "Relationship", false)) {
+    const id = attr(rel.attrs, "Id");
+    const target = attr(rel.attrs, "Target") ?? "";
+    if (id) targets.set(id, target.startsWith("/") ? target.slice(1) : `xl/${target}`);
   }
-  if (!path || !zip.has(path)) path = [...zip.keys()].filter((k) => /^xl\/worksheets\/sheet\d+\.xml$/.test(k)).sort()[0];
-  if (!path) throw new XlsxError("empty");
-  const sheetXml = (await part(path))!;
-  const shared: string[] = [];
-  for (const si of elements((await part("xl/sharedStrings.xml")) ?? "", "si")) shared.push(textOf(si.body));
-  const dates = dateStyles((await part("xl/styles.xml", META_MAX)) ?? "");
+  const out: { name: string; path: string }[] = [];
+  for (const s of elements(workbook, "sheet", false)) {
+    if (out.length >= MAX_SHEETS) break;
+    if (/hidden/i.test(attr(s.attrs, "state") ?? "")) continue;
+    const rid = attr(s.attrs, "r:id") ?? attr(s.attrs, "id");
+    const path = rid && targets.get(rid);
+    if (path && zip.has(path)) out.push({ name: attr(s.attrs, "name") ?? "Sheet", path });
+  }
+  // No usable link: fall back to the sheet files, in number order.
+  if (!out.length) {
+    const files = [...zip.keys()].filter((k) => /^xl\/worksheets\/sheet\d+\.xml$/.test(k)).sort((x, y) => Number(/\d+/.exec(x)![0]) - Number(/\d+/.exec(y)![0]));
+    for (const path of files.slice(0, MAX_SHEETS)) out.push({ name: `Sheet${/\d+/.exec(path)![0]}`, path });
+  }
+  return out;
+}
+
+/** One sheet's rows as CSV lines (formulas give their last saved value, dates give yyyy-mm-dd). Stops at `room` bytes of text. */
+function sheetLines(sheetXml: string, shared: string[], dates: Set<number>, room: number): string[] {
   const lines: string[] = [];
   let size = 0;
   for (const row of elements(sheetXml, "row")) {
@@ -254,9 +259,50 @@ export async function xlsxToCsv(file: Blob): Promise<{ csv: string; sheet: strin
     if (!cells.length) continue;
     const line = cells.join(",");
     size += line.length + 1;
-    if (size > CSV_MAX) break;
+    if (size > room) break;
     lines.push(line);
   }
-  if (!lines.length) throw new XlsxError("empty");
-  return { csv: lines.join("\n") + "\n", sheet: attr(first ?? "", "name") ?? "Sheet1" };
+  return lines;
+}
+
+/**
+ * Every visible sheet of an .xlsx file as CSV text, in workbook order.
+ * When more than one sheet has values, each one starts with a line "# Sheet: <name>". A workbook with one sheet gives plain CSV.
+ * Bounds: at most MAX_SHEETS sheets, PART_MAX unpacked bytes in all the sheet files together, CSV_MAX bytes of text in all.
+ */
+export async function xlsxToCsv(file: Blob): Promise<{ csv: string; sheets: string[] }> {
+  const zip = await listZip(file);
+  if (!zip?.get("xl/workbook.xml")) throw new XlsxError("broken");
+  const part = async (name: string, max?: number) => {
+    const e = zip.get(name);
+    return e ? readPart(file, e, max) : undefined;
+  };
+  const workbook = (await part("xl/workbook.xml", META_MAX))!;
+  const sheets = await listSheets(zip, workbook, async () => (await part("xl/_rels/workbook.xml.rels", META_MAX)) ?? "");
+  if (!sheets.length) throw new XlsxError("empty");
+  const shared: string[] = [];
+  for (const si of elements((await part("xl/sharedStrings.xml")) ?? "", "si")) shared.push(textOf(si.body));
+  const dates = dateStyles((await part("xl/styles.xml", META_MAX)) ?? "");
+  const found: { name: string; lines: string[] }[] = [];
+  let budget = PART_MAX;
+  let room = CSV_MAX;
+  for (const s of sheets) {
+    if (budget <= 0 || room <= 0) break;
+    let xml: string;
+    try {
+      xml = (await part(s.path, budget))!;
+    } catch (err) {
+      // A later sheet that is too big is left out. The first one is an error: nothing could be read.
+      if (found.length && err instanceof XlsxError && err.message === "big") break;
+      throw err;
+    }
+    budget -= xml.length;
+    const lines = sheetLines(xml, shared, dates, room);
+    if (!lines.length) continue;
+    room -= lines.reduce((n, l) => n + l.length + 1, 0);
+    found.push({ name: headingName(s.name), lines });
+  }
+  if (!found.length) throw new XlsxError("empty");
+  const csv = found.length === 1 ? found[0]!.lines.join("\n") + "\n" : found.map((f) => `# Sheet: ${f.name}\n${f.lines.join("\n")}\n`).join("\n");
+  return { csv, sheets: found.map((f) => f.name) };
 }

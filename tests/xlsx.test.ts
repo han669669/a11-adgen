@@ -9,15 +9,14 @@ const sheet = (rows: string) => `<worksheet><sheetData>${rows}</sheetData></work
 const book = (rows: string, extra: { name: string; data: string }[] = []) => zip([{ name: "xl/workbook.xml", data: WORKBOOK }, { name: "xl/_rels/workbook.xml.rels", data: RELS }, { name: "xl/worksheets/sheet1.xml", data: sheet(rows) }, ...extra]);
 
 describe("xlsx reader", () => {
-  it("reads real Excel files from two different writers: quotes, line breaks, dates, a blank cell, a formula value, entities, first sheet only", async () => {
-    const first = 'Ad name,Impressions,Clicks,Spend,Day,Note\na11_W45_wongi_b01_tof_c01_v1,2000,60,12.5,2026-11-02,"Café, ""quoted"""\na11_W45_wongi_b01_mof_c01_v1,1500,';
-    for (const [fixture, third] of [[OPENPYXL_XLSX, ",3.75,2026-11-03 14:30:00,\"line1\nline2\"\nTRUE,x < y & z\n"], [XLSXWRITER_XLSX, "500,3.75,2026-11-03 14:30:00,\"line1\nline2\"\nTRUE\n"]] as const) {
+  it("reads real Excel files from two different writers: quotes, line breaks, dates, a blank cell, a formula value, entities, and every sheet with a heading line", async () => {
+    const first = '# Sheet: Ads\nAd name,Impressions,Clicks,Spend,Day,Note\na11_W45_wongi_b01_tof_c01_v1,2000,60,12.5,2026-11-02,"Café, ""quoted"""\na11_W45_wongi_b01_mof_c01_v1,1500,';
+    for (const [fixture, third] of [[OPENPYXL_XLSX, ",3.75,2026-11-03 14:30:00,\"line1\nline2\"\nTRUE,x < y & z\n\n# Sheet: Other\nignored\n"], [XLSXWRITER_XLSX, "500,3.75,2026-11-03 14:30:00,\"line1\nline2\"\nTRUE\n\n# Sheet: Other\nignored\n"]] as const) {
       const f = fromB64(fixture);
       expect(await isXlsx(f)).toBe(true);
       const r = await xlsxToCsv(f);
-      expect(r.sheet).toBe("Ads");
+      expect(r.sheets).toEqual(["Ads", "Other"]);
       expect(r.csv).toBe(first + third);
-      expect(r.csv).not.toContain("ignored"); // the second sheet is not read
     }
   });
 
@@ -37,6 +36,47 @@ describe("xlsx reader", () => {
 
   it("says empty for a sheet with no values", async () => {
     await expect(xlsxToCsv(await book('<row r="1"><c r="A1"/></row>'))).rejects.toBeInstanceOf(XlsxError);
+  });
+
+  const row = (v: string) => `<row r="1"><c r="A1" t="inlineStr"><is><t>${v}</t></is></c></row>`;
+  const many = (sheets: { name: string; xml: string; state?: string }[]) =>
+    zip([
+      { name: "xl/workbook.xml", data: `<workbook xmlns:r="r"><sheets>${sheets.map((s, i) => `<sheet name="${s.name}" sheetId="${i + 1}"${s.state ? ` state="${s.state}"` : ""} r:id="rId${i + 1}"/>`).join("")}</sheets></workbook>` },
+      { name: "xl/_rels/workbook.xml.rels", data: `<Relationships>${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="x" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}</Relationships>` },
+      ...sheets.map((s, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, data: s.xml })),
+    ]);
+
+  it("reads every visible sheet in order, skips hidden and empty sheets, and gives no heading when only one sheet has values", async () => {
+    const f = await many([{ name: "Summary", xml: sheet(row("one")) }, { name: "Secret", state: "hidden", xml: sheet(row("hidden")) }, { name: "Blank", xml: sheet('<row r="1"/>') }, { name: "Detail", xml: sheet(row("two")) }]);
+    const r = await xlsxToCsv(f);
+    expect(r.csv).toBe("# Sheet: Summary\none\n\n# Sheet: Detail\ntwo\n");
+    expect(r.sheets).toEqual(["Summary", "Detail"]);
+    const one = await many([{ name: "Blank", xml: sheet('<row r="1"/>') }, { name: "Only", xml: sheet(row("x")) }]);
+    expect((await xlsxToCsv(one)).csv).toBe("x\n");
+  });
+
+  it("makes a hostile sheet name a safe one-line heading", async () => {
+    const f = await many([{ name: "a&#10;# Sheet: fake&#13;b", xml: sheet(row("one")) }, { name: "&lt;img src=x onerror=alert(1)&gt;" + "z".repeat(300), xml: sheet(row("two")) }]);
+    const lines = (await xlsxToCsv(f)).csv.split("\n").filter((l) => l.startsWith("#"));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toBe("# Sheet: a # Sheet: fake b"); // the line breaks became spaces: no fake second heading
+    expect(lines[1]!.length).toBeLessThan(120);
+  });
+
+  it("reads at most 30 sheets", async () => {
+    const f = await many(Array.from({ length: 45 }, (_, i) => ({ name: `S${i + 1}`, xml: sheet(row(`v${i + 1}`)) })));
+    const r = await xlsxToCsv(f);
+    expect(r.sheets).toHaveLength(30);
+    expect(r.sheets[29]).toBe("S30");
+  });
+
+  it("the unpacked byte cap covers all the sheets together: a later sheet that does not fit is left out, the first one is an error", async () => {
+    const filler = (n: number) => sheet(row("x") + " ".repeat(n));
+    const ok = await many([{ name: "A", xml: filler(6_000_000) }, { name: "B", xml: filler(6_000_000) }]); // 12 MB in all, over the 10 MB cap
+    const r = await xlsxToCsv(ok);
+    expect(r.sheets).toEqual(["A"]);
+    const bad = await many([{ name: "A", xml: filler(11_000_000) }]);
+    await expect(xlsxToCsv(bad)).rejects.toThrow(XlsxError);
   });
 
   it("stops a zip bomb: a part that unpacks past the cap is refused, fast and without holding it", async () => {

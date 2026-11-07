@@ -290,12 +290,13 @@ describe("client results upload: many files and Excel", () => {
     expect(uploadKeys(store)).toHaveLength(4);
   });
 
-  it("an Excel file is kept as CSV text for the owner's tools (first sheet); the Excel file itself is not stored", async () => {
+  it("an Excel file is kept as CSV text for the owner's tools (every sheet); the Excel file itself is not stored", async () => {
     const { env, store } = await makeEnv();
     expect((await sendMany(env, [{ blob: fromB64(OPENPYXL_XLSX), name: "Meta report.xlsx" }])).status).toBe(303);
     const g = await call(env, "uploads_get", { brand: "won-gi" });
     expect(g.files[0]).toMatchObject({ kind: "csv", fileName: "Meta report.xlsx", truncated: false });
-    expect(g.files[0].csv.split("\n")[0]).toBe("Ad name,Impressions,Clicks,Spend,Day,Note");
+    expect(g.files[0].csv.split("\n").slice(0, 2)).toEqual(["# Sheet: Ads", "Ad name,Impressions,Clicks,Spend,Day,Note"]);
+    expect(g.files[0].csv).toContain("# Sheet: Other");
     expect(g.files[0].csv).toContain("2026-11-02");
     expect(uploadKeys(store).every((k) => k.endsWith(".csv"))).toBe(true);
     expect(store.get(uploadKeys(store)[0]!)?.type).toBe("text/csv");

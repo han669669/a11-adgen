@@ -73,7 +73,7 @@ async function storeOne(env: Env, pack: { id: string }, file: File, since: strin
   if (!kind) return fail(415, TYPES_HELP);
   let body: Blob = file;
   if (kind.xlsx) {
-    // The owner's tools read text, so the first sheet is kept as CSV. The Excel file itself is not stored.
+    // The owner's tools read text, so every visible sheet is kept as CSV. The Excel file itself is not stored.
     try {
       body = new Blob([(await xlsxToCsv(file)).csv], { type: "text/csv" });
     } catch (e) {
@@ -150,7 +150,7 @@ interface Row {
   version: number;
 }
 
-/** The client's uploaded files for a brand, oldest first (the order to read them). A CSV comes as text (the first 100,000 bytes), and so does an Excel file, converted to CSV (first sheet); an image as a key for image_get (a big one is shown reduced). */
+/** The client's uploaded files for a brand, oldest first (the order to read them). A CSV comes as text (the first 100,000 bytes), and so does an Excel file, converted to CSV (all visible sheets, each after a "# Sheet: name" line when there is more than one); an image as a key for image_get (a big one is shown reduced). */
 export async function uploadsGet(env: Env, input: { brand: string; includeDone?: boolean; limit?: number }) {
   const b = await brandBySlug(env, input.brand);
   const rows = await env.DB.prepare(
