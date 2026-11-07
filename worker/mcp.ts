@@ -367,7 +367,7 @@ export const TOOLS: Tool[] = [
   {
     name: "picks_save",
     description:
-      "Record the final picks (the drafts to render at high). Claude picks them (D2, owner 2026-11-06): the draft that best meets the bar in docs/creative-playbook.md, one per idea (the server refuses two drafts of one idea in one call). A second final for an idea only when the first fails the bar. The owner can also pick on the board. Replaces earlier picks that have no final yet.",
+      "Record the final picks (the drafts to render at high). Claude picks them (D2, owner 2026-11-06): the draft that best meets the bar in docs/creative-playbook.md, one per idea (the server refuses a second draft of an idea that already has a pick with a final). To render an idea again after its final fails the bar, use render_submit (kind 'final'). The owner can also pick on the board. Replaces earlier picks that have no final yet.",
     inputSchema: {
       type: "object",
       properties: {

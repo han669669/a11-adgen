@@ -17,7 +17,7 @@
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "a11adgen-assets" }],
   "images": { "binding": "IMAGES" },
   "vars": {
-    "SPEND_CAP_USD": "11.00",
+    "SPEND_CAP_USD": "10.56",
     "PUBLIC_BASE_URL": "https://a11adgen.gamingcomputing.workers.dev"
   }
   // Secrets (dashboard → Variables and Secrets): FAL_KEY, EXA_API_KEY. MCP_TOKEN_SHA256 holds only a hash.

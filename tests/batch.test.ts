@@ -169,9 +169,11 @@ describe("batch flow", () => {
     await expect(batch.picksSave(env, b.id, [{ key: keys[0] }, { key: keys[1] }])).rejects.toThrow("one draft per idea");
     await batch.picksSave(env, b.id, [{ key: keys[0] }]);
     raw.prepare("UPDATE picks SET final_render_id = 'f1' WHERE render_key = ?").run(keys[0]);
-    await batch.picksSave(env, b.id, [{ key: keys[2] }]);
+    await expect(batch.picksSave(env, b.id, [{ key: keys[2] }])).rejects.toThrow("already has a final");
+    const bofKeys = addDraft(raw, b.id, ideas[1]!.id, "33333333-3333-3333-3333-444444444444");
+    await batch.picksSave(env, b.id, [{ key: bofKeys[0] }]);
     const left = raw.prepare("SELECT render_key FROM picks ORDER BY render_key").all().map((r: any) => r.render_key);
-    expect(left).toEqual([keys[0], keys[2]]);
+    expect(left).toEqual([keys[0], bofKeys[0]].sort());
   });
 
   it("starts a final from a pick with the draft as the first reference", async () => {
@@ -278,7 +280,7 @@ describe("batch flow", () => {
     const other = await batch.batchCreate(env, { brandSlug: "wongi", subjectId: subject.id, label: "W47" });
     await batch.ideasSave(env, other.id, [{ format: "tof", insight: "z", visual: "z", headline: "z", picked: true }]);
     expect(() => raw.prepare("UPDATE ideas SET batch_id = ? WHERE id = ?").run(other.id, ideas[0]!.id)).toThrow("Pick limit");
-    expect(b.id).not.toBe(other.id);
+    expect(raw.prepare("SELECT batch_id FROM ideas WHERE id = ?").get(ideas[0]!.id)).toEqual({ batch_id: b.id });
   });
 
   it("reports an unknown idea id on update", async () => {

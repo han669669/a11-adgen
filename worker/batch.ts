@@ -185,6 +185,12 @@ export async function picksSave(env: Env, batchId: string, picks: { key: string;
   // One draft per idea in a call: each pick becomes a paid final.
   const ideaIds = picks.map((p) => keys.get(p.key)!);
   if (new Set(ideaIds).size !== ideaIds.length) throw new Error("Pick one draft per idea.");
+  // A pick that has a final stays, so another draft of that idea would start a second paid final.
+  const finalled = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM picks WHERE batch_id = ? AND final_render_id IS NOT NULL
+     AND idea_id IN (SELECT value FROM json_each(?)) AND render_key NOT IN (SELECT value FROM json_each(?))`,
+  ).bind(batchId, JSON.stringify(ideaIds), JSON.stringify(picks.map((p) => p.key))).first<{ n: number }>();
+  if (finalled?.n) throw new Error("An idea in this call already has a final. To render it again, use render_submit (kind 'final').");
   const listed = picks.map((p) => p.key);
   const stmts = [
     env.DB.prepare(
