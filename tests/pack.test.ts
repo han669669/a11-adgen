@@ -190,7 +190,27 @@ describe("client portal", () => {
     expect(html).toContain('href="#view-1"');
     expect(html).toContain('id="view-1"');
     expect(html).not.toContain("<script");
-    expect(pack.DEFAULT_LAUNCH_PLAN && sentencesOf(pack.DEFAULT_LAUNCH_PLAN)).toHaveLength(5);
+    expect(sentencesOf(pack.DEFAULT_LAUNCH_PLAN)).toHaveLength(5);
+    expect(sentencesOf('He said "go now." Then (really) stop. Next one.')).toEqual(['He said "go now."', "Then (really) stop.", "Next one."]);
+  });
+
+  it("builds the lightbox controls for each ad: close, previous, next and download", async () => {
+    const m = makeEnv();
+    const { b, finals } = await seed(m.env, m.raw, m.files);
+    const r = await pack.packPublish(m.env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy() }, { renderId: finals[1]!, ...copy() }] });
+    const html = await (await get(m.env, new URL(r.link).pathname)).text();
+    const box = (n: number) => html.slice(html.indexOf(`id="view-${n}"`), html.indexOf("</div>", html.indexOf(`id="view-${n}"`)));
+    const one = box(1);
+    const two = box(2);
+    expect(one).toContain('aria-modal="true"');
+    expect(one).toContain('class="x" href="#ad-1"');
+    expect(one).toContain('class="nav next" href="#view-2"');
+    expect(one).not.toContain("nav prev");
+    expect(one).toContain('class="dl"');
+    expect(two).toContain('class="nav prev" href="#view-1"');
+    expect(two).not.toContain("nav next");
+    expect(two).toContain('class="x" href="#ad-2"');
+    expect(two).toContain('class="dl"');
   });
 
   it("escapes every value, including copy that carries markup", async () => {
