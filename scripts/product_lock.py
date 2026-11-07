@@ -85,7 +85,11 @@ def swap(a):
     if not (0 <= ox0 < ox1 <= W and 0 <= otop < obase <= H):
         sys.exit(f"--old {a.old} is outside the scene ({W}x{H}) or not x0<x1, top<base")
     cx = a.cx if a.cx is not None else (ox0 + ox1) / 2
+    if a.scale is not None and a.lower_only:
+        sys.exit("--scale cannot be combined with --lower-only")
     if a.scale is not None:  # same scale for pieces that must keep their real size next to each other (a jar and its cap)
+        if a.scale <= 0:
+            sys.exit("--scale must be greater than zero")
         scale = a.scale
         piece = pack.crop((x0 - PAD, y0 - PAD, x1 + PAD, y1 + PAD))
     elif a.lower_only:
@@ -140,6 +144,8 @@ def open_source(a):
     E, P = np.asarray(edit).copy(), np.asarray(pad)
     E[a.real_from:] = P[a.real_from:]
     s0, s1 = ints(a.strip, 2)
+    if not (0 <= s0 <= s1 < a.real_from < E.shape[0]):
+        sys.exit(f"--strip {a.strip} and --real-from {a.real_from} must be in bounds and ordered: 0 <= strip start <= strip end < real-from < {E.shape[0]}")
     strip = E[s0:s1 + 1].copy()
     n = strip.shape[0]
     ext = np.concatenate([E[:s1 + 1], strip, E[s1 + 1:]], axis=0)[n:]  # the top n rows are plain backdrop: the base keeps its y

@@ -10,7 +10,7 @@ Needs Python 3 with Pillow and numpy.
   python3 scripts/food_grade.py --src packshot.jpg --ref closeup.jpg --ref-box 200,300,820,760 \
       --region 350,165,682,283 --region 350,860,682,982 --out packshot-graded.jpg
 
---region: where food shows in --src (x0,y0,x1,y1), one per food area. --ref-box: a patch of the close-up that is all kernels.
+--region: where food shows in --src (x0,y0,x1,y1), one per food area. --ref-box: a patch of the close-up that is all kernels (--ref-bg is the backdrop colour to leave out).
 Use the graded packshot as the --packshot of product_lock.py. Defaults: strength 1.0, spread x1.15, contrast x1.12, clarity 0.7.
 """
 import numpy as np
@@ -43,7 +43,7 @@ def kernel_mask(rgb, bg, dist=48):
     glare = rgb.min(axis=-1) > 225
     return (d > dist) & (mx > 60) & ~glare
 
-def grade(src, regions, ref, ref_box, strength=1.0, sd_boost=1.15, contrast=1.12, clarity=0.7):
+def grade(src, regions, ref, ref_box, strength=1.0, sd_boost=1.15, contrast=1.12, clarity=0.7, ref_bg=(245, 230, 210)):
     """src: PIL RGB. regions: list of (x0,y0,x1,y1) in src where food shows. ref/ref_box: the close-up and an all-kernel patch of it.
     sd_boost widens the colour spread (deeper caramel patches), contrast stretches lightness, clarity adds local detail back."""
     from PIL import ImageFilter
@@ -51,7 +51,11 @@ def grade(src, regions, ref, ref_box, strength=1.0, sd_boost=1.15, contrast=1.12
     r = np.asarray(ref.convert("RGB")).astype(float)
     x0, y0, x1, y1 = ref_box
     rc = r[y0:y1, x0:x1]
-    rl = to_lab(rc)[kernel_mask(rc, np.array([245, 230, 210.0]), 60)]
+    strength = float(np.clip(strength, 0.0, 1.0))
+    # ref_bg: the close-up's plain backdrop colour; pixels near it (and white glare) are not counted as kernels
+    rl = to_lab(rc)[kernel_mask(rc, np.array(ref_bg, dtype=float), 60)]
+    if rl.size == 0:
+        raise ValueError("--ref-box has no kernel pixels (all of it is near --ref-bg or white): pick a patch that is all kernels")
     t_mu, t_sd = rl.mean(axis=0), rl.std(axis=0)
     out = a.copy()
     s_mu = t_mu
@@ -59,6 +63,8 @@ def grade(src, regions, ref, ref_box, strength=1.0, sd_boost=1.15, contrast=1.12
         reg = a[Y0:Y1, X0:X1]
         bg = np.median(a[Y0:Y1, max(0, X0 - 30):X0 - 5].reshape(-1, 3), axis=0)
         m = kernel_mask(reg, bg)
+        if not m.any():
+            raise ValueError(f"no kernel pixels found in region {(X0, Y0, X1, Y1)}: check the box")
         lab = to_lab(reg)
         s_mu, s_sd = lab[m].mean(axis=0), lab[m].std(axis=0)
         mapped = (lab - s_mu) / np.maximum(s_sd, 1e-3) * (t_sd * sd_boost) + t_mu
@@ -78,14 +84,15 @@ def main():
     p.add_argument("--ref", required=True)
     p.add_argument("--ref-box", required=True)
     p.add_argument("--region", action="append", required=True)
-    p.add_argument("--strength", type=float, default=1.0)
+    p.add_argument("--ref-bg", default="245,230,210", help="R,G,B of the close-up's plain backdrop (not counted as kernels)")
+    p.add_argument("--strength", type=float, default=1.0, help="0 to 1")
     p.add_argument("--sd-boost", type=float, default=1.15)
     p.add_argument("--contrast", type=float, default=1.12)
     p.add_argument("--clarity", type=float, default=0.7)
     p.add_argument("--out", required=True)
     a = p.parse_args()
     box = lambda s: tuple(int(float(v)) for v in s.split(","))
-    out, (s_mu, t_mu) = grade(Image.open(a.src), [box(r) for r in a.region], Image.open(a.ref), box(a.ref_box), a.strength, a.sd_boost, a.contrast, a.clarity)
+    out, (s_mu, t_mu) = grade(Image.open(a.src), [box(r) for r in a.region], Image.open(a.ref), box(a.ref_box), a.strength, a.sd_boost, a.contrast, a.clarity, tuple(int(v) for v in a.ref_bg.split(",")))
     out.save(a.out, quality=95)
     print(f"{a.out}: Lab mean of the kernels {s_mu.round(1).tolist()} -> {t_mu.round(1).tolist()}")
 
