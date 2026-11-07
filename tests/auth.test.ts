@@ -49,6 +49,31 @@ describe("/m/ media route", () => {
   });
 });
 
+describe("/admin/ref", () => {
+  const id = "0a1b2c3d-0000-4000-8000-0123456789ab";
+  const put = async (auth: string | null, name: string) => {
+    const saved = new Map<string, { type?: string }>();
+    const e = { ...env, MEDIA: { put: async (k: string, _v: ArrayBuffer, o: { httpMetadata?: { contentType?: string } }) => void saved.set(k, { type: o.httpMetadata?.contentType }) } } as unknown as Env;
+    const headers: Record<string, string> = { "Content-Length": "3" };
+    if (auth) headers.Authorization = auth;
+    const r = await worker.fetch(new Request(`https://x/admin/ref/${name}`, { method: "PUT", headers, body: "abc" }), e);
+    return { r, saved };
+  };
+  it("refuses without the token", async () => expect((await put(null, `${id}.jpg`)).r.status).toBe(401));
+  it("refuses a name that is not a uuid image", async () => {
+    expect((await put(`Bearer ${TOKEN}`, "skeleton.jpg")).r.status).toBe(400);
+    expect((await put(`Bearer ${TOKEN}`, `${id}.gif`)).r.status).toBe(400);
+  });
+  it("saves under refs/ with an image type, and /m/ serves it", async () => {
+    const { r, saved } = await put(`Bearer ${TOKEN}`, `${id}.jpg`);
+    expect(r.status).toBe(200);
+    expect([...saved.entries()]).toEqual([[`refs/${id}.jpg`, { type: "image/jpeg" }]]);
+    const obj = { body: new Response("abc").body, size: 3, httpMetadata: { contentType: "image/jpeg" } };
+    const media = { ...env, MEDIA: { get: async () => obj, head: async () => obj } } as unknown as Env;
+    expect((await worker.fetch(new Request(`https://x/m/refs/${id}.jpg`), media)).status).toBe(200);
+  });
+});
+
 describe("/admin/stage", () => {
   const put = async (auth: string | null, name: string, body = "export default {}", length: string | null = String(body.length)) => {
     const saved = new Map<string, ArrayBuffer>();
