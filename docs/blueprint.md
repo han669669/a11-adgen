@@ -93,7 +93,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 
 Prompts (slash commands) live on the server (`worker/prompts.ts`). Claude Code shows each MCP prompt as `/mcp__a11__<name>`: `brand`, `batch`, `final`, `learn`, `gold-test` (built in Phase 2b); `redesign` and `results` come with their tools (redesign in Phase 1, results in Phase 3). Each is resumable; state lives in D1.
 
-Plugin (in this repo, `plugin/`, installed once): subagents `writer`, `critic`, `art-director`, plus the MCP config. Install: `/plugin marketplace add han669669/a11-adgen`, then `/plugin install a11@a11-adgen`. The plugin's MCP config has no token. The first time, Claude Code opens a browser: sign in with the web app account, then press Allow. After that it renews the token by itself (1 hour access token, 30 day refresh token).
+Plugin (in this repo, `plugin/`, installed once): subagents `writer`, `critic`, `art-director`, plus the MCP config. Install: `/plugin marketplace add han669669/a11-adgen`, then `/plugin install a11@a11-adgen`. The plugin's MCP config has no token. The first time, Claude Code should open a browser: sign in with the web app account, then press Allow (not yet verified in Claude Code; the OAuth flow was tested end to end on the preview Worker). After that it renews the token by itself (1 hour access token, 30 day refresh token).
 
 Connect without the plugin (an alternative; do not add it when the plugin is installed, because both name the server `a11`):
 

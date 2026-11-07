@@ -16,7 +16,7 @@ const PAGE_HEADERS = {
   "cache-control": "no-store",
   "x-frame-options": "DENY",
   "x-content-type-options": "nosniff",
-  "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+  "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
 };
 
 const STYLE = `<style>body{font:16px/1.5 system-ui,sans-serif;max-width:30rem;margin:3rem auto;padding:0 1rem}label{display:block;margin:.8rem 0 .2rem}input{width:100%;padding:.5rem;font:inherit;box-sizing:border-box}button{font:inherit;padding:.5rem 1rem;margin:1rem .5rem 0 0}.warn{background:#fff3cd;padding:.6rem;border-radius:4px}.err{color:#b00020}</style>`;
@@ -29,10 +29,10 @@ function page(body: string, status = 200, extra?: Headers): Response {
 
 /** Where to go after sign-in: only back to /authorize with its own query. Anything else becomes /authorize. */
 export function safeNext(next: unknown): string {
-  return typeof next === "string" && /^\/authorize\?[\x21-\x7e]{1,3000}$/.test(next) ? next : "/authorize";
+  return typeof next === "string" && /^\/authorize\?[\x21-\x7e]{1,8000}$/.test(next) ? next : "/authorize";
 }
 
-function signInPage(next: string, message?: string): Response {
+function signInPage(next: string, message?: string, status = 401): Response {
   return page(
     `<h1>Sign in to a11</h1>${message ? `<p class="err">${escapeHtml(message)}</p>` : ""}
 <p>An app asks to use your a11 account. Sign in first.</p>
@@ -42,7 +42,7 @@ function signInPage(next: string, message?: string): Response {
 <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
 <button type="submit">Sign in</button>
 </form>`,
-    message ? 401 : 200,
+    message ? status : 200,
   );
 }
 
@@ -55,7 +55,7 @@ function consentPage(d: ConsentDescription, handle: string, email: string): stri
 <p>${origin}</p>
 <p>Access will be sent to <strong>${escapeHtml(d.redirectHost)}</strong>.</p>
 ${d.redirectIsLoopback ? `<p class="warn"><strong>This sends access to an app on your own computer.</strong> Continue only if you just started signing in from that app.</p>` : ""}
-<p>It can read and change everything in your a11 workspace: brands, batches, renders and spend (up to the monthly cap). It cannot see your password. You can stop it by removing it from the allow-list.</p>
+<p>It can read and change everything in your a11 workspace: brands, batches, renders and spend (up to the monthly cap). It cannot see your password. To cut off all a11 access for your account later, remove your email from the allow-list.</p>
 <form method="post">
 <input type="hidden" name="handle" value="${escapeHtml(handle)}">
 <button name="decision" value="approve" type="submit">Allow</button>
@@ -81,7 +81,7 @@ export async function handleAuthorize(request: Request, env: Env): Promise<Respo
       const cookie = await login(env, { email: form?.get("email"), password: form?.get("password") });
       return new Response(null, { status: 303, headers: { Location: next, "Set-Cookie": cookie, "cache-control": "no-store" } });
     } catch (e) {
-      if (e instanceof AuthError) return signInPage(next, e.message);
+      if (e instanceof AuthError) return signInPage(next, e.message, e.status);
       throw e;
     }
   }

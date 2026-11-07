@@ -10,7 +10,7 @@ export interface Env {
   IMAGES: ImagesBinding;
   /**
    * SHA-256 (hex) of the Phase 0 bearer token for /mcp. Only the hash is stored on the Worker.
-   * OAuth replaces this in Phase 1.
+   * It stays as a fallback beside OAuth, for scripts and the deploy path.
    */
   MCP_TOKEN_SHA256: string;
   FAL_KEY: string;

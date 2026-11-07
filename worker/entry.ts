@@ -5,7 +5,7 @@ import { MCP_SCOPE, handleAuthorize, stillAllowed } from "./oauth";
 import type { Env } from "./env";
 
 /**
- * Worker entry. OAuth 2.1 for /mcp (owner, 07-11-2026): the owner signs in with the web app account, asks consent once per app,
+ * Worker entry. OAuth 2.1 for /mcp (owner, 07-11-2026): the owner signs in with the web app account, approves each authorization request,
  * and the app gets a short token (1 hour) plus a refresh token (30 days). Clients register themselves (RFC 7591).
  * The Phase 0 bearer token still works (resolveExternalToken), so scripts and the deploy path do not break.
  * Everything that is not /mcp, /authorize or OAuth plumbing goes to the app in index.ts unchanged.

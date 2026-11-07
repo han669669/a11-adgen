@@ -137,6 +137,13 @@ describe("MCP OAuth login", () => {
     expect(bad.status).toBe(401);
   });
 
+  it("reports a sign-in lock-out as 429, not as a wrong password", async () => {
+    const env = await makeEnv();
+    const bad = () => go(env, "/authorize/signin", { method: "POST", headers: FORM, body: form({ email: EMAIL, password: "wrong wrong wrong", next: "/authorize" }) });
+    for (let i = 0; i < 5; i++) await bad();
+    expect((await bad()).status).toBe(429);
+  });
+
   it("does not sign in an email that is not on the allow-list", async () => {
     const env = await makeEnv();
     env.ALLOWED_EMAILS = "someone-else@a11.example";
@@ -171,7 +178,7 @@ describe("MCP OAuth login", () => {
     expect((await mcp(env, `Bearer ${access_token}`)).status).toBe(403);
   });
 
-  it("refuses the code a second time and a wrong PKCE verifier", async () => {
+  it("refuses a wrong PKCE verifier", async () => {
     const env = await makeEnv();
     const clientId = await register(env);
     const { challenge } = pkce();
@@ -183,6 +190,34 @@ describe("MCP OAuth login", () => {
     const code = new URL(approved.headers.get("location")!).searchParams.get("code")!;
     const bad = await go(env, "/oauth/token", { method: "POST", headers: FORM, body: form({ grant_type: "authorization_code", code, redirect_uri: REDIRECT, client_id: clientId, code_verifier: "x".repeat(50), resource: RESOURCE }) });
     expect(bad.status).toBe(400);
+  });
+
+  it("refuses a code that was already used", async () => {
+    const env = await makeEnv();
+    const clientId = await register(env);
+    const { verifier, challenge } = pkce();
+    const url = authorizeUrl(clientId, challenge);
+    const session = await signIn(env, url);
+    const page = await go(env, url, { headers: { cookie: session } });
+    const handle = /name="handle" value="([^"]+)"/.exec(await page.text())![1]!;
+    const approved = await go(env, "/authorize", { method: "POST", headers: { ...FORM, cookie: `${session}; ${cookiesOf(page)}` }, body: form({ handle, decision: "approve" }) });
+    const code = new URL(approved.headers.get("location")!).searchParams.get("code")!;
+    const redeem = () => go(env, "/oauth/token", { method: "POST", headers: FORM, body: form({ grant_type: "authorization_code", code, redirect_uri: REDIRECT, client_id: clientId, code_verifier: verifier, resource: RESOURCE }) });
+    expect((await redeem()).status).toBe(200);
+    expect((await redeem()).status).toBe(400);
+  });
+
+  it("refreshes a token, states the lifetime, and refuses a made-up refresh token", async () => {
+    const env = await makeEnv();
+    const first = await fullLogin(env);
+    const refresh = (token: string) => go(env, "/oauth/token", { method: "POST", headers: FORM, body: form({ grant_type: "refresh_token", refresh_token: token, client_id: first.clientId }) });
+    const r = await refresh(first.refresh_token);
+    expect(r.status).toBe(200);
+    const next = (await r.json()) as { access_token: string; expires_in: number };
+    expect(next.expires_in).toBeGreaterThan(0);
+    expect(next.expires_in).toBeLessThanOrEqual(3600);
+    expect((await mcp(env, `Bearer ${next.access_token}`)).status).toBe(200);
+    expect((await refresh("not-a-real-refresh-token")).status).toBe(400);
   });
 
   it("sends the client access_denied when the owner clicks Deny", async () => {
@@ -218,6 +253,8 @@ describe("MCP OAuth login", () => {
 describe("safeNext", () => {
   it("allows only a return to /authorize with its own query", () => {
     expect(safeNext("/authorize?client_id=1&state=a")).toBe("/authorize?client_id=1&state=a");
+    const long = `/authorize?x=${"a".repeat(5000)}`;
+    expect(safeNext(long)).toBe(long);
     for (const bad of ["https://evil.example", "//evil.example", "/api/me", "/authorize", "/authorize?\nx", "/authorize?a b", undefined, 5]) expect(safeNext(bad)).toBe("/authorize");
   });
 });

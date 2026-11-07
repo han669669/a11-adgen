@@ -11,7 +11,7 @@ The steps below are for the live Worker `a11adgen` (D1 `a11adgen-db`, R2 `a11adg
 3. D1 migrations, before the new code goes live (the code may need the new tables): in the connector, read each staged SQL file, check its SHA-256, run it with the D1 query API on the target database, then insert its name into `d1_migrations`. Skip a file already listed there.
 4. Deploy with the connector: read `deploy/<name>.js` from the target bucket, check its SHA-256 against step 1, then `PUT /accounts/{id}/workers/scripts/<worker>` (multipart): upload the bundle as a JavaScript module part named `index.js` (`application/javascript+module`) and set metadata `main_module` to `index.js`, with:
    - `compatibility_date` `2026-10-20`, `compatibility_flags` `["nodejs_compat"]`;
-   - the bindings in `wrangler.jsonc` (including `{ "type": "images", "name": "IMAGES" }` and the KV namespace `OAUTH_KV`: live `a11adgen-oauth` `e29131310aa446489fa715d74e1c35ff`, preview `a11adgen-preview-oauth` `830b5d7881a049fb8712411763495000`), plus `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256` as `plain_text` (hashes only; not in `wrangler.jsonc`);
+   - the bindings in `wrangler.jsonc` (including `{ "type": "images", "name": "IMAGES" }` and the KV namespace `OAUTH_KV` = live `a11adgen-oauth` `e29131310aa446489fa715d74e1c35ff`, for `a11adgen` only; a preview deploy uses its own, see the Preview deploy table), plus `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256` as `plain_text` (hashes only; not in `wrangler.jsonc`);
    - `keep_bindings: ["secret_text"]`, so the owner's `FAL_KEY`, `EXA_API_KEY` and `ALLOWED_EMAILS` stay.
 5. Web app: `npm run build:app`, then `PUT /admin/app/<path>` on the target Worker (same bearer token) for each file in `dist/app`, `index.html` last. It saves to `app/` in that Worker's bucket, and the Worker serves the app from there. Old hashed files in `app/assets/` can stay; `index.html` points to the new ones.
 6. Smoke test: `spend_get` through `/mcp`, `/api/me` (401 without a session), and one call of each changed tool.
@@ -45,6 +45,7 @@ Deploy a branch to `a11adgen-preview` with the same steps, but with these bindin
 |---|---|
 | `DB` | D1 `a11adgen-preview-db` (`2c28c64f-f8c0-46f9-9e2d-7ca70d2a0f70`) |
 | `MEDIA` | R2 `a11adgen-preview-assets` |
+| `OAUTH_KV` | KV `a11adgen-preview-oauth` (`830b5d7881a049fb8712411763495000`) |
 | `PUBLIC_BASE_URL` | `https://a11adgen-preview.gamingcomputing.workers.dev` |
 | `ALLOWED_EMAILS` | a plain test address, not the owner's list |
 | `SIGNUP_CODE_SHA256` | the hash of a test code, never the live one (or leave it out to keep sign-up closed) |
