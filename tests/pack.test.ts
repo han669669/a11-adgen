@@ -154,6 +154,8 @@ describe("pack_publish", () => {
   });
 });
 
+import { sentences as sentencesOf } from "../worker/portal";
+
 describe("client portal", () => {
   const get = (env: Env, path: string, method = "GET") => worker.fetch(new Request(`https://w${path}`, { method }), env);
 
@@ -179,6 +181,16 @@ describe("client portal", () => {
     expect(r.headers.get("cache-control")).toBe("private, no-store");
     expect(r.headers.get("referrer-policy")).toBe("no-referrer");
     expect(r.headers.get("content-security-policy")).toMatch(/default-src 'none'/);
+  });
+
+  it("puts each sentence of the launch plan on its own line and lets the client enlarge the pictures without scripts", async () => {
+    const { env, path } = await published({ launchPlan: "Run all ads for 72 hours. Pause any ad under 1,000 impressions at S$8.90! Send us the CSV.\nThank you." });
+    const html = await (await get(env, path)).text();
+    expect(html).toContain('<div class="plan"><p>Run all ads for 72 hours.</p><p>Pause any ad under 1,000 impressions at S$8.90!</p><p>Send us the CSV.</p><p>Thank you.</p></div>');
+    expect(html).toContain('href="#view-1"');
+    expect(html).toContain('id="view-1"');
+    expect(html).not.toContain("<script");
+    expect(pack.DEFAULT_LAUNCH_PLAN && sentencesOf(pack.DEFAULT_LAUNCH_PLAN)).toHaveLength(5);
   });
 
   it("escapes every value, including copy that carries markup", async () => {
