@@ -16,7 +16,11 @@ export const SIZES = {
 
 /** Code adds this once to every render prompt (hard check 4: no painted CTA). */
 export const RENDER_SUFFIX =
-  "Format: a 4:5 portrait static ad. Do not paint a button, a call to action, a URL or a price that the brief does not give. Keep every text and the logo well inside the frame.";
+  "Format: a 4:5 portrait static ad. Do not paint a button, a call to action, a URL or a price that the brief does not give. Keep every text and the logo well inside the frame. " +
+  // Owner's v1 picture notes (docs/render-checklist.md D1, D3, D4, F1): true for every ad, so set once here.
+  "No readable text except the quoted strings and the product's own label: no handwriting, notes, cards or printed paper on props. " +
+  "Every object keeps its real size next to the product and either rests on a surface with a contact shadow or is held in a hand; nothing floats. " +
+  "No drip, spill or stain on the product or a prop.";
 
 export type Kind = keyof typeof SIZES;
 
