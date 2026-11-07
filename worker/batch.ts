@@ -1,6 +1,7 @@
 import { brandBySlug, latestKit } from "./brand";
 import type { Env } from "./env";
 import * as fal from "./fal";
+import { storeSubjectImages } from "./subjectimages";
 
 /** Funnel stages (owner, 2026-11-06). Picks per batch: 1 per stage (a database trigger enforces it). */
 export const FORMATS = ["tof", "mof", "bof"] as const;
@@ -15,11 +16,21 @@ export async function subjectSave(
 ) {
   const brand = await brandBySlug(env, input.brandSlug);
   const id = crypto.randomUUID();
-  const data = { imageUrls: input.imageUrls ?? [], notes: input.notes ?? "" };
-  await env.DB.prepare("INSERT INTO subjects (id, brand_id, kind, title, url, data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .bind(id, brand.id, input.kind, input.title, input.url ?? null, JSON.stringify(data), now())
-    .run();
-  return { id, brandSlug: brand.slug, kind: input.kind, title: input.title };
+  // The images are fetched now and kept: a live ad can be taken down, and the agent looks at the copy with image_get.
+  const { keys: imageKeys, errors: imageErrors } = await storeSubjectImages(env, id, input.imageUrls ?? []);
+  const data = { imageUrls: input.imageUrls ?? [], imageKeys, imageErrors, notes: input.notes ?? "" };
+  try {
+    await env.DB.prepare("INSERT INTO subjects (id, brand_id, kind, title, url, data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, brand.id, input.kind, input.title, input.url ?? null, JSON.stringify(data), now())
+      .run();
+  } catch (e) {
+    // The write may have committed before the error: delete the files only when no row points at them.
+    // When the check itself fails, keep the files (an orphan is harmless; a row without its images is not).
+    const row = await env.DB.prepare("SELECT id FROM subjects WHERE id = ?").bind(id).first().catch(() => ({ id }));
+    if (!row) await Promise.all(imageKeys.map((k) => env.MEDIA.delete(k).catch(() => undefined)));
+    throw e;
+  }
+  return { id, brandSlug: brand.slug, kind: input.kind, title: input.title, imageKeys, imageErrors };
 }
 
 export interface FactInput {

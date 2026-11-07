@@ -40,7 +40,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | # | Step | Who | What happens |
 |---|---|---|---|
 | 0 | Brand kit | CODE, CLAUDE | `brand_extract` reads the home page source (fetch; Browser Rendering is a later upgrade): colours, fonts, logo candidates (header logo first, each file probed live) and icons, with a `missing` list. Only public https hosts are fetched. Claude writes voice, palette roles and "what this brand would never say". Kit is versioned. Claude checks that the logo reads the brand name. |
-| 1 | Subject | HAN (input only) | Product URL, or brand only (no product), or redesign (upload a live ad). This is input, not a decision step. |
+| 1 | Subject | HAN (input only) | Product URL, or brand only (no product), or redesign (picture links of a live ad). This is input, not a decision step. |
 | 2 | Fact sheet | PAID Exa, CLAUDE | Exa `/contents` reads the page. Each fact keeps its source URL and exact quote: price, offer, pack size, proof. |
 | 3 | Research | PAID Exa, CLAUDE | Exa search: Reddit, HardwareZone, reviews, competitor pages, Singapore moments. Optional later: Meta Ad Library through Apify (long-running ads are likely winners). |
 | 4 | Insight sheet | CLAUDE | 8 to 12 buyer truths, each with its source. |
@@ -83,7 +83,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | Group | Tools |
 |---|---|
 | Brand | `brand_extract` (built: fetch-based), `brand_get`, `brand_save_version` |
-| Subject | `product_read`, `facts_save`, `redesign_get` |
+| Subject | `subject_save`, `facts_save`; redesign images are kept under `subjects/` and shown by `image_get` (`redesign_get` is not needed). `exa_contents` reads product-page text |
 | Research | `exa_search`, `exa_contents`, `adlibrary_fetch` (later; paid, asks first) |
 | Ideas | `ideas_save`, `ideas_pick_save` |
 | Images | `render_drafts`, `render_edit`, `render_final`, `image_get` (returns the image) |
@@ -91,7 +91,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | Memory | `taste_log` (his picks and passes with the critic's rank), `canon_get`, `canon_update`, `swipe_add`, `swipe_search`, `gold_import`, `gold_get`, `gold_score`, `gold_runs` (all built in Phase 2a), `picks_get` (not built yet), `baseline_save`, `results_save`, `results_get` (built in Phase 3b: the results ledger), `comments_get` (built in Phase 3b: the client's comments), `uploads_get`, `uploads_done` (built in Phase 3b: the client's results files) |
 | Ops | `batch_status`, `spend_get`, `pack_publish` |
 
-Prompts (slash commands) live on the server (`worker/prompts.ts`). Claude Code shows each MCP prompt as `/mcp__a11__<name>`: `brand`, `batch`, `final`, `learn`, `gold-test` (built in Phase 2b); `redesign` and `results` come with their tools (redesign in Phase 1, results in Phase 3). Each is resumable; state lives in D1.
+Prompts (slash commands) live on the server (`worker/prompts.ts`). Claude Code shows each MCP prompt as `/mcp__a11__<name>`: `brand`, `batch`, `final`, `learn`, `gold-test` (built in Phase 2b); `redesign` (built, with the redesign subject) and `results` (built in Phase 3b). Each is resumable; state lives in D1.
 
 Plugin (in this repo, `plugin/`, installed once): subagents `writer`, `critic`, `art-director`, plus the MCP config. Install: `/plugin marketplace add han669669/a11-adgen`, then `/plugin install a11@a11-adgen`. The plugin's MCP config has no token. The first time, Claude Code should open a browser: sign in with the web app account, then press Allow (not yet verified in Claude Code; the OAuth flow was tested end to end on the preview Worker). After that it renews the token by itself (1 hour access token, 30 day refresh token).
 
