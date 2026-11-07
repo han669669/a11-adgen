@@ -5,10 +5,10 @@ import { packByToken } from "./pack";
 
 const now = () => new Date().toISOString();
 
-/** The largest file the portal takes (owner, 2026-11-07: 30 MB at most). image_get shows a larger image reduced, because MCP carries 3 MB. */
-export const UPLOAD_MAX_BYTES = 30_000_000;
+/** The largest file the portal takes (owner, 2026-11-07: 20 MB at most, because the image reducer reads at most 20 MB). image_get shows a larger image reduced, because MCP carries 3 MB. */
+export const UPLOAD_MAX_BYTES = 20_000_000;
 /** One pack link takes at most this many files in 24 hours. A leaked link cannot fill the bucket. */
-export const UPLOADS_PER_DAY = 5;
+export const UPLOADS_PER_DAY = 10;
 /** Form fields and boundaries around the file. */
 const FORM_OVERHEAD = 16_384;
 const CSV_READ_MAX = 100_000;
@@ -54,7 +54,7 @@ export async function uploadAdd(env: Env, request: Request, token: string): Prom
   const pack = await packByToken(env, token);
   if (!pack) return { ok: false, status: 404, message: "Not found." };
   const tooMany = { ok: false as const, status: 429, message: "That is a lot of files for one day. Please try again tomorrow." };
-  const tooBig = { ok: false as const, status: 413, message: "That file is too big. Please send one under 30 MB." };
+  const tooBig = { ok: false as const, status: 413, message: "That file is too big. Please send one under 20 MB." };
   const ct = request.headers.get("content-type") ?? "";
   if (!/^multipart\/form-data\s*;/i.test(ct)) return { ok: false, status: 400, message: "Choose a file first." };
   // The length must be declared: the edge ends the body at that length, so the limit holds without reading it into memory first.

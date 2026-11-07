@@ -892,9 +892,9 @@ export const TOOLS: Tool[] = [
       let mimeType = obj.httpMetadata?.contentType ?? "image/jpeg";
       if (obj.size <= MAX_IMAGE_BYTES) data = await obj.arrayBuffer();
       else if (PRIVATE_KEY.test(a.key)) {
-        // A client's upload can be up to 30 MB (a subject image up to 8 MB). MCP carries 3 MB, so it is shown reduced as a JPEG. The stored file is not changed.
+        // A client's upload can be up to 20 MB (a subject image up to 8 MB). MCP carries 3 MB, so it is shown reduced as a JPEG. The stored file is not changed.
         // Width and height are both bounded (a tall screenshot is mostly height). A second, smaller try reads the object again: a body can be read once.
-        // The upload limit is 30 MB but the reducer reads 20 MB: say so, in plain words, before the call that would fail.
+        // The upload limit equals the reducer's 20 MB, so only a file stored under an older, higher limit gets here: say so, in plain words, before the call that would fail.
         const tooBigToShow = `This image is ${obj.size} bytes. The reducer that makes a preview reads at most ${IMAGES_INPUT_MAX} bytes, so it cannot show this one. Ask the client for a smaller screenshot (under 20 MB), or ask the owner to open the file.`;
         if (obj.size > IMAGES_INPUT_MAX) throw new Error(tooBigToShow);
         const tries = [
