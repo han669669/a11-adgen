@@ -17,8 +17,11 @@ export function contentType(res: Response): string {
   return (res.headers.get("content-type") ?? "").toLowerCase();
 }
 
-/** Read a body, but stop at MAX_IMAGE_BYTES even when the server sent no Content-Length. */
-export async function readCapped(res: Response, what: string): Promise<Uint8Array> {
+/** Thrown when a body is larger than the limit. A caller that only wants the size error catches this class. */
+export class TooLargeError extends Error {}
+
+/** Read a body, but stop at max bytes (default MAX_IMAGE_BYTES) even when the server sent no Content-Length. Throws TooLargeError past the limit. */
+export async function readCapped(res: Pick<Response, "body" | "arrayBuffer">, what: string, max = MAX_IMAGE_BYTES): Promise<Uint8Array> {
   const reader = res.body?.getReader();
   if (!reader) return new Uint8Array(await res.arrayBuffer());
   const parts: Uint8Array[] = [];
@@ -27,9 +30,9 @@ export async function readCapped(res: Response, what: string): Promise<Uint8Arra
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > MAX_IMAGE_BYTES) {
+    if (size > max) {
       await reader.cancel();
-      throw new Error(`${what} is larger than ${MAX_IMAGE_BYTES} bytes.`);
+      throw new TooLargeError(`${what} is larger than ${max} bytes.`);
     }
     parts.push(value);
   }
