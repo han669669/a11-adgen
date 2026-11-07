@@ -31,8 +31,8 @@ h2{font-size:1.3rem;margin:48px 0 8px}h3{margin:0 0 4px;font-size:1.15rem;line-h
 code{font:inherit;font-weight:600;background:#efe6da;padding:1px 6px;border-radius:4px;word-break:break-all}
 .plan{margin:12px 0 0;padding-left:1.3em;max-width:60ch}.plan li{margin:0 0 18px;padding-left:4px;font-size:1.05rem}
 .steps{padding-left:1.4em;margin:8px 0}.steps li{margin:4px 0}
-.facts{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:10px}.facts li{background:#fff;border:1px solid #e6dccd;border-radius:10px;padding:12px 14px;font-size:.95rem}
-.facts .n{display:inline-block;margin-bottom:6px;padding:1px 10px;border-radius:6px;background:#efe6da;font-size:1.15rem;font-weight:700;white-space:nowrap}
+.facts{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:10px}.facts li{background:#fff;border:1px solid #e6dccd;border-radius:10px;padding:12px 14px;font-size:.95rem;overflow-wrap:anywhere}
+.facts .n{display:inline-block;margin-bottom:6px;padding:1px 10px;border-radius:6px;background:#efe6da;font-size:1.15rem;font-weight:700}
 .facts .what{margin:0 0 4px}.facts .what b{font-weight:700}.facts .q{margin:0 0 6px;font-size:.9rem}.facts .src{display:block;font-size:.85rem;overflow-wrap:anywhere}
 a{color:inherit}
 .foot{margin-top:48px;font-size:.85rem}
@@ -100,7 +100,7 @@ export function renderPack(token: string, title: string, c: PackContent): string
   // One card per number, not a table: a table is too narrow on a phone and breaks the numbers.
   // The stored fact reads "label: value"; show the label as a bold lead-in.
   const factLine = (fact: string) => {
-    const m = /^([^:]{1,30}):\s+(.+)$/s.exec(fact);
+    const m = /^([^:]{1,80}):\s+(.+)$/s.exec(fact);
     return m ? `<b>${esc(m[1]![0]!.toUpperCase() + m[1]!.slice(1))}:</b> ${esc(m[2]!)}` : esc(fact);
   };
   const facts = c.factCheck.length

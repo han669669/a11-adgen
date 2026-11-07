@@ -228,6 +228,7 @@ describe("client portal", () => {
     const html = await (await get(env, path)).text();
     expect(html).not.toContain("<table");
     expect(html).toContain('<ul class="facts">');
+    expect(html.match(/<li><span class="n">/g)).toHaveLength(2);
     expect(html).toMatch(/<li><span class="n">8\.90<\/span><p class="what"><b>Price:<\/b> S\$8\.90 a jar<\/p><p class="q muted">"Caramel Pop Barley 70g S\$8\.90"<\/p><span class="src"><a href="https:\/\/b\.example\/p"/);
   });
 
