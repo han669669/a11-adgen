@@ -2,8 +2,10 @@ import type { DatabaseSync } from "node:sqlite";
 import { inflateSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../worker/env";
+import { check } from "../worker/fal";
 import { foodFix } from "../worker/food";
 import worker from "../worker/index";
+import { pasteBack } from "../worker/paste";
 import { maskPng } from "../worker/png";
 import { fakeD1 } from "./helpers/d1";
 
@@ -90,8 +92,25 @@ function makeEnv(opts: { food?: string; laterFood?: string; kind?: string } = {}
     put: async (k: string, v: Uint8Array, o: { httpMetadata: { contentType: string } }) => void saved.set(k, { bytes: v, type: o.httpMetadata.contentType }),
     get: async (k: string) => (saved.has(k) ? { body: new Blob([saved.get(k)!.bytes]).stream(), size: saved.get(k)!.bytes.length, httpMetadata: { contentType: saved.get(k)!.type } } : null),
   };
-  const env = { DB, MEDIA, FAL_KEY: "k", SPEND_CAP_USD: "5.00", PUBLIC_BASE_URL: "https://w" } as unknown as Env;
-  return { env, saved, raw };
+  // Records the Images pipeline instead of drawing pixels. Each input gets a tag (in1, in2, ...) in call order.
+  const calls: unknown[][] = [];
+  const size = { width: 1536, height: 1920 };
+  let inputs = 0;
+  const handle = (tag: string) => {
+    const self = {
+      tag,
+      transform: (t: unknown) => (calls.push(["transform", tag, t]), self),
+      draw: (child: { tag: string }, o: unknown) => (calls.push(["draw", tag, child.tag, o]), self),
+      output: async () => ({ response: () => new Response("merged") }),
+    };
+    return self;
+  };
+  const IMAGES = {
+    info: async () => ({ format: "image/jpeg", fileSize: 1, ...size }),
+    input: () => handle(`in${++inputs}`),
+  };
+  const env = { DB, MEDIA, IMAGES, FAL_KEY: "k", SPEND_CAP_USD: "5.00", PUBLIC_BASE_URL: "https://w" } as unknown as Env;
+  return { env, saved, raw, calls, size };
 }
 
 function stubFal() {
@@ -155,5 +174,58 @@ describe("food_fix", () => {
     const r = await worker.fetch(new Request(`https://w/m/${maskKey}`), env);
     expect(r.status).toBe(200);
     expect(r.headers.get("content-type")).toBe("image/png");
+  });
+});
+
+describe("paste-back", () => {
+  it("food_fix saves the paste plan before fal accepts; the result keeps the original outside the boxes", async () => {
+    const { env, saved, calls } = makeEnv({ food: "f" });
+    saved.set(KEY, { bytes: new TextEncoder().encode("original"), type: "image/jpeg" });
+    let planAtSubmit = false;
+    vi.stubGlobal("fetch", async () => {
+      planAtSubmit = [...saved.keys()].some((k) => k.endsWith("/paste.json"));
+      return new Response(JSON.stringify({ request_id: "r", status_url: "https://q/s", response_url: "https://q/r" }));
+    });
+    const out = await foodFix(env, input);
+    expect(planAtSubmit).toBe(true);
+    const plan = JSON.parse(String(saved.get(`renders/${out.id}/paste.json`)!.bytes));
+    expect(plan).toEqual({ source: KEY, width: 1536, height: 1920, boxes: input.boxes });
+
+    const merged = await pasteBack(env, out.id, new TextEncoder().encode("fixed").buffer as ArrayBuffer);
+    expect(new TextDecoder().decode(merged!)).toBe("merged");
+    // in1 = the original final (the base); in2 = the fal image, cropped to the box {x 40, y 80, w 35, h 15}
+    // of 1536 x 1920 and drawn at the same place.
+    expect(calls).toEqual([
+      ["transform", "in2", { trim: { top: 1536, left: 614, width: 538, height: 288 } }],
+      ["draw", "in1", "in2", { top: 1536, left: 614 }],
+    ]);
+  });
+
+  it("returns null without a paste plan, and throws when a plan exists but the size differs", async () => {
+    const { env, saved, size } = makeEnv({ food: "f" });
+    saved.set(KEY, { bytes: new TextEncoder().encode("original"), type: "image/jpeg" });
+    const bytes = new TextEncoder().encode("x").buffer as ArrayBuffer;
+    expect(await pasteBack(env, RID, bytes)).toBeNull();
+    stubFal();
+    const out = await foodFix(env, input);
+    size.width = 1024;
+    await expect(pasteBack(env, out.id, bytes)).rejects.toThrow("1024 x 1920");
+  });
+
+  it("fails the render instead of saving the raw fal image when the paste cannot run", async () => {
+    const { env, saved, size, raw } = makeEnv({ food: "f" });
+    saved.set(KEY, { bytes: new TextEncoder().encode("original"), type: "image/jpeg" });
+    stubFal();
+    const out = await foodFix(env, input);
+    size.width = 1024;
+    vi.stubGlobal("fetch", async (u: string) =>
+      u === "https://q/s" ? new Response(JSON.stringify({ status: "COMPLETED" }))
+      : u === "https://q/r" ? new Response(JSON.stringify({ images: [{ url: "https://fal/img.jpg" }] }))
+      : new Response("raw-fal-image"));
+    const r = await check(env, out.id);
+    expect(r.status).toBe("failed");
+    expect((r as { error: string }).error).toContain("paste-back failed");
+    expect(saved.has(`renders/${out.id}/1.jpg`)).toBe(false);
+    expect(raw.prepare("SELECT status FROM renders WHERE id = ?").get(out.id)).toEqual({ status: "failed" });
   });
 });

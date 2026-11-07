@@ -2,6 +2,7 @@ import { latestKit } from "./brand";
 import { RENDER_KEY } from "./compose";
 import type { Env } from "./env";
 import * as fal from "./fal";
+import { type PastePlan, pasteKey } from "./paste";
 import { type Box, checkBoxes, maskPng } from "./png";
 
 /**
@@ -9,6 +10,9 @@ import { type Box, checkBoxes, maskPng } from "./png";
  * A final shows the right layout and text, but the model paints idealised food. This stage re-renders
  * only the food: a mask (white = food boxes) protects every text, label and prop, and the kit's real
  * close-up photos and packshot are the references. The kit's food description is the same words every time.
+ * The mask only guides fal: it re-renders the whole picture (W46b: chips outside the mask became barley).
+ * So when the result arrives, the Worker pastes only the boxes onto the original final (pasteBack):
+ * outside the boxes the picture is the original.
  */
 export function foodPrompt(food: string, keep: string, textures: number, packshots: number): string {
   const tex = textures === 1 ? "Image 2 is a real close-up photo of this food" : `Images 2 to ${1 + textures} are real close-up photos of this food`;
@@ -51,6 +55,10 @@ export async function foodFix(env: Env, input: { key: string; boxes: Box[]; keep
   const maskKey = `renders/${id}/mask-${Date.now()}${crypto.getRandomValues(new Uint32Array(1))[0]}.png`;
   await env.MEDIA.put(maskKey, mask, { httpMetadata: { contentType: "image/png" } });
   const maskUrl = fal.mediaUrl(env, maskKey);
+  // The paste plan exists before fal accepts the render, so no poll can save the result without it.
+  const renderId = crypto.randomUUID();
+  const plan: PastePlan = { source: input.key, width: row.width, height: row.height, boxes: input.boxes };
+  await env.MEDIA.put(pasteKey(renderId), JSON.stringify(plan), { httpMetadata: { contentType: "application/json" } });
   const out = await fal.submit(env, {
     batch: row.batch,
     idea: row.idea,
@@ -59,6 +67,7 @@ export async function foodFix(env: Env, input: { key: string; boxes: Box[]; keep
     referenceUrls: [fal.mediaUrl(env, input.key), ...textures, ...packshots],
     numImages: 1,
     maskUrl,
+    id: renderId,
   });
   return { ...out, source: input.key, maskUrl };
 }

@@ -49,15 +49,22 @@ export function checkBoxes(boxes: Box[]): void {
   }
 }
 
+/** A box in pixels: x0 and y0 inside, x1 and y1 outside. The mask and the paste-back use the same pixels. */
+export function boxPixels(width: number, height: number, b: Box) {
+  return {
+    x0: Math.floor((b.x * width) / 100),
+    x1: Math.min(width, Math.ceil(((b.x + b.w) * width) / 100)),
+    y0: Math.floor((b.y * height) / 100),
+    y1: Math.min(height, Math.ceil(((b.y + b.h) * height) / 100)),
+  };
+}
+
 export async function maskPng(width: number, height: number, boxes: Box[]): Promise<Uint8Array> {
   checkBoxes(boxes);
   const rowLen = width + 1; // filter byte 0, then one grey byte per pixel
   const raw = new Uint8Array(rowLen * height);
   for (const b of boxes) {
-    const x0 = Math.floor((b.x * width) / 100);
-    const x1 = Math.min(width, Math.ceil(((b.x + b.w) * width) / 100));
-    const y0 = Math.floor((b.y * height) / 100);
-    const y1 = Math.min(height, Math.ceil(((b.y + b.h) * height) / 100));
+    const { x0, x1, y0, y1 } = boxPixels(width, height, b);
     for (let y = y0; y < y1; y++) raw.fill(255, y * rowLen + 1 + x0, y * rowLen + 1 + x1);
   }
   const ihdr = new Uint8Array(13);
