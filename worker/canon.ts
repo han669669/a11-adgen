@@ -98,7 +98,7 @@ export async function canonUpdate(env: Env, c: CanonChange) {
     // An edit is not evidence: it does not refresh the 60-day clock. The source is kept in the log.
     await env.DB.batch([
       env.DB.prepare("UPDATE canon_rules SET text = ?, stage = ?, updated_at = ? WHERE id = ?").bind(c.rule, c.stage ?? r!.stage, at, c.id),
-      log(c.id!, "edit", { from: r!.text, to: c.rule, source: c.source }),
+      log(c.id!, "edit", { from: r!.text, to: c.rule, source: c.source, ...(c.quote ? { quote: c.quote } : {}) }),
     ]);
     return { id: c.id, edited: true };
   }

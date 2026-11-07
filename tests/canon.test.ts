@@ -23,12 +23,21 @@ const run = async (env: Env, name: string, args: unknown) => {
 describe("canon seed", () => {
   it("is in the migration, equal to docs/canon-seed.json, each rule with an exact quote from the owner's notes", async () => {
     const { env } = makeEnv({ seeded: true });
-    const seed = JSON.parse(readFileSync(new URL("../docs/canon-seed.json", import.meta.url), "utf8")) as { stage: string; rule: string; source: string; quote: string }[];
+    const seed = JSON.parse(readFileSync(new URL("../docs/canon-seed.json", import.meta.url), "utf8")) as { stage: string; rule: string; source: string; kind: "owner" | "doc"; quote?: string; doc?: string }[];
     const g = await canon.canonGet(env, {});
     expect(g.activeRules).toBe(seed.length);
     expect(g.rules.map((r) => [r.stage, r.rule]).sort()).toEqual(seed.map((s) => [s.stage, s.rule]).sort());
     const notes = (readFileSync(new URL("../docs/taste-seed.md", import.meta.url), "utf8") + readFileSync(new URL("../docs/marks.md", import.meta.url), "utf8")).replaceAll("**", "");
-    for (const s of seed) expect(notes).toContain(s.quote);
+    // "owner" evidence is his own words (a quote); "doc" evidence is the notes' own wording, labelled as such, never a quote.
+    for (const s of seed) {
+      const text = s.kind === "owner" ? s.quote : s.doc;
+      expect(typeof text).toBe("string");
+      expect(s.kind === "owner" ? s.doc : s.quote).toBeUndefined();
+      expect(notes).toContain(text!);
+    }
+    const stored = (makeEnv({ seeded: true }).raw.prepare("SELECT evidence FROM canon_rules").all() as { evidence: string }[]).map((r) => JSON.parse(r.evidence)[0] as Record<string, string>);
+    expect(stored.filter((e) => "quote" in e)).toHaveLength(seed.filter((s) => s.kind === "owner").length);
+    expect(stored.filter((e) => "doc" in e)).toHaveLength(seed.filter((s) => s.kind === "doc").length);
     for (const r of g.rules) expect(r.evidenceCount).toBe(1);
   });
 });
@@ -101,6 +110,13 @@ describe("taste canon", () => {
     expect(r).toMatchObject({ rule: "A reworded rule, still stale.", stage: "bof", evidenceCount: 1, retireDue: true });
     await canon.canonUpdate(env, { action: "retire", id, reason: "stale" });
     await expect(canon.canonUpdate(env, { action: "edit", id, rule: "Edit of a retired rule.", source: "owner" })).rejects.toThrow(/Restore it first/);
+  });
+
+  it("keeps the owner's words with an edit, in the log", async () => {
+    const { env } = makeEnv();
+    const { id } = await canon.canonUpdate(env, { action: "add", rule: "A rule that will be reworded.", source: "s" }) as { id: string };
+    await canon.canonUpdate(env, { action: "edit", id, rule: "The rule, reworded after he said so.", source: "owner, 07-11-2026", quote: "his exact words" });
+    expect((await canon.canonGet(env, {})).recentChanges[0]!.detail).toContain("his exact words");
   });
 
   it("keeps the stage on an edit that does not name one (the tool schema adds no default)", async () => {
