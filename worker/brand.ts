@@ -21,6 +21,8 @@ export interface KitInput {
   logoWidthPct?: number;
   logoTopPct?: number;
   notes?: string;
+  /** The real food in words, written once from the texture photos (shape, surface, colour, how pieces sit). */
+  food?: string;
 }
 
 export interface Kit {
@@ -32,6 +34,8 @@ export interface Kit {
   refs: { key: string; url: string; sourceUrl: string; label: string; role: string }[];
   placement: { logoWidthPct: number; logoTopPct: number };
   notes: string;
+  /** Absent in kits saved before 07-11-2026. */
+  food?: string;
 }
 
 interface BrandRow {
@@ -99,6 +103,7 @@ export async function brandSave(env: Env, input: { slug: string; name: string; s
     refs,
     placement: { logoWidthPct: input.kit.logoWidthPct ?? 28, logoTopPct: input.kit.logoTopPct ?? 3 },
     notes: input.kit.notes ?? "",
+    food: input.kit.food ?? "",
   };
 
   for (const f of puts) await env.MEDIA.put(f.key, f.bytes, { httpMetadata: { contentType: f.type } });
