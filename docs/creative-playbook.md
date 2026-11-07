@@ -53,7 +53,7 @@ Three ads per batch: 1 tof, 1 mof, 1 bof (owner, 07-11-2026). The database allow
 4. Mix: at least 1 of the 3 picks in a native look (not the beige studio look).
 5. Draft: 3 `low` drafts per picked idea, with the packshot as the reference. Write the product's real size and the `render-checklist.md` §4 lines that fit the look into every prompt (the studio style line only for a studio look). When the ad shows food, also pass the kit's texture photo and put the kit's food words in the prompt. Say in the prompt that the texture photo is a texture cue only: do not copy its amount of food or its state.
 6. Pick (D2, Claude): judge each draft against §2 first, then `render-checklist.md` §1 to §3 at phone size, craft last. Pick one per idea with `picks_save`, then `final_render`.
-7. Food truth (§6): `food_fix` on every final that shows food, then the food check. Repeat until the food matches. Then `compose_final`.
+7. Food truth (§6): `food_fix` on every final that shows food, then the food check. Repeat until the food matches. Use `region_fix` for one non-food checklist defect (`render-checklist.md` §5), poll `render_status`, and check the edit and its edges at full size. Then `compose_final` the completed key.
 8. Final check: §2 and `render-checklist.md` again on the composed final. When a final fails, say which item in the report. Do not send it.
 
 ## 6. Real food (owner, 07-11-2026)
