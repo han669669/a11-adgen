@@ -1,4 +1,6 @@
 import { contentType, readCapped } from "./images";
+import { fileKey, headerLogos, organizationLogo, siteName } from "./logohtml";
+import { isPublicHost, isPublicHttpsUrl } from "./urlsafety";
 
 const HTML_MAX = 1_500_000;
 const CSS_MAX = 400_000;
@@ -16,7 +18,7 @@ async function fetchText(url: string, max: number, type: RegExp): Promise<{ url:
   try {
     let at = url;
     for (let hop = 0; hop <= REDIRECTS; hop++) {
-      if (new URL(at).protocol !== "https:") return null;
+      if (!isPublicHttpsUrl(at)) return null;
       const res = await fetch(at, { headers: UA, redirect: "manual", signal: AbortSignal.timeout(15_000) });
       if (res.status >= 300 && res.status < 400) {
         const loc = res.headers.get("location");
@@ -36,7 +38,7 @@ async function fetchText(url: string, max: number, type: RegExp): Promise<{ url:
 const abs = (href: string, base: string): string | null => {
   try {
     const u = new URL(decode(href.trim()), base);
-    return u.protocol === "https:" ? u.href : null;
+    return u.protocol === "https:" && isPublicHost(u.hostname) ? u.href : null;
   } catch {
     return null;
   }
@@ -64,6 +66,32 @@ const top = <T extends string>(counts: Map<T, number>, n: number, boost?: T | nu
   const rank = ([k, v]: [T, number]) => v + (k === boost ? 5 : 0);
   return [...counts.entries()].sort((a, b) => rank(b) - rank(a) || (a[0] < b[0] ? -1 : 1)).slice(0, n);
 };
+
+const LOGOS_MAX = 6;
+
+/** live: a PNG, JPEG or WebP answered. svg: an SVG file answered (brand_save refuses SVG). dead: an error status or a reply that is not an image. unknown: no clear answer (a timeout keeps the logo). */
+async function probeLogo(url: string, signal: AbortSignal): Promise<"live" | "svg" | "dead" | "unknown"> {
+  let at = url;
+  try {
+    for (let hop = 0; hop <= REDIRECTS; hop++) {
+      if (!isPublicHttpsUrl(at)) return "unknown"; // a host we may not call is not proof that the file is gone
+      const res = await fetch(at, { headers: { ...UA, accept: "image/*,*/*;q=0.5" }, redirect: "manual", signal });
+      await res.body?.cancel();
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get("location");
+        if (!loc) return "dead";
+        at = new URL(loc, at).href;
+        continue;
+      }
+      if (!res.ok) return "dead";
+      const type = contentType(res);
+      return type.includes("svg") ? "svg" : type.startsWith("image/") ? "live" : "dead";
+    }
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
 
 /** The declaration text of a style sheet at any nesting depth: what sits inside braces, without the selectors. A nested rule does not hide its parent's declarations. */
 function declarations(css: string): string {
@@ -134,14 +162,40 @@ export async function brandExtract(input: { url: string }) {
     }
   }
 
-  // Images that call themselves a logo (in the file name, alt text, class or id).
-  const logoCandidates: { url: string; alt: string | null }[] = [];
-  for (const t of tags("img")) {
-    const src = attr(t, "src") ?? attr(t, "data-src");
-    if (!src || !/logo/i.test(`${src} ${attr(t, "alt") ?? ""} ${attr(t, "class") ?? ""} ${attr(t, "id") ?? ""}`)) continue;
-    const u = abs(src, base);
-    if (u && !logoCandidates.some((c) => c.url === u)) logoCandidates.push({ url: u, alt: decode(attr(t, "alt") ?? "").trim() || null });
-    if (logoCandidates.length >= 8) break;
+  // The brand's own logo, in this order: the header of the page, then the JSON-LD Organization logo.
+  // A logo found anywhere else on the page is a guess (a press or partner logo looks the same), so it comes last and says so.
+  const name = siteName(html) || meta("og:site_name") || new URL(base).hostname.replace(/^www\./, "");
+  const logoCandidates: { url: string; kind: "header" | "organization" | "guess" }[] = [];
+  const addLogo = (raw: string | undefined, kind: "header" | "organization" | "guess") => {
+    const u = raw ? abs(raw, base) : null;
+    if (u && !/\.ico(\?|$)/i.test(u) && !logoCandidates.some((c) => fileKey(c.url) === fileKey(u))) logoCandidates.push({ url: u, kind });
+  };
+  let inlineSvgLogo = false;
+  for (const l of headerLogos(html, base, name)) {
+    if (l.kind === "img") addLogo(l.url, "header");
+    else inlineSvgLogo = true;
+  }
+  addLogo(organizationLogo(html, base), "organization");
+  // Each logo file must still answer with a raster image. A dead file is left out; an SVG file is left out and counted (brand_save refuses SVG); a timeout keeps it.
+  const probeSignal = AbortSignal.timeout(10_000);
+  let deadLogos = 0;
+  let svgLogos = 0;
+  const probe = async (list: typeof logoCandidates) => {
+    const states = await Promise.all(list.map((c) => probeLogo(c.url, probeSignal)));
+    deadLogos += states.filter((s) => s === "dead").length;
+    svgLogos += states.filter((s) => s === "svg").length;
+    return list.filter((_, i) => states[i] === "unknown" || states[i] === "live");
+  };
+  let logos = await probe(logoCandidates.slice(0, LOGOS_MAX));
+  if (!logos.length) {
+    // Nothing usable from the header or the site data (or every file was dead): look for a logo-named image elsewhere on the page.
+    const before = logoCandidates.length; // addLogo skips a file already listed, so what it adds is new
+    for (const t of tags("img")) {
+      const src = attr(t, "src") ?? attr(t, "data-src");
+      if (src && /logo/i.test(`${src} ${attr(t, "alt") ?? ""} ${attr(t, "class") ?? ""} ${attr(t, "id") ?? ""}`)) addLogo(src, "guess");
+      if (logoCandidates.length - before >= 3) break;
+    }
+    logos = await probe(logoCandidates.slice(before));
   }
 
   const sheets = (await Promise.all(sheetUrls.map((u) => fetchText(u, CSS_MAX, /^text\/css|^text\/plain/)))).filter((x): x is { url: string; text: string } => !!x);
@@ -172,7 +226,7 @@ export async function brandExtract(input: { url: string }) {
 
   const fonts = new Map<string, number>(googleFamilies);
   const bump = (name: string, by = 1) => {
-    const n = name.replace(/["']/g, "").trim();
+    const n = name.replace(/!\s*important/gi, "").replace(/["']/g, "").trim();
     if (n && n.length <= 60 && !n.startsWith("var(") && !GENERIC.has(n.toLowerCase())) fonts.set(n, (fonts.get(n) ?? 0) + by);
   };
   for (const m of css.matchAll(/font-family\s*:\s*([^;}{]+)/gi)) bump(m[1]!.split(",")[0]!);
@@ -180,20 +234,25 @@ export async function brandExtract(input: { url: string }) {
 
   const warnings: string[] = [];
   if (!cssChromatic) warnings.push("No brand colours found in the CSS. The page may build its styles with script, or use rgb() or hsl() colours. Take the colours from the logo and the packshot instead.");
-  if (!logoCandidates.length && !icons.length) warnings.push("No logo or icon found in the page tags. Ask the owner for the logo file.");
+  if (!logos.length) warnings.push(svgLogos && !inlineSvgLogo ? "The logo the site names is an SVG file, and brand_save needs a PNG or WebP file. Ask the owner for one." : inlineSvgLogo ? "The header logo is an inline SVG, so there is no file to fetch. Ask the owner for the logo file." : "No logo found in the page header or the site data. Ask the owner for the logo file.");
+  else if (logos.every((l) => l.kind === "guess")) warnings.push("These logos are guesses: no logo was found in the header. Look at each one before you use it: a press or partner logo looks the same.");
+  if (deadLogos) warnings.push(`${deadLogos} logo file(s) the page names did not answer with an image and were left out.`);
+  if (inlineSvgLogo && logos.length) warnings.push("The header logo is an inline SVG (no file). The logos listed are other files the site names: check that they are the brand's own.");
   if (sheetUrls.length && sheets.length < sheetUrls.length) warnings.push(`${sheetUrls.length - sheets.length} stylesheet(s) could not be read.`);
 
   return {
     url: base,
     title,
-    siteName: meta("og:site_name"),
+    siteName: siteName(html) || meta("og:site_name"),
     description: meta("description") ?? meta("og:description"),
     themeColor,
     colours: top(chromatic, 8, themeColor).map(([hex, uses]) => ({ hex, uses })),
     neutrals: top(neutral, 4).map(([hex, uses]) => ({ hex, uses })),
     namedColours: named,
     fonts: top(fonts, 6).map(([name, uses]) => ({ name, uses })),
-    logoCandidates,
+    logoCandidates: logos,
+    inlineSvgLogo,
+    missing: [...(logos.length ? [] : ["logo"]), ...(cssChromatic ? [] : ["colours"]), ...(fonts.size ? [] : ["fonts"])],
     icons: icons.slice(0, 6),
     ogImage,
     stylesheetsRead: sheets.length,

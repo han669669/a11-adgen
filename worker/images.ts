@@ -1,11 +1,33 @@
+import { isPublicHost } from "./urlsafety";
+
 /** Largest brand image the Worker reads (logo or reference photo). */
 export const MAX_IMAGE_BYTES = 8_000_000;
 
-/** Fetch an image over HTTPS only (also after redirects), so nobody on the path can swap a brand file. */
+const IMAGE_REDIRECTS = 5;
+
+/**
+ * Fetch an image over HTTPS only. Redirects are followed by hand, so every hop is checked before the request goes out:
+ * https, and a public host (never a loopback, private or metadata address). The old check ran after fetch had already followed a redirect.
+ */
 export async function fetchHttpsImage(url: string, what: string): Promise<Response> {
-  if (new URL(url).protocol !== "https:") throw new Error(`${what} URL must use HTTPS.`);
-  const res = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (a11adgen)" }, signal: AbortSignal.timeout(15_000) });
-  if (!res.url.startsWith("https:")) throw new Error(`${what} URL redirected to a non-HTTPS address.`);
+  let at = url;
+  const signal = AbortSignal.timeout(15_000); // one bound for the whole chain, not one per hop
+  let res!: Response;
+  for (let hop = 0; hop <= IMAGE_REDIRECTS; hop++) {
+    const u = new URL(at);
+    if (u.protocol !== "https:") throw new Error(hop === 0 ? `${what} URL must use HTTPS.` : `${what} URL redirected to a non-HTTPS address.`);
+    if (!isPublicHost(u.hostname)) throw new Error(`${what} URL must point at a public host.`);
+    res = await fetch(at, { headers: { "user-agent": "Mozilla/5.0 (a11adgen)" }, redirect: "manual", signal });
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get("location");
+      await res.body?.cancel();
+      if (!loc) throw new Error(`${what} URL redirected without a location.`);
+      at = new URL(loc, at).href;
+      continue;
+    }
+    break;
+  }
+  if (res.status >= 300 && res.status < 400) throw new Error(`${what} URL redirected too many times.`);
   const type = contentType(res);
   if (!res.ok || !type.startsWith("image/")) throw new Error(`${what} URL did not return an image (HTTP ${res.status}, ${type || "no type"}).`);
   if (Number(res.headers.get("content-length") ?? 0) > MAX_IMAGE_BYTES) throw new Error(`${what} is larger than ${MAX_IMAGE_BYTES} bytes.`);

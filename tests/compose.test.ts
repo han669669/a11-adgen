@@ -51,8 +51,37 @@ describe("compose_final input checks", () => {
   it("refuses a logo URL that is not HTTPS", async () =>
     expect(composeFinal(envWith("final", "done"), input("http://example.com/logo.png"))).rejects.toThrow("HTTPS"));
   it("refuses a logo that redirects to plain HTTP", async () => {
-    vi.stubGlobal("fetch", async () => logoResponse("http://cdn.example.com/logo.png"));
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", async (u: string) => {
+      asked.push(String(u));
+      return { ...logoResponse(String(u)), ok: false, status: 302, headers: new Headers({ location: "http://cdn.example.com/logo.png" }), body: null };
+    });
     await expect(composeFinal(envWith("final", "done"), input())).rejects.toThrow("non-HTTPS");
+    expect(asked).toEqual(["https://example.com/logo.png"]); // the plain-http address is never requested
+  });
+  it("refuses a logo on a private or internal host, before any request", async () => {
+    const f = vi.fn();
+    vi.stubGlobal("fetch", f);
+    await expect(composeFinal(envWith("final", "done"), input("https://169.254.169.254/logo.png"))).rejects.toThrow("public host");
+    await expect(composeFinal(envWith("final", "done"), input("https://localhost/logo.png"))).rejects.toThrow("public host");
+    expect(f).not.toHaveBeenCalled();
+  });
+  it("refuses a logo that redirects to an internal host", async () => {
+    // The mock fails on any URL but the first, so the test proves the fence runs before the internal request.
+    vi.stubGlobal("fetch", async (u: string) => {
+      if (String(u) !== "https://example.com/logo.png") throw new Error(`unexpected request to ${u}`);
+      return { ...logoResponse("x"), ok: false, status: 301, headers: new Headers({ location: "https://127.0.0.1/logo.png" }), body: null };
+    });
+    await expect(composeFinal(envWith("final", "done"), input())).rejects.toThrow("public host");
+  });
+  it("follows a safe https redirect by hand", async () => {
+    vi.stubGlobal("fetch", async (u: string) =>
+      String(u) === "https://example.com/logo.png"
+        ? { ...logoResponse(String(u)), ok: false, status: 302, headers: new Headers({ location: "https://cdn.example.com/logo.png" }), body: null }
+        : logoResponse(String(u)),
+    );
+    const out = await composeFinal(envWith("final", "done"), input());
+    expect(out.key).toMatch(/-c\d{13}\d+\.jpg$/);
   });
 });
 
