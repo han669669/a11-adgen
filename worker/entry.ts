@@ -3,6 +3,7 @@ import app, { tokenOk } from "./index";
 import { handleMcp } from "./mcp";
 import { MCP_SCOPE, handleAuthorize, stillAllowed } from "./oauth";
 import type { Env } from "./env";
+import { iconResponse } from "./icon";
 
 /**
  * Worker entry. OAuth 2.1 for /mcp (owner, 07-11-2026): the owner signs in with the web app account, approves each authorization request,
@@ -26,6 +27,8 @@ const mcpHandler = {
 const defaultHandler = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const path = new URL(request.url).pathname;
+    const icon = request.method === "GET" || request.method === "HEAD" ? iconResponse(path) : null;
+    if (icon) return request.method === "HEAD" ? new Response(null, { status: icon.status, headers: icon.headers }) : icon;
     if (path === "/authorize" || path === "/authorize/signin") return handleAuthorize(request, env);
     return app.fetch(request, env);
   },
