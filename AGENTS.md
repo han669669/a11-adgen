@@ -13,6 +13,7 @@ This document uses ASD-STE100 Simplified Technical English with British spelling
 4. `docs/v1-lessons.md`: what the old tool (`han669669/ai-ad-generator`) taught us.
 5. `docs/taste-seed.md`: the owner's taste, from his marks on v1. This seeds the taste canon.
 6. `docs/creative-playbook.md`: the bar for every ad (the option B test), the funnel stages and the batch process. Read it before you write ideas.
+7. `docs/render-checklist.md`: the owner's picture notes from v1 (writing on props, scale, props, physics, hands, copy). Read it before you write a prompt, pick a draft or send a final.
 
 The plan started in a Claude Code session on 2026-11-06 SGT. The plan page (private, owner only): https://claude.ai/artifact/9zyEqrUHpWa5xijAfU18K6. The files in `docs/` are the source of truth. When the page and the files disagree, the files win.
 
