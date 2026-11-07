@@ -256,9 +256,63 @@ def vary_food(a):
         print(f"{a.out_prefix}{k}.jpg" + (" (the photo unchanged)" if k == 1 else ""))
 
 
+def relight(a):
+    """Make a pasted pack take the scene's light, so it does not look pasted: side shading across the cylinder (dark on the side away
+    from the light), a soft fall-off at the edges, bounce light from the floor colour on the lower part, and a contact shadow
+    where the pack meets the floor. Run it on the composite before the blend pass. The direction is the side the light comes from."""
+    from PIL import ImageFilter
+    scene = Image.open(a.scene).convert("RGB")
+    arr = np.asarray(scene).astype(float)
+    H, W = arr.shape[:2]
+    x0, x1, top, base = ints(a.box, 4)
+    if not (0 <= x0 < x1 <= W and 0 <= top < base <= H):
+        sys.exit(f"--box {a.box} is outside the scene ({W}x{H})")
+    if a.light not in ("left", "right"):
+        sys.exit("--light must be left or right")
+    bounce = np.array(rgb(a.floor), dtype=float)
+    cx, half = (x0 + x1) / 2, (x1 - x0) / 2
+    # jar mask: rounded box, soft edge
+    m = Image.new("L", (W * 2, H * 2), 0)
+    ImageDraw.Draw(m).rounded_rectangle((x0 * 2, top * 2, x1 * 2, base * 2), radius=36, fill=255)
+    mask = np.asarray(m.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.8))).astype(float) / 255
+    xs = np.arange(W, dtype=float)
+    u = np.clip((xs - cx) / half, -1, 1)
+    toward = u if a.light == "left" else -u            # +1 on the side away from the light
+    gain = 1 + a.shade * 0.35 - a.shade * (toward + 1) / 2
+    gain *= 1 - a.edge * np.abs(u) ** 3
+    ys = np.arange(H, dtype=float)
+    w = np.clip((ys - (base - (base - top) * a.bounce_zone)) / ((base - top) * a.bounce_zone), 0, 1)[:, None]   # 0 above the zone, 1 at the base
+    out = arr.copy()
+    lit = arr * gain[None, :, None]
+    lum = (arr.mean(axis=2, keepdims=True) / 255)
+    lit = lit * (1 - a.bounce * w[..., None]) + (bounce[None, None, :] * (0.5 + lum)) * (a.bounce * w[..., None])
+    out = out * (1 - mask[..., None]) + lit * mask[..., None]
+    # contact shadow on the floor, outside the pack
+    sh = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(sh).ellipse((x0 - half * 0.08, base - 10, x1 + half * 0.08, base + 16), fill=255)
+    sh = np.asarray(sh.filter(ImageFilter.GaussianBlur(a.contact_blur))).astype(float) / 255
+    dark = 1 - a.contact * sh * (1 - mask)
+    out = out * dark[..., None]
+    Image.fromarray(out.clip(0, 255).astype("uint8")).save(a.out, quality=95)
+    print(f"{a.out}: light from the {a.light}, shade {a.shade}, bounce {a.bounce} of {a.floor}, contact {a.contact}")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
+    r = sub.add_parser("relight", help="make a pasted pack take the scene's light (side shading, floor bounce, contact shadow)")
+    r.add_argument("--scene", required=True)
+    r.add_argument("--box", required=True, help="x0,x1,top,base of the pack in the scene")
+    r.add_argument("--light", required=True, help="the side the light comes from: left or right (a shadow that falls left means light from the right)")
+    r.add_argument("--floor", default="120,80,55", help="R,G,B of the floor or surface the pack stands on (bounce light)")
+    r.add_argument("--shade", type=float, default=0.30, help="how much darker the side away from the light gets (0 to 0.6)")
+    r.add_argument("--edge", type=float, default=0.12, help="fall-off at both edges, for roundness")
+    r.add_argument("--bounce", type=float, default=0.14, help="how much of the floor colour lights the lower part")
+    r.add_argument("--bounce-zone", type=float, default=0.22, help="share of the pack's height, from the base, that gets bounce light")
+    r.add_argument("--contact", type=float, default=0.55, help="darkness of the contact shadow under the pack")
+    r.add_argument("--contact-blur", type=float, default=9)
+    r.add_argument("--out", required=True)
+    r.set_defaults(fn=relight)
     v = sub.add_parser("vary-food", help="N copies of a packshot with differently arranged kernels (for a row of identical packs)")
     v.add_argument("--packshot", required=True)
     v.add_argument("--region", action="append", required=True, help="x0,y0,x1,y1 of a food area; repeat for each")
