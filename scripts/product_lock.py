@@ -9,6 +9,8 @@ Needs Python 3 with Pillow and numpy. Runs on the owner's machine or in the sess
 
   skeleton  A blank canvas with N real products placed on it. Use it as the ONLY reference of a draft.
             Each draft gets its own placement, so the 3 drafts of an idea differ in layout, scale and crop.
+  cutout    Make a silhouette mask for a product that is not a rounded box (a cake on its box, on a dark or white backdrop).
+            Pass it as --alpha to skeleton and swap.
   swap      Replace the product in an existing draft or final with the real one (repair of a picked draft).
             --lower-only keeps the scene above the label: for an open, almost empty jar (the packshot cannot show that
             state, so only the label and the base are real pixels).
@@ -49,6 +51,58 @@ def alpha(size, scale, square_top=False):
     return m.resize(size, Image.LANCZOS)
 
 
+def alpha_from_png(path, box, size):
+    """The product's own silhouette from a mask file (made by `cutout`), cropped like the piece and resized to it."""
+    m = Image.open(path).convert("L")
+    return m.crop(box).resize(size, Image.LANCZOS)
+
+
+def cutout(a):
+    """Cut a product out of a packshot with a plain backdrop (dark and/or white), for products that are not a rounded box
+    (a cake on its box). A dark pixel (max channel below --dark-max) or a light unsaturated pixel (saturation below --light-sat and
+    brightness above --light-min) that is joined to the picture's border is backdrop; everything else is the product.
+    The mask is opened (--open px) and eroded by 1 px (no specks, thin lines or fringe), reduced to its largest piece, and softened a little."""
+    from PIL import ImageFilter
+    im = Image.open(a.packshot).convert("RGB")
+    arr = np.asarray(im).astype(int)
+    H, W = arr.shape[:2]
+    mx, mn = arr.max(axis=2), arr.min(axis=2)
+    sat = (mx - mn) / np.maximum(mx, 1)
+    border = [(x, y) for x in range(W) for y in (0, H - 1)] + [(x, y) for y in range(H) for x in (0, W - 1)]
+
+    def backdrop(cls):
+        b = Image.fromarray((cls * 255).astype("uint8"), "L")
+        out = np.zeros((H, W), bool)
+        for s in border[:: max(1, a.seed_step)]:
+            if b.getpixel(s) == 255 and not out[s[1], s[0]]:
+                t = b.copy()
+                ImageDraw.floodfill(t, s, 128)
+                out |= np.asarray(t) == 128
+        return out
+
+    bg = backdrop(mx < a.dark_max) | backdrop((sat < a.light_sat) & (mx > a.light_min))
+    m = Image.fromarray(((~bg) * 255).astype("uint8"), "L").filter(ImageFilter.MinFilter(a.open)).filter(ImageFilter.MaxFilter(a.open)).filter(ImageFilter.MinFilter(3))
+    fg = np.asarray(m) > 0
+    lab = Image.fromarray((fg * 255).astype("uint8"), "L")
+    seen = np.zeros((H, W), bool)
+    best = None
+    ys, xs = np.where(fg)
+    for y, x in zip(ys[::5], xs[::5]):
+        if seen[y, x]:
+            continue
+        t = lab.copy()
+        ImageDraw.floodfill(t, (int(x), int(y)), 128)
+        c = np.asarray(t) == 128
+        seen |= c
+        if best is None or c.sum() > best.sum():
+            best = c
+    if best is None:
+        sys.exit("no product found: every pixel counts as backdrop. Lower --dark-max or --light-sat.")
+    Image.fromarray((best * 255).astype("uint8"), "L").filter(ImageFilter.GaussianBlur(0.9)).save(a.out)
+    ys, xs = np.where(best)
+    print(f"{a.out}: product box x {xs.min()},{xs.max()} y {ys.min()},{ys.max()} ({int(best.sum())} px of {W * H}). Use --box {xs.min()},{ys.min()},{xs.max()},{ys.max()} --alpha {a.out}")
+
+
 def cut(pack, box, band_top=None):
     x0, y0, x1, y1 = box
     top = band_top if band_top is not None else y0
@@ -63,7 +117,7 @@ def skeleton(a):
     jar_h = round(H * a.jar_height)
     scale = jar_h / (y1 - y0 + 2 * PAD)
     piece = piece.resize((round(piece.width * scale), round(piece.height * scale)), Image.LANCZOS)
-    mask = alpha(piece.size, scale)
+    mask = alpha_from_png(a.alpha, (x0 - PAD, y0 - PAD, x1 + PAD, y1 + PAD), piece.size) if a.alpha else alpha(piece.size, scale)
     canvas = Image.new("RGB", (W, H), rgb(a.bg))
     pitch = piece.width * (1 + a.gap)
     total = pitch * (a.count - 1) + piece.width
@@ -101,7 +155,9 @@ def swap(a):
         scale = (obase - otop) / (y1 - y0 + 2 * PAD)
         piece = pack.crop((x0 - PAD, y0 - PAD, x1 + PAD, y1 + PAD))
     piece = piece.resize((round(piece.width * scale), round(piece.height * scale)), Image.LANCZOS)
-    mask = alpha(piece.size, scale, square_top=a.lower_only)
+    if a.alpha and a.lower_only:
+        sys.exit("--alpha cannot be combined with --lower-only")
+    mask = alpha_from_png(a.alpha, (x0 - PAD, y0 - PAD, x1 + PAD, y1 + PAD), piece.size) if a.alpha else alpha(piece.size, scale, square_top=a.lower_only)
     ytop = obase - piece.height + round(PAD * scale)
     # Paint the old product's area with the backdrop (a blend of the columns just outside it), then paste the real one.
     pad, probe = 8, 14
@@ -342,6 +398,15 @@ def main():
     v.add_argument("--strip-max", type=int, default=125)
     v.add_argument("--out-prefix", required=True, help="writes <prefix>1.jpg ... <prefix>N.jpg (copy 1 is unchanged)")
     v.set_defaults(fn=vary_food)
+    c = sub.add_parser("cutout", help="cut a product (not a rounded box) out of a plain dark or white backdrop into a mask file")
+    c.add_argument("--packshot", required=True)
+    c.add_argument("--out", required=True, help="the mask: a grey PNG the size of the packshot")
+    c.add_argument("--dark-max", type=int, default=48, help="a pixel whose brightest channel is below this, joined to the border, is backdrop")
+    c.add_argument("--light-sat", type=float, default=0.17, help="a light pixel with saturation below this, joined to the border, is backdrop")
+    c.add_argument("--light-min", type=int, default=150, help="the lowest brightness of a light backdrop pixel")
+    c.add_argument("--open", type=int, default=3, help="odd size of the opening filter: thin lines narrower than this are removed (3 keeps fine edges, 7 removes a horizon line)")
+    c.add_argument("--seed-step", type=int, default=7, help="try every Nth border pixel as a flood fill start")
+    c.set_defaults(fn=cutout)
     d = sub.add_parser("pad45", help="pad a square packshot to 4:5 for a model edit")
     d.add_argument("--packshot", required=True)
     d.add_argument("--out", required=True)
@@ -365,6 +430,7 @@ def main():
     s.add_argument("--jar-height", type=float, required=True, help="product height, fraction of the canvas height")
     s.add_argument("--cx", type=float, default=0.5, help="centre x, fraction of the width")
     s.add_argument("--base", type=float, default=0.9, help="y of the product's base, fraction of the height")
+    s.add_argument("--alpha", help="a silhouette mask the size of the packshot (from `cutout`) instead of a rounded box")
     s.add_argument("--count", type=int, default=1)
     s.add_argument("--gap", type=float, default=0.18, help="gap between products, fraction of one product's width")
     s.add_argument("--out", required=True)
@@ -376,6 +442,7 @@ def main():
     w.add_argument("--old", required=True, help="x0,x1,top,base of the old product in the scene")
     w.add_argument("--scale", type=float, help="paste at this scale (packshot pixels to scene pixels) instead of fitting --old")
     w.add_argument("--cx", type=float, help="centre x of the pasted piece (default: the centre of --old)")
+    w.add_argument("--alpha", help="a silhouette mask the size of the packshot (from `cutout`) instead of a rounded box")
     w.add_argument("--lower-only", action="store_true")
     w.add_argument("--band-top", type=int, help="y of the label's top band in the packshot (with --lower-only)")
     w.add_argument("--out", required=True)
