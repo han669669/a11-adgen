@@ -150,7 +150,10 @@ Phase 0 measures the real fal cost at 1536x1920 high and the Claude usage per ba
 
 | Point | Status |
 |---|---|
-| `main` branch | Created 2026-11-06 (owner yes). GitHub's default branch is still `docs/foundation`; the owner sets it to `main` in repo Settings. |
+| `main` branch | Created 2026-11-06 (owner yes). The GitHub default branch is `main` (owner confirmed 07-11-2026). |
+| First real client | Cat & the Fiddle (https://www.catandthefiddle.com/), product Fickle Feline 2.0 Cheesecake (owner, 07-11-2026). v1 made ads for this product too: 17 v1 batches, and the owner's marks on them are in the gold set. |
+| MCP auth | OAuth 2.1 (owner, 07-11-2026: "safety first", take the agent's recommendation). Needs one free KV namespace. Until it ships, the plugin reads the bearer token from `A11_MCP_TOKEN`. |
+| Studio site (a11studio.pro) | Not touched by this repo's agents. Another agent handles it and the owner decides its copy (owner, 07-11-2026). |
 | Cloudflare plan | Workers Free (owner, 2026-11-06). Limits in `AGENTS.md` §6. |
 | Cloud session network | Unrestricted. The Worker calls fal and Exa, not the session. |
 | fal `edit` at high keeps the draft's layout | Not verified. Phase 0 tests it. |

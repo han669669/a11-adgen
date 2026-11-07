@@ -44,4 +44,6 @@ v1 is `han669669/ai-ad-generator` (Convex, TheGrid, Replicate, 9:16). It ran fro
 | Used ads (final images) | `batchAds.usedDraftId` → `adDrafts` → storage | Swipe file |
 | Headlines the owner wrote or edited | `tasteEvents` edits | Canon examples |
 
-How: the owner (or an agent with his Convex deploy key) runs `npx convex export --prod --path v1-export.zip` in `ai-ad-generator`. Ask him first. Do not commit the export to the repo; store it in R2.
+How: the owner (or an agent with his Convex deploy key) runs `npx convex export --path v1-export.zip` with `CONVEX_DEPLOY_KEY` set (run it from a scratch folder with `convex` installed; the old repo has no `node_modules`). Ask him first. Do not commit the export to the repo.
+
+Done 07-11-2026 (the owner gave the key in chat): the export (3.4 MB, 43 tables, no file storage, so no images) was read in a scratch folder. It also holds the v1 auth tables (accounts, sessions), so the zip is **not** stored in R2 and is not kept: only the derived marks were imported. `tasteEvents` (1,073 events) gave one gold item per ad with a final mark: 264 items, 77 use and 187 pass, each with the headline, the picture idea, the stage, and the owner's note and tags when he wrote them (`gold_import`, source `v1`). Items have no images. Rotate the Convex deploy key after an export.
