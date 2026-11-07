@@ -5,7 +5,7 @@ import { handleMcp } from "./mcp";
 /** A Worker bundle on the Free plan is at most 3 MB. */
 const STAGE_MAX_BYTES = 3_000_000;
 
-const MEDIA_KEY = /^(renders\/[0-9a-f-]{36}\/(\d+(-c\d*)?\.jpg|mask-\d+\.png)|brands\/[0-9a-f-]{36}\/(logo|ref\d)\.(png|jpg|webp))$/;
+const MEDIA_KEY = /^(renders\/[0-9a-f-]{36}\/(\d+(-c\d*)?\.jpg|mask-\d+\.png)|brands\/[0-9a-f-]{36}\/(logo|ref\d)\.(png|jpg|webp)|refs\/[0-9a-f-]{36}\.(png|jpg))$/;
 
 async function sha256Hex(s: string): Promise<string> {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
@@ -35,6 +35,7 @@ const TYPES: Record<string, string> = {
   css: "text/css; charset=utf-8",
   svg: "image/svg+xml",
   png: "image/png",
+  jpg: "image/jpeg",
   ico: "image/x-icon",
   woff2: "font/woff2",
   json: "application/json",
@@ -51,7 +52,7 @@ async function stage(request: Request, env: Env, name: string, pattern: RegExp, 
   const body = await request.arrayBuffer();
   if (body.byteLength === 0) return new Response("Empty body", { status: 400 });
   if (body.byteLength > STAGE_MAX_BYTES) return new Response("Too large", { status: 413 });
-  const contentType = prefix === "app/" ? typeOf(name) : "application/javascript";
+  const contentType = prefix === "app/" || prefix === "refs/" ? typeOf(name) : "application/javascript";
   await env.MEDIA.put(`${prefix}${name}`, body, { httpMetadata: { contentType } });
   return Response.json({ key: `${prefix}${name}`, bytes: body.byteLength });
 }
@@ -92,6 +93,12 @@ export default {
     // Web app files: the built app goes to R2 app/<path>; the Worker serves it below.
     if (url.pathname.startsWith("/admin/app/") && request.method === "PUT") {
       return stage(request, env, url.pathname.slice("/admin/app/".length), APP_PATH, "app/");
+    }
+
+    // Reference images made outside the Worker (a product-lock skeleton, scripts/product_lock.py): saved to R2 refs/<uuid>.<jpg|png>,
+    // read by fal through /m/refs/<name>.
+    if (url.pathname.startsWith("/admin/ref/") && request.method === "PUT") {
+      return stage(request, env, url.pathname.slice("/admin/ref/".length), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png)$/, "refs/");
     }
 
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);

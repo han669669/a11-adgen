@@ -49,6 +49,50 @@ describe("/m/ media route", () => {
   });
 });
 
+describe("/admin/ref", () => {
+  const id = "0a1b2c3d-0000-4000-8000-0123456789ab";
+  const store = () => {
+    const saved = new Map<string, { bytes: ArrayBuffer; type?: string }>();
+    const e = {
+      ...env,
+      MEDIA: {
+        put: async (k: string, v: ArrayBuffer, o: { httpMetadata?: { contentType?: string } }) => void saved.set(k, { bytes: v, type: o.httpMetadata?.contentType }),
+        get: async (k: string) => {
+          const o = saved.get(k);
+          return o && { body: new Response(o.bytes).body, size: o.bytes.byteLength, httpMetadata: { contentType: o.type } };
+        },
+        head: async (k: string) => {
+          const o = saved.get(k);
+          return o && { size: o.bytes.byteLength, httpMetadata: { contentType: o.type } };
+        },
+      },
+    } as unknown as Env;
+    return { saved, e };
+  };
+  const put = async (e: Env, auth: string | null, name: string) => {
+    const headers: Record<string, string> = { "Content-Length": "3" };
+    if (auth) headers.Authorization = auth;
+    return worker.fetch(new Request(`https://x/admin/ref/${name}`, { method: "PUT", headers, body: "abc" }), e);
+  };
+  it("refuses without the token", async () => expect((await put(store().e, null, `${id}.jpg`)).status).toBe(401));
+  it("refuses a name that is not an exact uuid image", async () => {
+    const { e } = store();
+    for (const name of ["skeleton.jpg", `${id}.gif`, "a".repeat(36) + ".jpg", "-".repeat(36) + ".jpg"]) {
+      expect((await put(e, `Bearer ${TOKEN}`, name)).status, name).toBe(400);
+    }
+  });
+  it("saves under refs/ with an image type, and /m/ serves the same bytes", async () => {
+    const { e, saved } = store();
+    expect((await put(e, `Bearer ${TOKEN}`, `${id}.jpg`)).status).toBe(200);
+    expect([...saved.keys()]).toEqual([`refs/${id}.jpg`]);
+    expect(saved.get(`refs/${id}.jpg`)!.type).toBe("image/jpeg");
+    const r = await worker.fetch(new Request(`https://x/m/refs/${id}.jpg`), e);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toBe("image/jpeg");
+    expect(await r.text()).toBe("abc");
+  });
+});
+
 describe("/admin/stage", () => {
   const put = async (auth: string | null, name: string, body = "export default {}", length: string | null = String(body.length)) => {
     const saved = new Map<string, ArrayBuffer>();
