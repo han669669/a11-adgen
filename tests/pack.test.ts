@@ -100,6 +100,12 @@ describe("pack_publish", () => {
     raw.prepare("UPDATE renders SET kind = 'final', composed_key = NULL WHERE id = ?").run(finals[1]!);
     await expect(publish([{ renderId: finals[1]!, ...copy() }])).rejects.toThrow(/compose_final/);
     await expect(publish([{ renderId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", ...copy() }])).rejects.toThrow(/not a render of this batch/);
+    // A real, composed final that belongs to ANOTHER batch is refused too.
+    const other = await batch.batchCreate(env, { brandSlug: "won-gi", subjectId: (raw.prepare("SELECT subject_id FROM batches WHERE id = ?").get(b.id) as { subject_id: string }).subject_id, label: "W47" });
+    const [otherIdea] = await batch.ideasSave(env, other.id, [{ format: "tof", insight: "other batch idea", visual: "an empty jar", headline: "Another batch.", picked: true }]);
+    const otherRender = "dddddddd-dddd-dddd-dddd-dddddddd0001";
+    raw.prepare("INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, composed_key, usd_est, created_at, updated_at) VALUES (?, ?, ?, 'final', 'done', 'p', '[]', 1, 1, 'high', 1, 'renders/y/1-c1.jpg', 0, 'n', 'n')").run(otherRender, other.id, otherIdea!.id);
+    await expect(publish([{ renderId: otherRender, ...copy() }])).rejects.toThrow(/not a render of this batch/);
     raw.prepare("INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, composed_key, usd_est, created_at, updated_at) VALUES (?, ?, ?, 'final', 'done', 'p', '[]', 1, 1, 'high', 1, 'renders/x/1-c1.jpg', 0, 'n', 'n')").run("cccccccc-cccc-cccc-cccc-cccccccccccc", b.id, ideas[0]!.id);
     await expect(publish([{ renderId: finals[0]!, ...copy() }, { renderId: "cccccccc-cccc-cccc-cccc-cccccccccccc", ...copy() }])).rejects.toThrow(/same idea/);
     await expect(publish([{ renderId: finals[0]!, ...copy() }], "dddddddd-dddd-dddd-dddd-dddddddddddd")).rejects.toThrow(/No such batch/);
@@ -113,6 +119,32 @@ describe("pack_publish", () => {
     expect(() => validate(t.inputSchema, { ...base, ads: [{ ...ad, headlines: ["x".repeat(41), "fine one"] }] })).toThrow();
     expect(() => validate(t.inputSchema, { ...base, ads: [{ ...ad, primaryTexts: [ad.primaryTexts[0]] }] })).toThrow();
     expect(() => validate(t.inputSchema, { ...base, ads: [{ ...ad, cta: "CLICK_ME" }] })).toThrow();
+  });
+
+  it("refuses whitespace-only copy, and uses the default plan for a blank launch plan", async () => {
+    const t = TOOLS.find((x) => x.name === "pack_publish")!;
+    const base = { batchId: "11111111-1111-1111-1111-111111111111" };
+    const ad = { renderId: "22222222-2222-2222-2222-222222222222", ...copy() };
+    expect(() => validate(t.inputSchema, { ...base, ads: [{ ...ad, primaryTexts: ["          ", ad.primaryTexts[1]] }] })).toThrow();
+    expect(() => validate(t.inputSchema, { ...base, ads: [{ ...ad, headlines: ["   ", "Gone in one sitting"] }] })).toThrow();
+    expect(() => validate(t.inputSchema, { ...base, ads: [{ ...ad, description: "   " }] })).toThrow();
+    expect(() => validate(t.inputSchema, { ...base, ads: [{ ...ad, why: "                    " }] })).toThrow();
+    expect(() => validate(t.inputSchema, { ...base, ads: [ad], launchPlan: " ".repeat(30) })).toThrow();
+    const { env, raw, files } = makeEnv();
+    const { b, finals } = await seed(env, raw, files);
+    const r = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy() }], launchPlan: "   " });
+    const stored = JSON.parse((raw.prepare("SELECT content FROM packs WHERE id = ?").get(r.packId) as { content: string }).content);
+    expect(stored.launchPlan).toBe(pack.DEFAULT_LAUNCH_PLAN);
+  });
+
+  it("gives two publishes for one batch at the same moment two versions, not an error", async () => {
+    const { env, raw, files } = makeEnv();
+    const { b, finals } = await seed(env, raw, files);
+    const one = () => pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy() }] });
+    const [x, y] = await Promise.all([one(), one()]);
+    expect([x.version, y.version].sort()).toEqual([1, 2]);
+    expect(x.adNames[0]).toMatch(new RegExp(`_v${x.version}$`));
+    expect(y.adNames[0]).toMatch(new RegExp(`_v${y.version}$`));
   });
 
   it("reads numbers and the ISO week", () => {

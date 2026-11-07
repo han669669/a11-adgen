@@ -83,11 +83,11 @@ export async function packPublish(
   if (!b) throw new InputError("No such batch.");
   const facts = (await env.DB.prepare("SELECT label, value, quote, source_url FROM facts WHERE subject_id = ? ORDER BY id LIMIT 200")
     .bind(b.subject_id).all<FactRow>()).results;
-  const version = ((await env.DB.prepare("SELECT MAX(version) AS v FROM packs WHERE batch_id = ?").bind(a.batchId).first<{ v: number | null }>())?.v ?? 0) + 1;
   const week = isoWeek(a.at ?? new Date());
 
   const ads: PackAd[] = [];
   const factCheck: PackContent["factCheck"] = [];
+  const ideaNumbers: number[] = [];
   const seenIdeas = new Set<string>();
   for (const ad of a.ads) {
     const r = await env.DB.prepare(
@@ -99,6 +99,7 @@ export async function packPublish(
     if (!r.composed_key?.startsWith("renders/")) throw new InputError(`Render ${ad.renderId} has no composed image yet: run compose_final first.`);
     if (seenIdeas.has(r.idea_id)) throw new InputError("Two ads are for the same idea. Send one final per idea.");
     seenIdeas.add(r.idea_id);
+    ideaNumbers.push(r.n);
     const texts = [...ad.primaryTexts, ...ad.headlines, ad.description];
     for (const n of new Set(texts.flatMap(numbersIn))) {
       const f = facts.find((x) => numbersIn(`${x.value} ${x.quote}`).includes(n));
@@ -107,7 +108,7 @@ export async function packPublish(
       if (!factCheck.some((c) => c.claim === n && c.fact === fact)) factCheck.push({ claim: n, fact, quote: f.quote, sourceUrl: f.source_url });
     }
     ads.push({
-      name: adName(week, b.slug, r.format, r.n, version),
+      name: "", // set with the version, below
       stage: r.format,
       headline: r.headline,
       imageKey: r.composed_key,
@@ -121,22 +122,32 @@ export async function packPublish(
   const content: PackContent = {
     brand: b.name,
     ads,
-    launchPlan: a.launchPlan ?? DEFAULT_LAUNCH_PLAN,
+    launchPlan: a.launchPlan?.trim() || DEFAULT_LAUNCH_PLAN,
     factCheck,
     healthNote: a.healthProduct ? HEALTH_NOTE : null,
   };
   const token = [...crypto.getRandomValues(new Uint8Array(24))].map((x) => x.toString(16).padStart(2, "0")).join("");
   const id = crypto.randomUUID();
-  await env.DB.prepare("INSERT INTO packs (id, batch_id, version, token_hash, title, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .bind(id, a.batchId, version, await sha256Hex(token), `${b.name} ${b.label} v${version}`, JSON.stringify(content), now()).run();
-  return {
-    packId: id,
-    version,
-    link: `${env.PUBLIC_BASE_URL}/c/${token}`,
-    note: "The link is shown once. Send it to the client. packRevoke stops it.",
-    adNames: ads.map((x) => x.name),
-    numbersChecked: factCheck.length,
-  };
+  // Two publishes for one batch at the same moment can pick the same version. The unique key refuses the second; it takes the next one.
+  for (let attempt = 0; ; attempt++) {
+    const version = ((await env.DB.prepare("SELECT MAX(version) AS v FROM packs WHERE batch_id = ?").bind(a.batchId).first<{ v: number | null }>())?.v ?? 0) + 1;
+    const named = { ...content, ads: ads.map((x, i) => ({ ...x, name: adName(week, b.slug, x.stage, ideaNumbers[i]!, version) })) };
+    try {
+      await env.DB.prepare("INSERT INTO packs (id, batch_id, version, token_hash, title, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(id, a.batchId, version, await sha256Hex(token), `${b.name} ${b.label} v${version}`, JSON.stringify(named), now()).run();
+    } catch (e) {
+      if (attempt < 4 && /UNIQUE/i.test(String(e))) continue;
+      throw e;
+    }
+    return {
+      packId: id,
+      version,
+      link: `${env.PUBLIC_BASE_URL}/c/${token}`,
+      note: "The link is shown once. Send it to the client. packRevoke stops it.",
+      adNames: named.ads.map((x) => x.name),
+      numbersChecked: factCheck.length,
+    };
+  }
 }
 
 export async function packRevoke(env: Env, packId: string) {

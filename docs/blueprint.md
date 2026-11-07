@@ -112,7 +112,7 @@ claude mcp add --transport http a11 https://a11adgen.gamingcomputing.workers.dev
 
 ## 8. Hard checks in code (budget 15)
 
-1. Every price, number and offer in the copy matches the fact sheet text. (Built in Phase 3a, for the Meta text in `pack_publish`.)
+1. Every price, number and offer in the copy matches the fact sheet text. Built in Phase 3a for the Meta text in `pack_publish` as a number check: every number must be in a fact's value or quote. A claim with no number ("free delivery") is checked by the critic against the fact sheet, not by code.
 2. Painted text equals the approved copy (vision read, then code compares).
 3. The logo reads the brand name.
 4. No CTA button painted in the image.
