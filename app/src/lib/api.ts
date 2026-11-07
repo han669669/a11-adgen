@@ -41,7 +41,7 @@ export interface Final {
 export interface Idea {
   id: string;
   n: number;
-  format: "hook" | "anatomy" | "usvsthem" | "offer";
+  format: "tof" | "mof" | "bof" | "hook" | "anatomy" | "usvsthem" | "offer";
   insight: string;
   headline: string;
   picked: boolean;

@@ -46,14 +46,20 @@ const kit = {
   refs: [{ url: "https://brand.example/closeup.jpg", label: "kernels close-up", role: "texture" as const }],
 };
 
+/** Completes a seeded batch to one pick per stage: a picked mof, and the seeded bof marked picked. */
+async function pickAllStages(env: Env, batchId: string, bofId: string) {
+  await batch.ideasSave(env, batchId, [{ format: "mof", insight: "m", visual: "m", headline: "M", picked: true }]);
+  await batch.ideasUpdate(env, [{ id: bofId, picked: true }]);
+}
+
 async function seed(env: Env) {
   vi.stubGlobal("fetch", async (u: string) => img(u, u.endsWith(".jpg") ? "image/jpeg" : "image/png"));
   await brandSave(env, { slug: "wongi", name: "WonGi", kit });
   const subject = await batch.subjectSave(env, { brandSlug: "wongi", kind: "product", title: "Pop Barley", url: "https://brand.example/p" });
   const b = await batch.batchCreate(env, { brandSlug: "wongi", subjectId: subject.id, label: "W46" });
   const ideas = await batch.ideasSave(env, b.id, [
-    { format: "hook", insight: "jar empties fast", visual: "empty jar", headline: "Somehow the jar is empty again.", picked: true },
-    { format: "offer", insight: "bundle", visual: "three jars", headline: "Three jars. One price." },
+    { format: "tof", insight: "jar empties fast", visual: "empty jar", headline: "Somehow the jar is empty again.", picked: true },
+    { format: "bof", insight: "bundle", visual: "three jars", headline: "Three jars. One price." },
   ]);
   return { subject, b, ideas };
 }
@@ -160,11 +166,14 @@ describe("batch flow", () => {
     const { env, raw } = makeEnv();
     const { b, ideas } = await seed(env);
     const keys = addDraft(raw, b.id, ideas[0]!.id, "33333333-3333-3333-3333-333333333333");
-    await batch.picksSave(env, b.id, [{ key: keys[0] }, { key: keys[1] }]);
+    await expect(batch.picksSave(env, b.id, [{ key: keys[0] }, { key: keys[1] }])).rejects.toThrow("one draft per idea");
+    await batch.picksSave(env, b.id, [{ key: keys[0] }]);
     raw.prepare("UPDATE picks SET final_render_id = 'f1' WHERE render_key = ?").run(keys[0]);
-    await batch.picksSave(env, b.id, [{ key: keys[2] }]);
+    await expect(batch.picksSave(env, b.id, [{ key: keys[2] }])).rejects.toThrow("already has a final");
+    const bofKeys = addDraft(raw, b.id, ideas[1]!.id, "33333333-3333-3333-3333-444444444444");
+    await batch.picksSave(env, b.id, [{ key: bofKeys[0] }]);
     const left = raw.prepare("SELECT render_key FROM picks ORDER BY render_key").all().map((r: any) => r.render_key);
-    expect(left).toEqual([keys[0], keys[2]]);
+    expect(left).toEqual([keys[0], bofKeys[0]].sort());
   });
 
   it("starts a final from a pick with the draft as the first reference", async () => {
@@ -190,6 +199,7 @@ describe("batch flow", () => {
     const { env, raw } = makeEnv();
     const { b, ideas } = await seed(env);
     addDraft(raw, b.id, ideas[0]!.id, "66666666-6666-6666-6666-666666666666");
+    await pickAllStages(env, b.id, ideas[1]!.id);
     await expect(batch.batchUpdate(env, { id: b.id, status: "board" })).rejects.toThrow("finalPrompt");
     await batch.ideasUpdate(env, [{ id: ideas[0]!.id, finalPrompt: "B".repeat(50) }]);
     await expect(batch.batchUpdate(env, { id: b.id, status: "board" })).resolves.toMatchObject({ updated: ["status"] });
@@ -199,15 +209,21 @@ describe("batch flow", () => {
     const { env, raw } = makeEnv();
     const { b, subject } = await seed(env);
     const other = await batch.batchCreate(env, { brandSlug: "wongi", subjectId: subject.id, label: "W47" });
-    const [foreign] = await batch.ideasSave(env, other.id, [{ format: "hook", insight: "x", visual: "x", headline: "x" }]);
+    const [foreign] = await batch.ideasSave(env, other.id, [{ format: "tof", insight: "x", visual: "x", headline: "x" }]);
     const keys = addDraft(raw, b.id, foreign!.id, "77777777-7777-7777-7777-777777777777");
     await expect(batch.picksSave(env, b.id, [{ key: keys[0] }])).rejects.toThrow("not a finished draft");
   });
 
-  it("allows only one critic pick per format in a batch", async () => {
+  it("allows 1 pick per stage per batch, on save and on update", async () => {
     const { env } = makeEnv();
-    const { b } = await seed(env);
-    await expect(batch.ideasSave(env, b.id, [{ format: "hook", insight: "y", visual: "y", headline: "y", picked: true }])).rejects.toThrow(/UNIQUE/);
+    const { b, ideas } = await seed(env); // seed: one tof picked, one bof not picked
+    const pick = (format: "tof" | "mof" | "bof") => batch.ideasSave(env, b.id, [{ format, insight: "y", visual: "y", headline: "y", picked: true }]);
+    await expect(pick("tof")).rejects.toThrow("Pick limit");
+    await pick("mof");
+    await expect(pick("mof")).rejects.toThrow("Pick limit");
+    await pick("bof");
+    await expect(batch.ideasUpdate(env, [{ id: ideas[1]!.id, picked: true }])).rejects.toThrow("Pick limit");
+    await batch.ideasUpdate(env, [{ id: ideas[0]!.id, picked: true }]); // already picked: no change in count
   });
 
   it("starts only one final when Render is tapped twice at once", async () => {
@@ -246,7 +262,25 @@ describe("batch flow", () => {
          VALUES ('q1', ?, ?, 'draft', 'queued', 'p', '[]', 1024, 1280, 'low', 3, 0.02, 'now', 'now')`,
       )
       .run(b.id, ideas[0]!.id);
+    await pickAllStages(env, b.id, ideas[1]!.id);
     await expect(batch.batchUpdate(env, { id: b.id, status: "board" })).resolves.toMatchObject({ updated: ["status"] });
+  });
+
+  it("needs exactly one picked idea per stage before 'board'", async () => {
+    const { env } = makeEnv();
+    const { b, ideas } = await seed(env); // tof picked; bof not picked; no mof
+    await expect(batch.batchUpdate(env, { id: b.id, status: "board" })).rejects.toThrow("missing: mof, bof");
+    await pickAllStages(env, b.id, ideas[1]!.id);
+    await expect(batch.batchUpdate(env, { id: b.id, status: "board" })).resolves.toMatchObject({ updated: ["status"] });
+  });
+
+  it("checks the pick limit when a picked idea moves to another batch", async () => {
+    const { env, raw } = makeEnv();
+    const { b, ideas, subject } = await seed(env);
+    const other = await batch.batchCreate(env, { brandSlug: "wongi", subjectId: subject.id, label: "W47" });
+    await batch.ideasSave(env, other.id, [{ format: "tof", insight: "z", visual: "z", headline: "z", picked: true }]);
+    expect(() => raw.prepare("UPDATE ideas SET batch_id = ? WHERE id = ?").run(other.id, ideas[0]!.id)).toThrow("Pick limit");
+    expect(raw.prepare("SELECT batch_id FROM ideas WHERE id = ?").get(ideas[0]!.id)).toEqual({ batch_id: b.id });
   });
 
   it("reports an unknown idea id on update", async () => {
@@ -266,7 +300,7 @@ describe("monthly spend cap", () => {
 
 describe("nested tool input", () => {
   const schema = TOOLS.find((t) => t.name === "ideas_save")!.inputSchema;
-  const idea = { format: "hook", insight: "insight", visual: "visual", headline: "H" };
+  const idea = { format: "tof", insight: "insight", visual: "visual", headline: "H" };
   it("fills nested defaults and accepts a good list", () => {
     const out = validate(schema, { batchId: "11111111-1111-1111-1111-111111111111", ideas: [idea] }) as any;
     expect(out.ideas[0].picked).toBe(false);
