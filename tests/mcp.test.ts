@@ -43,7 +43,7 @@ describe("mcp handler", () => {
   });
   it("lists the prompts and returns one with its arguments filled in", async () => {
     const list: any = await (await post({ jsonrpc: "2.0", id: 4, method: "prompts/list" })).json();
-    expect(list.result.prompts.map((p: any) => p.name)).toEqual(["brand", "batch", "final", "learn", "results", "gold-test"]);
+    expect(list.result.prompts.map((p: any) => p.name)).toEqual(["brand", "batch", "redesign", "final", "learn", "results", "gold-test"]);
     const got: any = await (await post({ jsonrpc: "2.0", id: 5, method: "prompts/get", params: { name: "final", arguments: { batchId: "abc-123" } } })).json();
     expect(got.result.messages[0].content.text).toContain("Batch abc-123");
     expect(got.result.messages[0].role).toBe("user");
@@ -88,7 +88,7 @@ describe("mcp handler", () => {
     const { PROMPTS } = await import("../worker/prompts");
     const known = new Set(TOOLS.map((t) => t.name));
     const used = new Set<string>();
-    for (const p of PROMPTS) for (const m of p.text({ url: "u", slug: "s", brand: "b", batchId: "", productUrl: "https://b.example/p", productTitle: "P", label: "W1", note: "n" }).matchAll(/\b([a-z]+_[a-z_]+)\b/g)) used.add(m[1]!);
+    for (const p of PROMPTS) for (const m of p.text({ url: "u", slug: "s", brand: "b", batchId: "", productUrl: "https://b.example/p", productTitle: "P", label: "W1", note: "n", adImageUrls: "https://a.example/1.png", title: "T" }).matchAll(/\b([a-z]+_[a-z_]+)\b/g)) used.add(m[1]!);
     expect(used.size).toBeGreaterThan(10);
     expect([...used].filter((n) => !known.has(n))).toEqual([]);
   });

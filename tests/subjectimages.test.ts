@@ -37,7 +37,8 @@ async function makeEnv() {
     },
     head: async () => null,
   };
-  const env = { DB: fakeD1(), MEDIA, PUBLIC_BASE_URL: "https://w" } as unknown as Env;
+  const IMAGES = { input: () => ({ transform: () => IMAGES.input(), output: async () => ({ response: () => new Response("png-bytes") }) }) };
+  const env = { DB: fakeD1(), MEDIA, IMAGES, PUBLIC_BASE_URL: "https://w" } as unknown as Env;
   stub({ "https://b.example/logo.png": { body: PNG } });
   await brandSave(env, { slug: "won-gi", name: "WonGi", kit: { logoUrl: "https://b.example/logo.png", palette: [{ hex: "#F26A21", role: "logo" }], voice: "Warm and short." } });
   return { env, store, raw: (env.DB as unknown as { raw: DatabaseSync }).raw };
@@ -146,5 +147,20 @@ describe("the stored image is private and the agent can look at it", () => {
     const id = "3f2b8c1e-aaaa-4bbb-8ccc-1234567890ab";
     for (const key of [`subjects/${id}/0.png`, `subjects/${id}/7.png`, `subjects/${id}/1.gif`, `subjects/${id}/../x.png`, `subjects/x/1.png`]) expect(() => validate(t.inputSchema, { key }), key).toThrow();
     expect(() => validate(t.inputSchema, { key: `subjects/${id}/6.webp` })).not.toThrow();
+  });
+});
+
+describe("the redesign prompt", () => {
+  it("fills the subject_save call with the picture links, and refuses a link that is not https or more than 6", async () => {
+    const { PROMPTS } = await import("../worker/prompts");
+    const p = PROMPTS.find((x) => x.name === "redesign")!;
+    const a = { brand: "wongi", adImageUrls: "https://a.example/1.png  https://a.example/2.jpg", title: "Old ad", label: "W48", adUrl: "https://a.example/ad" };
+    const text = p.text(a);
+    expect(text).toContain("subject_save: brandSlug wongi, kind 'redesign', title 'Old ad', url https://a.example/ad, imageUrls [https://a.example/1.png, https://a.example/2.jpg]");
+    expect(text).toContain("imageKeys and imageErrors");
+    expect(text).not.toMatch(/run \/mcp__a11__(batch|brand|redesign)/);
+    expect(p.check!(a)).toBeNull();
+    expect(p.check!({ ...a, adImageUrls: "http://a.example/1.png" })).toMatch(/https/);
+    expect(p.check!({ ...a, adImageUrls: Array.from({ length: 7 }, (_, i) => `https://a.example/${i}.png`).join(" ") })).toMatch(/at most 6/);
   });
 });
