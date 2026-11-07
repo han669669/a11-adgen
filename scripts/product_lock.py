@@ -135,6 +135,20 @@ def pad45(a):
     print(f"{a.out}: padded {extra // 2} px at the top and bottom, size {w}x{h + extra}; packshot y + {extra // 2} = padded y")
 
 
+def widen_neck(img, rim, neck_end, shoulder_end, factor, cx):
+    """The model draws the open neck narrower than the body (bottle-like). The real jar is straight-sided under a cap that is almost
+    as wide as the body, so widen the neck rows by `factor` about the jar's centre, easing back to 1.0 by shoulder_end."""
+    out = img.copy()
+    w = img.shape[1]
+    xs = np.arange(w, dtype=float)
+    for y in range(rim, shoulder_end + 1):
+        f = factor if y <= neck_end else 1 + (factor - 1) * (shoulder_end - y) / max(1, shoulder_end - neck_end)
+        src = cx + (xs - cx) / f
+        for c in range(3):
+            out[y, :, c] = np.interp(src, xs, img[y, :, c])
+    return out
+
+
 def open_source(a):
     """Build the source for an OPEN product from a model edit of the padded packshot (cap removed, same framing).
     The model gives the open neck at the packshot's own camera angle. Everything from --real-from down is the real photo again
@@ -149,6 +163,8 @@ def open_source(a):
     strip = E[s0:s1 + 1].copy()
     n = strip.shape[0]
     ext = np.concatenate([E[:s1 + 1], strip, E[s1 + 1:]], axis=0)[n:]  # the top n rows are plain backdrop: the base keeps its y
+    if a.neck:
+        ext = widen_neck(ext, *ints(a.neck, 3), a.neck_widen, a.cx)
     Image.fromarray(ext).save(a.out, quality=95)
     print(f"{a.out}: neck extended by {n} px; the rim moved up {n} px; the box top is the old rim y minus {n}")
 
@@ -165,6 +181,9 @@ def main():
     o.add_argument("--edit", required=True, help="the model's edit of it (cap off, same framing)")
     o.add_argument("--real-from", type=int, required=True, help="padded y inside the label's top band: from here down the real photo is used")
     o.add_argument("--strip", required=True, help="y0,y1 of a strip of the neck's threads to repeat (a whole number of thread periods)")
+    o.add_argument("--neck", help="rim_y,neck_end_y,shoulder_end_y in the output: widen the neck rows (see widen_neck)")
+    o.add_argument("--neck-widen", type=float, default=1.05, help="widen factor for the neck (the model draws it at 0.90 of the body width; the real one is about 0.95)")
+    o.add_argument("--cx", type=float, default=513, help="centre x of the jar in the padded packshot")
     o.add_argument("--out", required=True)
     o.set_defaults(fn=open_source)
     s = sub.add_parser("skeleton")

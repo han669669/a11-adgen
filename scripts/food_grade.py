@@ -11,7 +11,7 @@ Needs Python 3 with Pillow and numpy.
       --region 350,165,682,283 --region 350,860,682,982 --out packshot-graded.jpg
 
 --region: where food shows in --src (x0,y0,x1,y1), one per food area. --ref-box: a patch of the close-up that is all kernels (--ref-bg is the backdrop colour to leave out).
-Use the graded packshot as the --packshot of product_lock.py. Defaults: strength 1.0, spread x1.15, contrast x1.12, clarity 0.7.
+Use the graded packshot as the --packshot of product_lock.py. Defaults (the W46c v3 settings, the owner's pick): strength 0.8, no spread boost, no contrast boost, no clarity. Stronger settings (strength 1, spread 1.15, contrast 1.12, clarity 0.7) looked fake and plastic to the owner.
 """
 import numpy as np
 from PIL import Image
@@ -36,14 +36,14 @@ def to_rgb(lab):
     c = np.where(lin <= 0.0031308, 12.92 * lin, 1.055 * np.clip(lin, 0, None) ** (1 / 2.4) - 0.055)
     return np.clip(c * 255, 0, 255)
 
-def kernel_mask(rgb, bg, dist=48):
-    """Kernels: pixels clearly away from the plain backdrop colour, not white glare."""
-    mx = rgb.max(axis=-1)
+def kernel_mask(rgb, bg, dist=70, sat_min=0.28):
+    """Kernels: saturated pixels clearly away from the plain backdrop colour (white glare and glass are not saturated)."""
+    mx, mn = rgb.max(axis=-1), rgb.min(axis=-1)
+    sat = (mx - mn) / np.maximum(mx, 1)
     d = np.abs(rgb - bg).sum(axis=-1)
-    glare = rgb.min(axis=-1) > 225
-    return (d > dist) & (mx > 60) & ~glare
+    return (sat > sat_min) & (d > dist) & (mx > 70)
 
-def grade(src, regions, ref, ref_box, strength=1.0, sd_boost=1.15, contrast=1.12, clarity=0.7, ref_bg=(245, 230, 210)):
+def grade(src, regions, ref, ref_box, strength=0.8, sd_boost=1.0, contrast=1.0, clarity=0.0, ref_bg=(245, 230, 210)):
     """src: PIL RGB. regions: list of (x0,y0,x1,y1) in src where food shows. ref/ref_box: the close-up and an all-kernel patch of it.
     sd_boost widens the colour spread (deeper caramel patches), contrast stretches lightness, clarity adds local detail back."""
     from PIL import ImageFilter
@@ -53,7 +53,7 @@ def grade(src, regions, ref, ref_box, strength=1.0, sd_boost=1.15, contrast=1.12
     rc = r[y0:y1, x0:x1]
     strength = float(np.clip(strength, 0.0, 1.0))
     # ref_bg: the close-up's plain backdrop colour; pixels near it (and white glare) are not counted as kernels
-    rl = to_lab(rc)[kernel_mask(rc, np.array(ref_bg, dtype=float), 60)]
+    rl = to_lab(rc)[kernel_mask(rc, np.array(ref_bg, dtype=float))]
     if rl.size == 0:
         raise ValueError("--ref-box has no kernel pixels (all of it is near --ref-bg or white): pick a patch that is all kernels")
     t_mu, t_sd = rl.mean(axis=0), rl.std(axis=0)
@@ -85,10 +85,10 @@ def main():
     p.add_argument("--ref-box", required=True)
     p.add_argument("--region", action="append", required=True)
     p.add_argument("--ref-bg", default="245,230,210", help="R,G,B of the close-up's plain backdrop (not counted as kernels)")
-    p.add_argument("--strength", type=float, default=1.0, help="0 to 1")
-    p.add_argument("--sd-boost", type=float, default=1.15)
-    p.add_argument("--contrast", type=float, default=1.12)
-    p.add_argument("--clarity", type=float, default=0.7)
+    p.add_argument("--strength", type=float, default=0.8, help="0 to 1")
+    p.add_argument("--sd-boost", type=float, default=1.0, help="widen the colour spread (more than 1 gave a plastic look)")
+    p.add_argument("--contrast", type=float, default=1.0)
+    p.add_argument("--clarity", type=float, default=0.0, help="local detail added back (more than 0 gave a gritty, fake look)")
     p.add_argument("--out", required=True)
     a = p.parse_args()
     box = lambda s: tuple(int(float(v)) for v in s.split(","))
