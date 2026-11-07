@@ -31,7 +31,9 @@ h2{font-size:1.3rem;margin:48px 0 8px}h3{margin:0 0 4px;font-size:1.15rem;line-h
 code{font:inherit;font-weight:600;background:#efe6da;padding:1px 6px;border-radius:4px;word-break:break-all}
 .plan{margin:12px 0 0;padding-left:1.3em;max-width:60ch}.plan li{margin:0 0 18px;padding-left:4px;font-size:1.05rem}
 .steps{padding-left:1.4em;margin:8px 0}.steps li{margin:4px 0}
-table{border-collapse:collapse;width:100%;font-size:.9rem;background:#fff;border-radius:8px}td,th{text-align:left;padding:8px 10px;border-bottom:1px solid #e6dccd;vertical-align:top;overflow-wrap:anywhere}
+.facts{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:10px}.facts li{background:#fff;border:1px solid #e6dccd;border-radius:10px;padding:12px 14px;font-size:.95rem;overflow-wrap:anywhere}
+.facts .n{display:inline-block;margin-bottom:6px;padding:1px 10px;border-radius:6px;background:#efe6da;font-size:1.15rem;font-weight:700}
+.facts .what{margin:0 0 4px}.facts .what b{font-weight:700}.facts .q{margin:0 0 6px;font-size:.9rem}.facts .src{display:block;font-size:.85rem;overflow-wrap:anywhere}
 a{color:inherit}
 .foot{margin-top:48px;font-size:.85rem}
 .lb{display:none;position:fixed;inset:0;z-index:10;background:#140c07;animation:fade .2s}.lb:has(.slide:target){display:block}
@@ -95,10 +97,16 @@ export function renderPack(token: string, title: string, c: PackContent): string
       return `<div class="slide" id="view-${i + 1}" role="dialog" aria-modal="true" aria-label="Ad ${i + 1} of ${n}, full size" tabindex="-1"><a class="bg" href="#ad-${i + 1}" aria-label="Close" tabindex="-1"></a><img src="${base}.jpg" alt="${esc(a.headline)}" loading="lazy"><a class="x" href="#ad-${i + 1}" aria-label="Close">&times;</a>${n > 1 ? `<span class="count">${i + 1} / ${n}</span>` : ""}${prev}${next}<a class="dl" href="${base}.jpg" download="${esc(a.name)}.jpg">Download JPEG</a></div>`;
     })
     .join("");
+  // One card per number, not a table: a table is too narrow on a phone and breaks the numbers.
+  // The stored fact reads "label: value"; show the label as a bold lead-in.
+  const factLine = (fact: string) => {
+    const m = /^([^:]{1,80}):\s+(.+)$/s.exec(fact);
+    return m ? `<b>${esc(m[1]![0]!.toUpperCase() + m[1]!.slice(1))}:</b> ${esc(m[2]!)}` : esc(fact);
+  };
   const facts = c.factCheck.length
-    ? `<h2>Fact check</h2><p class="muted">We checked every number in the ad text against the product page. Nothing here is guessed.</p><table><tr><th>Number in the ad</th><th>What it is</th><th>Where it comes from</th></tr>${c.factCheck
-        .map((f) => `<tr><td>${esc(f.claim)}</td><td>${esc(f.fact)}<br><span class="muted">"${esc(f.quote)}"</span></td><td>${link(f.sourceUrl)}</td></tr>`)
-        .join("")}</table>`
+    ? `<h2>Fact check</h2><p class="muted">We checked every number in the ad text against the product page. Nothing here is guessed.</p><ul class="facts">${c.factCheck
+        .map((f) => `<li><span class="n">${esc(f.claim)}</span><p class="what">${factLine(f.fact)}</p><p class="q muted">"${esc(f.quote)}"</p><span class="src">${link(f.sourceUrl)}</span></li>`)
+        .join("")}</ul>`
     : "";
   const heading = `${c.brand}: ad pack`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${esc(heading)}${version ? ` v${version}` : ""}</title><link rel="preload" href="${FONT_PATH}" as="font" type="font/woff2" crossorigin><style>${CSS}</style></head><body><main>
