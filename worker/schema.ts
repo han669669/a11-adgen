@@ -1,5 +1,5 @@
 /**
- * A small JSON Schema subset for tool inputs: object, string, integer, boolean, array, enum, default.
+ * A small JSON Schema subset for tool inputs: object, string, integer, number, boolean, array, enum, default.
  * The same object goes to tools/list (so Claude sees it) and checks the arguments.
  */
 export type StringProp = {
@@ -15,6 +15,7 @@ export type StringProp = {
 export type Prop =
   | StringProp
   | { type: "integer"; description?: string; minimum?: number; maximum?: number; default?: number }
+  | { type: "number"; description?: string; minimum?: number; maximum?: number; default?: number }
   | { type: "boolean"; description?: string; default?: boolean }
   | { type: "array"; description?: string; items: StringProp | ObjectSchema; minItems?: number; maxItems?: number }
   | ObjectSchema;
@@ -54,6 +55,11 @@ function checkProp(name: string, p: Prop, v: unknown): unknown {
       return checkString(name, p, v);
     case "integer":
       if (typeof v !== "number" || !Number.isInteger(v)) throw new InputError(`${name} must be an integer.`);
+      if (p.minimum !== undefined && v < p.minimum) throw new InputError(`${name} must be at least ${p.minimum}.`);
+      if (p.maximum !== undefined && v > p.maximum) throw new InputError(`${name} must be at most ${p.maximum}.`);
+      return v;
+    case "number":
+      if (typeof v !== "number" || !Number.isFinite(v)) throw new InputError(`${name} must be a number.`);
       if (p.minimum !== undefined && v < p.minimum) throw new InputError(`${name} must be at least ${p.minimum}.`);
       if (p.maximum !== undefined && v > p.maximum) throw new InputError(`${name} must be at most ${p.maximum}.`);
       return v;

@@ -43,7 +43,7 @@ describe("mcp handler", () => {
   });
   it("lists the prompts and returns one with its arguments filled in", async () => {
     const list: any = await (await post({ jsonrpc: "2.0", id: 4, method: "prompts/list" })).json();
-    expect(list.result.prompts.map((p: any) => p.name)).toEqual(["brand", "batch", "final", "learn", "gold-test"]);
+    expect(list.result.prompts.map((p: any) => p.name)).toEqual(["brand", "batch", "final", "learn", "results", "gold-test"]);
     const got: any = await (await post({ jsonrpc: "2.0", id: 5, method: "prompts/get", params: { name: "final", arguments: { batchId: "abc-123" } } })).json();
     expect(got.result.messages[0].content.text).toContain("Batch abc-123");
     expect(got.result.messages[0].role).toBe("user");

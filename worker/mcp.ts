@@ -6,6 +6,7 @@ import { toBase64 } from "./b64";
 import type { Env } from "./env";
 import * as batch from "./batch";
 import * as canon from "./canon";
+import * as results from "./results";
 import { brandBySlug, brandGet, brandList, brandSave, latestKit, SLUG } from "./brand";
 import { composeFinal, finalAttach } from "./compose";
 import { foodFix, regionFix } from "./food";
@@ -447,6 +448,69 @@ export const TOOLS: Tool[] = [
       additionalProperties: false,
     },
     run: async (env, a) => text(await canon.canonUpdate(env, a as canon.CanonChange)),
+  },
+  {
+    name: "baseline_save",
+    description:
+      "Save the client's usual click-through rate (CTR), read from one Ads Manager screenshot of their usual ads at onboarding. results_get judges every ad against it: an ad wins only when its CTR is above this number. A new call replaces the baseline for the brand (the old one stays on record). Free.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        brand: { type: "string", pattern: SLUG },
+        ctrPct: { type: "number", minimum: 0, maximum: 100, description: "The CTR in percent, for example 1.2 for 1.2%" },
+        source: { type: "string", minLength: 3, maxLength: 300, description: "Where the number came from, for example 'client screenshot, last 30 days, 2026-11-05'" },
+      },
+      required: ["brand", "ctrPct", "source"],
+      additionalProperties: false,
+    },
+    run: async (env, a) => text(await results.baselineSave(env, a as { brand: string; ctrPct: number; source: string })),
+  },
+  {
+    name: "results_save",
+    description:
+      "Save one report of ad numbers from the client's Ads Manager: impressions and clicks per ad name. Every ad name must be an ad in a published pack of this brand, and clicks cannot be more than impressions, or nothing is saved. Saving the same ad and date again replaces the row. Read docs/blueprint.md section 4 for how results steer the next batch. Free.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        brand: { type: "string", pattern: SLUG },
+        reportDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "The day of the report, YYYY-MM-DD" },
+        source: { type: "string", minLength: 3, maxLength: 300, description: "For example 'client screenshot' or 'client CSV'" },
+        rows: {
+          type: "array",
+          minItems: 1,
+          maxItems: 60,
+          items: {
+            type: "object",
+            properties: {
+              adName: { type: "string", pattern: results.AD_NAME_PATTERN },
+              impressions: { type: "integer", minimum: 0, maximum: 1000000000 },
+              clicks: { type: "integer", minimum: 0, maximum: 1000000000 },
+              spendSgd: { type: "number", minimum: 0, maximum: 10000000, description: "Spend in S$, when the report shows it" },
+            },
+            required: ["adName", "impressions", "clicks"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["brand", "reportDate", "source", "rows"],
+      additionalProperties: false,
+    },
+    run: async (env, a) => text(await results.resultsSave(env, a as Parameters<typeof results.resultsSave>[1])),
+  },
+  {
+    name: "results_get",
+    description:
+      "The week report data for a brand: the client's baseline CTR, each ad's latest numbers, and a verdict per ad: winner (at least minImpressions and CTR above the baseline), below baseline, too early, or no baseline. Also lists the winners. Read it before you plan the next batch.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        brand: { type: "string", pattern: SLUG },
+        minImpressions: { type: "integer", minimum: 1, maximum: 1000000, description: "Default 1000, the same as the launch plan" },
+      },
+      required: ["brand"],
+      additionalProperties: false,
+    },
+    run: async (env, a) => text(await results.resultsGet(env, a as { brand: string; minImpressions?: number })),
   },
   {
     name: "swipe_add",
