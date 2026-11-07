@@ -35,7 +35,7 @@ Three ads per batch: 1 tof, 1 mof, 1 bof (owner, 07-11-2026). The database allow
 
 | Stage | Job | What to lead with | Never |
 |---|---|---|---|
-| `tof` top of funnel (cold) | Stop a stranger who has not heard of the brand. | A human truth or a persona sorting line ("For the one who finishes the jar in one sitting"). Native looks are allowed: a phone notes screen, a meme layout, a phone-photo moment. Never a handwritten note or sticky note: painted handwriting reads as AI (`render-checklist.md` D1). | Offer stickers, prices, feature lists. |
+| `tof` top of funnel (cold) | Stop a stranger who has not heard of the brand. | A human truth or a persona sorting line ("For the one who finishes the jar in one sitting"). Native looks are allowed: a meme layout, a phone-photo moment. Never a handwritten note or sticky note: painted handwriting reads as AI (`render-checklist.md` D1). | Offer stickers, prices, feature lists. |
 | `mof` middle (warm) | Give a reason to switch. | Sell the switch: name what they eat now (fried chips, the office biscuit tin, the 3 pm vending machine) and the one difference that matters. Or credibility from a figure this buyer trusts (an archetype, never a real person without consent). | Callout lists of every feature. |
 | `bof` bottom (ready to buy) | Give a reason to buy now. | One simple, true offer from the product facts (for example a delivery threshold, a bundle, a guarantee), with its source. Show the product clearly. | A freebie stack the brand cannot fund. A wrong price. |
 
@@ -51,7 +51,7 @@ Three ads per batch: 1 tof, 1 mof, 1 bof (owner, 07-11-2026). The database allow
 2. Burst: at least 8 ideas per stage before you pick. Ideas cost nothing; drafts cost money.
 3. Kill: apply §2, and kill an idea that needs a `render-checklist.md` defect (D1 to D8) to work. Most ideas must die here. If fewer than the needed picks survive, write more ideas. Do not lower the bar.
 4. Mix: at least 1 of the 3 picks in a native look (not the beige studio look).
-5. Draft: 3 `low` drafts per picked idea, with the packshot as the reference. Write the `render-checklist.md` §4 lines and the product's real size into every prompt. When the ad shows food, also pass the kit's texture photo and put the kit's food words in the prompt. Say in the prompt that the texture photo is a texture cue only: do not copy its amount of food or its state.
+5. Draft: 3 `low` drafts per picked idea, with the packshot as the reference. Write the product's real size and the `render-checklist.md` §4 lines that fit the look into every prompt (the studio style line only for a studio look). When the ad shows food, also pass the kit's texture photo and put the kit's food words in the prompt. Say in the prompt that the texture photo is a texture cue only: do not copy its amount of food or its state.
 6. Pick (D2, Claude): judge each draft against §2 first, then `render-checklist.md` §1 to §3 at phone size, craft last. Pick one per idea with `picks_save`, then `final_render`.
 7. Food truth (§6): `food_fix` on every final that shows food, then the food check. Repeat until the food matches. Then `compose_final`.
 8. Final check: §2 and `render-checklist.md` again on the composed final. When a final fails, say which item in the report. Do not send it.

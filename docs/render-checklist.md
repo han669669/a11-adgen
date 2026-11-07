@@ -10,12 +10,12 @@ These are words for you to apply with judgement, not code rules (`docs/v1-lesson
 |---|---|---|
 | D1 | **Writing on a prop.** No readable text except the approved headline, sticker and tagline, and the product's own label. No handwritten note, sticky note, notebook, card, sign, book, magazine or printed paper. The model paints handwriting and small print badly, and it reads as AI at once. When an idea needs words on an object, put the words in the headline instead. | v1 render rule: "leave out props that carry writing"; owner note on a handwritten sticky note: AI slop. W46b tof broke this ("ONE HANDFUL ONLY" note). |
 | D2 | **Fake food.** Any food that looks waxy, glossy, invented, cloned or wrong in colour. For the brand's own food, run the food truth stage (`creative-playbook.md` §6). Never paint a prepared food that the product is not (a kaya toast beside a kaya bar). | B39 kaya toast; reason code `fakeFood`. |
-| D3 | **AI-rendered prop.** A drip, spill or stain on a cup, glass or plate; waxy or flat liquid; a lumpy or fused rim or handle; plastic texture where the real material has grain. A side prop is dry, empty and solid. | B44: a drip on an espresso cup, "very ai slop looking less premium". Filled drink, food, hand or fabric props: 0 Use of 9. |
+| D3 | **AI-rendered prop.** A drip, spill or stain on a cup, glass or plate; waxy or flat liquid; a lumpy or fused rim or handle; plastic texture where the real material has grain. A side prop is dry, empty and solid, except the one real serving that D6 allows. | B44: a drip on an espresso cup, "very ai slop looking less premium". Filled drink, food, hand or fabric props: 0 Use of 9. |
 | D4 | **Physics.** Every object rests on a surface with a contact shadow from the one light, or is held in a hand. Nothing floats. Nothing balances on a moving, pouring or tilted object. No food balanced on a spoon for show, no spoon stuck in a pack or jar, no straw in a pan, no cloth over food. A cold product has condensation. | Reason code `physics`; B2/B3 dry "iced" cans. |
 | D5 | **Off-putting placement.** No shoes by food, no plates on the floor, no used tea bag or leftovers, nothing odd under or on the product. | Reason code `placement`; B32 used tea bag. |
 | D6 | **Unneeded serving.** Show a serving (a slice, a poured glass) only when it shows what the pack hides (cake layers, a tart in its tin) or the true size of a food sold by weight, and it fits the headline. | B46: the Oatside glass of milk "entirely destroys the ad"; the Kele tart "works fine". |
 | D7 | **Wrong or garbled logo**, or a logo inside a pill or badge. In v2 the real logo is drawn in code: keep the top band plain. | HFB5b "THEI"; reason code `logoPill`. |
-| D8 | **Race, ethnicity or religion** in copy or in the picture. | HFX-mix2: "sounds racist". |
+| D8 | **Race, ethnicity or religion.** In copy: never name them (the owner's hard no). In the picture: no stereotype, and never make a person's race, ethnicity or religion the point of the ad. | HFX-mix2: "sounds racist". |
 
 ## 2. Faults: two of these reject the ad
 
@@ -32,7 +32,7 @@ These are words for you to apply with judgement, not code rules (`docs/v1-lesson
 
 ## 3. Copy checks (headline, sticker, tagline)
 
-- Headline: one idea with a turn, 2 to 8 words, sentence case, no exclamation mark. A buyer's own words win (a Reddit title used word for word worked). An oddly specific true detail is good.
+- Headline: one idea with a turn, 2 to 7 words (`blueprint.md` hard check 6), sentence case, no exclamation mark. A buyer's own words win (a Reddit title used word for word worked). An oddly specific true detail is good.
 - No hype words (unlock, elevate, game-changer, "you deserve", "say goodbye to"). No urgency. No "you" diagnosis question ("Struggling with...?").
 - A short true tagline under the headline when the product page backs it ("Hand-packaged to order"). The owner felt ads without one were incomplete.
 - No filler sticker: no shelf life, no bare size, no flavour scale, no thin review count (fewer than 20 reviews is never proof).
@@ -41,7 +41,7 @@ These are words for you to apply with judgement, not code rules (`docs/v1-lesson
 
 ## 4. Prompt lines that worked in v1
 
-- Start the style line with "A real studio photograph, honest and unposed:" and name the real textures (paper texture, light falloff, fine grain). Then: "No glamorization, no heavy retouching, no glossy CG finish. Avoid cinematic lighting and dramatic colour grading."
+- Studio look: start the style line with "A real studio photograph, honest and unposed:" and name the real textures (paper texture, light falloff, fine grain). Then: "No glamorization, no heavy retouching, no glossy CG finish. Avoid cinematic lighting and dramatic colour grading." Native look: "A real phone photo, honest and unposed:", with the same no-CG lines.
 - At most one small mark, on the backdrop or the surface only (a soft crease in the paper). Never a mark on the product or a prop.
 - State the product's real physical state: condensation on a cold product, a level surface on a poured drink, a torn edge on an opened sachet.
 - Say the side of the frame for the product (not centred) and give the product's real size.
