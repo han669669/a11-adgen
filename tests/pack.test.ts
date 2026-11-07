@@ -184,6 +184,10 @@ describe("client portal", () => {
     expect(html).toContain("10 minutes later, poof.");
     expect(html).toContain("a11_W");
     expect(html).toContain("Launch plan");
+    expect(html.lastIndexOf('class="ad"')).toBeLessThan(html.indexOf("Your ads are ready.")); // pictures first, the guide above the launch plan
+    expect(html.indexOf("Your ads are ready.")).toBeLessThan(html.indexOf("Launch plan"));
+    expect(html).toContain('font-family:"Plus Jakarta Sans"');
+    expect(html).not.toMatch(/https?:\/\/fonts/);
     expect(html).toContain("HSA");
     expect(html).toContain("Caramel Pop Barley 70g S$8.90");
     expect(html).not.toContain("<script");
@@ -191,12 +195,25 @@ describe("client portal", () => {
     expect(r.headers.get("cache-control")).toBe("private, no-store");
     expect(r.headers.get("referrer-policy")).toBe("no-referrer");
     expect(r.headers.get("content-security-policy")).toMatch(/default-src 'none'/);
+    expect(r.headers.get("content-security-policy")).toMatch(/font-src 'self'/);
+  });
+
+  it("serves the page font from the Worker, as a woff2 file", async () => {
+    const { fontResponse, FONT_PATH } = await import("../worker/font");
+    const { default: entry } = await import("../worker/entry");
+    expect(fontResponse("/other")).toBeNull();
+    const r = await entry.fetch(new Request(`https://x.example${FONT_PATH}`), { PUBLIC_BASE_URL: "https://x.example" } as any, {} as any); // through the Worker entry, so a routing break fails here
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toBe("font/woff2");
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    expect(String.fromCharCode(...bytes.slice(0, 4))).toBe("wOF2");
+    expect(bytes.length).toBeGreaterThan(20_000);
   });
 
   it("puts each sentence of the launch plan on its own line and lets the client enlarge the pictures without scripts", async () => {
     const { env, path } = await published({ launchPlan: "Run all ads for 72 hours. Pause any ad under 1,000 impressions at S$8.90! Send us the CSV.\nThank you." });
     const html = await (await get(env, path)).text();
-    expect(html).toContain('<div class="plan"><p>Run all ads for 72 hours.</p><p>Pause any ad under 1,000 impressions at S$8.90!</p><p>Send us the CSV.</p><p>Thank you.</p></div>');
+    expect(html).toContain('<ul class="plan"><li>Run all ads for 72 hours.</li><li>Pause any ad under 1,000 impressions at S$8.90!</li><li>Send us the CSV.</li><li>Thank you.</li></ul>');
     expect(html).toContain('href="#view-1"');
     expect(html).toContain('id="view-1"');
     expect(html).not.toContain("<script");
@@ -210,6 +227,8 @@ describe("client portal", () => {
     const r = await pack.packPublish(m.env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy() }, { renderId: finals[1]!, ...copy() }] });
     const html = await (await get(m.env, new URL(r.link).pathname)).text();
     const box = (n: number) => html.slice(html.indexOf(`id="view-${n}"`), html.indexOf("</div>", html.indexOf(`id="view-${n}"`)));
+    expect(html.match(/class="track"/g) ?? []).toHaveLength(1); // one swipe row for all the slides
+    expect(html.lastIndexOf('class="ad"')).toBeLessThan(html.indexOf("Your ads are ready.")); // every picture comes before the guide
     const one = box(1);
     const two = box(2);
     expect(one).toContain('aria-modal="true"');
