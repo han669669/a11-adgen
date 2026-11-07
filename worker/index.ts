@@ -98,7 +98,7 @@ export default {
     // Reference images made outside the Worker (a product-lock skeleton, scripts/product_lock.py): saved to R2 refs/<uuid>.<jpg|png>,
     // read by fal through /m/refs/<name>.
     if (url.pathname.startsWith("/admin/ref/") && request.method === "PUT") {
-      return stage(request, env, url.pathname.slice("/admin/ref/".length), /^[0-9a-f-]{36}\.(jpg|png)$/, "refs/");
+      return stage(request, env, url.pathname.slice("/admin/ref/".length), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png)$/, "refs/");
     }
 
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);

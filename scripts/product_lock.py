@@ -81,6 +81,9 @@ def swap(a):
     x0, y0, x1, y1 = ints(a.box, 4)
     ox0, ox1, otop, obase = ints(a.old, 4)  # the old product in the scene: x0,x1,top,base (one product per call)
     arr = np.asarray(scene).astype(float)
+    H, W = arr.shape[:2]
+    if not (0 <= ox0 < ox1 <= W and 0 <= otop < obase <= H):
+        sys.exit(f"--old {a.old} is outside the scene ({W}x{H}) or not x0<x1, top<base")
     cx = (ox0 + ox1) / 2
     if a.lower_only:
         if a.band_top is None:
@@ -97,11 +100,17 @@ def swap(a):
     pad, probe = 8, 14
     # lower-only keeps the scene above the pasted piece (the open neck and rim stay); a full swap clears the old product.
     fy0 = max(0, (ytop - 4) if a.lower_only else (min(otop, ytop) - 6))
-    L = arr[:, max(0, ox0 - pad - probe):ox0 - pad].mean(axis=1)
-    R = arr[:, ox1 + pad:ox1 + pad + probe].mean(axis=1)
-    for x in range(ox0 - pad, ox1 + pad):
-        t = (x - (ox0 - pad)) / max(1, (ox1 + pad) - (ox0 - pad))
-        arr[fy0:obase + 8, x] = L[fy0:obase + 8] * (1 - t) + R[fy0:obase + 8] * t
+    fy1 = min(H, obase + 8)
+    fx0, fx1 = max(0, ox0 - pad), min(W, ox1 + pad)  # clip to the picture: a product at an edge must not wrap or crash
+    lcols = arr[:, max(0, fx0 - probe):fx0]
+    rcols = arr[:, fx1:fx1 + probe]
+    if lcols.shape[1] == 0 and rcols.shape[1] == 0:
+        sys.exit("the old product spans the whole width: there is no backdrop beside it to blend from")
+    L = (lcols if lcols.shape[1] else rcols).mean(axis=1)  # an edge-touching product uses the one side that exists
+    R = (rcols if rcols.shape[1] else lcols).mean(axis=1)
+    for x in range(fx0, fx1):
+        t = (x - fx0) / max(1, fx1 - fx0)
+        arr[fy0:fy1, x] = L[fy0:fy1] * (1 - t) + R[fy0:fy1] * t
     out = Image.fromarray(arr.clip(0, 255).astype("uint8"))
     out.paste(piece, (round(cx - piece.width / 2), ytop), mask)
     out.save(a.out, quality=95)
