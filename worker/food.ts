@@ -28,18 +28,19 @@ export async function foodFix(env: Env, input: { key: string; boxes: Box[]; keep
   const id = m[1]!;
   checkBoxes(input.boxes);
   const row = await env.DB.prepare(
-    `SELECT r.batch, r.idea, r.kind, r.status, r.width, r.height, b.brand_id, b.kit_version
+    `SELECT r.batch, r.idea, r.kind, r.status, r.width, r.height, r.image_keys, b.brand_id, b.kit_version
      FROM renders r JOIN batches b ON b.id = r.batch WHERE r.id = ?`,
   )
     .bind(id)
-    .first<{ batch: string; idea: string; kind: string; status: string; width: number; height: number; brand_id: string; kit_version: number }>();
+    .first<{ batch: string; idea: string; kind: string; status: string; width: number; height: number; image_keys: string | null; brand_id: string; kit_version: number }>();
   if (!row) throw new Error(`No render ${id} in a batch.`);
   if (row.kind !== "final" || row.status !== "done") throw new Error(`Render ${id} is not a completed final (${row.kind}, ${row.status}).`);
+  if (!(JSON.parse(row.image_keys ?? "[]") as string[]).includes(input.key)) throw new Error(`Render ${id} has no saved image ${input.key}.`);
 
   // The batch's pinned kit gives the photos. The food words may come from a later kit version (the food does not change).
   const pinned = await latestKit(env, row.brand_id, row.kit_version);
   const latest = await latestKit(env, row.brand_id);
-  const food = pinned?.kit.food || latest?.kit.food;
+  const food = pinned?.kit.food?.trim() || latest?.kit.food?.trim();
   if (!food) throw new Error("The brand kit has no food description. Save a kit version with kit.food (brand_save).");
   const refsOf = (role: string) => (pinned?.kit.refs ?? []).filter((r) => r.role === role).map((r) => r.url);
   const textures = refsOf("texture").slice(0, 3);
@@ -47,7 +48,7 @@ export async function foodFix(env: Env, input: { key: string; boxes: Box[]; keep
   const packshots = refsOf("packshot").slice(0, 6 - 1 - textures.length);
 
   const mask = await maskPng(row.width, row.height, input.boxes);
-  const maskKey = `renders/${id}/mask-${Date.now()}.png`;
+  const maskKey = `renders/${id}/mask-${Date.now()}${crypto.getRandomValues(new Uint32Array(1))[0]}.png`;
   await env.MEDIA.put(maskKey, mask, { httpMetadata: { contentType: "image/png" } });
   const maskUrl = fal.mediaUrl(env, maskKey);
   const out = await fal.submit(env, {

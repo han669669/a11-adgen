@@ -63,6 +63,13 @@ export async function latestKit(env: Env, brandId: string, version?: number) {
   return { version: row.version, note: row.note, createdAt: row.created_at, kit: JSON.parse(row.kit) as Kit };
 }
 
+/** The food does not change between kit versions: a save without `food` keeps the latest kit's description. */
+async function previousFood(env: Env, slug: string): Promise<string | undefined> {
+  const brand = await env.DB.prepare("SELECT id FROM brands WHERE slug = ?").bind(slug).first<{ id: string }>();
+  const prev = brand ? await latestKit(env, brand.id) : null;
+  return prev?.kit.food?.trim() || undefined;
+}
+
 /**
  * Save a brand (created on first save) and a new kit version.
  * Order: fetch and check every file first; store them in R2 under a new kit id; then write the brand and the kit row
@@ -103,7 +110,7 @@ export async function brandSave(env: Env, input: { slug: string; name: string; s
     refs,
     placement: { logoWidthPct: input.kit.logoWidthPct ?? 28, logoTopPct: input.kit.logoTopPct ?? 3 },
     notes: input.kit.notes ?? "",
-    food: input.kit.food ?? "",
+    food: input.kit.food?.trim() || (await previousFood(env, input.slug)),
   };
 
   for (const f of puts) await env.MEDIA.put(f.key, f.bytes, { httpMetadata: { contentType: f.type } });

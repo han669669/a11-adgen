@@ -93,6 +93,14 @@ describe("brand kit", () => {
     expect((await brandGet(env, "wongi")).kit?.version).toBe(2);
     expect((await brandGet(env, "wongi", 1)).kit?.version).toBe(1);
   });
+  it("keeps the latest kit's food words when a new save has none, and trims them", async () => {
+    const { env } = makeEnv();
+    vi.stubGlobal("fetch", async (u: string) => img(u, u.endsWith(".jpg") ? "image/jpeg" : "image/png"));
+    const v1 = await brandSave(env, { slug: "wongi", name: "WonGi", kit: { ...kit, food: "  Lumpy kernels.  " } });
+    const v2 = await brandSave(env, { slug: "wongi", name: "WonGi", kit });
+    const v3 = await brandSave(env, { slug: "wongi", name: "WonGi", kit: { ...kit, food: "   " } });
+    expect([v1.kit.food, v2.kit.food, v3.kit.food]).toEqual(["Lumpy kernels.", "Lumpy kernels.", "Lumpy kernels."]);
+  });
   it("refuses an SVG logo", async () => {
     const { env } = makeEnv();
     vi.stubGlobal("fetch", async (u: string) => img(u, "image/svg+xml"));

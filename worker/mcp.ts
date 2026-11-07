@@ -400,7 +400,7 @@ export const TOOLS: Tool[] = [
   {
     name: "final_render",
     description:
-      "Start the high final for one pick. It uses the idea's finalPrompt, the picked draft as the first reference, then the idea's finalRefs. Paid (about US$0.08). Then poll render_status and run compose_final with brandSlug.",
+      "Start the high final for one pick. It uses the idea's finalPrompt, the picked draft as the first reference, then the idea's finalRefs. Paid (about US$0.08). Then poll render_status. If the final shows food, run food_fix and the food check first (docs/creative-playbook.md §6); run compose_final with brandSlug only on the version that passes.",
     inputSchema: {
       type: "object",
       properties: {

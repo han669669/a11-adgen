@@ -56,7 +56,7 @@ const KEY = `renders/${RID}/1.jpg`;
 function makeEnv(opts: { food?: string; laterFood?: string; kind?: string } = {}) {
   const DB = fakeD1();
   const raw = (DB as unknown as { raw: DatabaseSync }).raw;
-  const kit = (food: string | undefined) =>
+  const kit = (food: string | undefined, v = 1) =>
     JSON.stringify({
       logo: { key: "brands/k/logo.png", url: "https://w/m/brands/k/logo.png", sourceUrl: "x" },
       palette: [],
@@ -64,8 +64,8 @@ function makeEnv(opts: { food?: string; laterFood?: string; kind?: string } = {}
       voice: "v",
       neverSay: [],
       refs: [
-        { key: "k1", url: "https://w/m/brands/k/ref1.jpg", sourceUrl: "x", label: "jar", role: "packshot" },
-        { key: "k2", url: "https://w/m/brands/k/ref2.jpg", sourceUrl: "x", label: "close-up", role: "texture" },
+        { key: "k1", url: `https://w/m/brands/k${v}/ref1.jpg`, sourceUrl: "x", label: "jar", role: "packshot" },
+        { key: "k2", url: `https://w/m/brands/k${v}/ref2.jpg`, sourceUrl: "x", label: "close-up", role: "texture" },
       ],
       placement: { logoWidthPct: 28, logoTopPct: 3 },
       notes: "",
@@ -77,13 +77,14 @@ function makeEnv(opts: { food?: string; laterFood?: string; kind?: string } = {}
     INSERT INTO batches (id, brand_id, subject_id, kit_version, label, status, created_at, updated_at) VALUES ('ba', 'br', 'su', 1, 'W46b', 'board', 't', 't');
   `);
   raw.prepare("INSERT INTO brand_kits (id, brand_id, version, kit, created_at) VALUES ('k1', 'br', 1, ?, 't')").run(kit(opts.food));
-  if (opts.laterFood !== undefined) raw.prepare("INSERT INTO brand_kits (id, brand_id, version, kit, created_at) VALUES ('k2', 'br', 2, ?, 't')").run(kit(opts.laterFood));
+  if (opts.laterFood !== undefined) raw.prepare("INSERT INTO brand_kits (id, brand_id, version, kit, created_at) VALUES ('k2', 'br', 2, ?, 't')").run(kit(opts.laterFood, 2));
   raw
     .prepare(
       `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, usd_est, created_at, updated_at)
        VALUES (?, 'ba', 'idea-1', ?, 'done', 'p', '[]', 1536, 1920, 'high', 1, 0.08, 'now', 'now')`,
     )
     .run(RID, opts.kind ?? "final");
+  raw.prepare("UPDATE renders SET image_keys = ? WHERE id = ?").run(JSON.stringify([KEY]), RID);
   const saved = new Map<string, { bytes: Uint8Array; type: string }>();
   const MEDIA = {
     put: async (k: string, v: Uint8Array, o: { httpMetadata: { contentType: string } }) => void saved.set(k, { bytes: v, type: o.httpMetadata.contentType }),
@@ -118,7 +119,7 @@ describe("food_fix", () => {
     expect(px(768, 300)).toBe(0); // the headline area stays black (kept)
     const body = sent[0]!;
     expect(body.mask_url).toBe(`https://w/m/${maskKey}`);
-    expect(body.image_urls).toEqual([`https://w/m/${KEY}`, "https://w/m/brands/k/ref2.jpg", "https://w/m/brands/k/ref1.jpg"]);
+    expect(body.image_urls).toEqual([`https://w/m/${KEY}`, "https://w/m/brands/k1/ref2.jpg", "https://w/m/brands/k1/ref1.jpg"]);
     expect(body.prompt).toContain("Irregular puffed grains with a crackled caramel net.");
     expect(body.prompt).toContain("The jar stays almost empty");
     expect(body.prompt).toContain("Image 2 is a real close-up photo of this food. Image 3 is the real product as sold.");
@@ -132,11 +133,15 @@ describe("food_fix", () => {
     const sent = stubFal();
     await foodFix(env, input);
     expect(sent[0]!.prompt).toContain("Lumpy, split-open kernels.");
+    // The photos still come from the batch's pinned kit (version 1).
+    expect(sent[0]!.image_urls).toEqual([`https://w/m/${KEY}`, "https://w/m/brands/k1/ref2.jpg", "https://w/m/brands/k1/ref1.jpg"]);
   });
 
   it("refuses without a food description, on a draft, and with a box outside the picture", async () => {
     stubFal();
     await expect(foodFix(makeEnv().env, input)).rejects.toThrow("no food description");
+    await expect(foodFix(makeEnv({ food: "   " }).env, input)).rejects.toThrow("no food description");
+    await expect(foodFix(makeEnv({ food: "f" }).env, { ...input, key: `renders/${RID}/2.jpg` })).rejects.toThrow("no saved image");
     await expect(foodFix(makeEnv({ food: "f", kind: "draft" }).env, input)).rejects.toThrow("not a completed final");
     await expect(foodFix(makeEnv({ food: "f" }).env, { ...input, boxes: [{ x: 90, y: 0, w: 20, h: 5 }] })).rejects.toThrow("inside the picture");
   });
