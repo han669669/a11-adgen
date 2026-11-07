@@ -56,8 +56,10 @@ export function regionPrompt(edit: string): string {
 }
 
 export async function regionFix(env: Env, input: { key: string; boxes: Box[]; edit: string }) {
+  const edit = input.edit.trim();
+  if (!edit) throw new Error("edit must not be blank.");
   const { id, row } = await finalRow(env, input.key, input.boxes);
-  return maskedEdit(env, id, row, input.key, input.boxes, regionPrompt(input.edit), []);
+  return maskedEdit(env, id, row, input.key, input.boxes, regionPrompt(edit), []);
 }
 
 interface FinalRow {

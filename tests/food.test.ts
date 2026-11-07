@@ -241,12 +241,14 @@ describe("region_fix", () => {
     expect(body.prompt).toContain("The edit: Remove the yellow sticky note");
     expect(body.prompt).toContain("Add nothing that the edit does not ask for: no food");
     expect(body.prompt).not.toContain("Irregular puffed grains.");
-    expect(saved.has(`renders/${out.id}/paste.json`)).toBe(true);
+    const plan = JSON.parse(String(saved.get(`renders/${out.id}/paste.json`)!.bytes));
+    expect(plan).toEqual({ source: KEY, width: 1536, height: 1920, boxes: [{ x: 46, y: 29, w: 30, h: 21 }] });
   });
 
-  it("refuses a draft and a box outside the picture", async () => {
+  it("refuses a blank edit, a draft and a box outside the picture", async () => {
     stubFal();
     const edit = "Remove the note from the jar.";
+    await expect(regionFix(makeEnv().env, { key: KEY, boxes: input.boxes, edit: "            " })).rejects.toThrow("must not be blank");
     await expect(regionFix(makeEnv({ kind: "draft" }).env, { key: KEY, boxes: input.boxes, edit })).rejects.toThrow("not a completed final");
     await expect(regionFix(makeEnv().env, { key: KEY, boxes: [{ x: 90, y: 0, w: 20, h: 5 }], edit })).rejects.toThrow("inside the picture");
   });
