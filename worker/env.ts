@@ -1,10 +1,16 @@
+import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
+
 export interface Env {
   DB: D1Database;
+  /** KV for the MCP OAuth login (clients, grants, tokens as hashes). Free plan. */
+  OAUTH_KV: KVNamespace;
+  /** Set by the OAuth provider on the requests it passes to the app. */
+  OAUTH_PROVIDER: OAuthHelpers;
   MEDIA: R2Bucket;
   IMAGES: ImagesBinding;
   /**
    * SHA-256 (hex) of the Phase 0 bearer token for /mcp. Only the hash is stored on the Worker.
-   * OAuth replaces this in Phase 1.
+   * It stays as a fallback beside OAuth, for scripts and the deploy path.
    */
   MCP_TOKEN_SHA256: string;
   FAL_KEY: string;

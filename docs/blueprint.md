@@ -93,13 +93,15 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 
 Prompts (slash commands) live on the server (`worker/prompts.ts`). Claude Code shows each MCP prompt as `/mcp__a11__<name>`: `brand`, `batch`, `final`, `learn`, `gold-test` (built in Phase 2b); `redesign` and `results` come with their tools (redesign in Phase 1, results in Phase 3). Each is resumable; state lives in D1.
 
-Plugin (in this repo, `plugin/`, installed once): subagents `writer`, `critic`, `art-director`, plus the MCP config. Install: `/plugin marketplace add han669669/a11-adgen`, then `/plugin install a11@a11-adgen`. Until MCP OAuth is built (Phase 1), the plugin's MCP config reads the bearer token from the environment variable `A11_MCP_TOKEN`.
+Plugin (in this repo, `plugin/`, installed once): subagents `writer`, `critic`, `art-director`, plus the MCP config. Install: `/plugin marketplace add han669669/a11-adgen`, then `/plugin install a11@a11-adgen`. The plugin's MCP config has no token. The first time, Claude Code should open a browser: sign in with the web app account, then press Allow (not yet verified in Claude Code; the OAuth flow was tested end to end on the preview Worker). After that it renews the token by itself (1 hour access token, 30 day refresh token).
 
 Connect without the plugin (an alternative; do not add it when the plugin is installed, because both name the server `a11`):
 
 ```bash
-claude mcp add --transport http a11 https://a11adgen.gamingcomputing.workers.dev/mcp --header "Authorization: Bearer $A11_MCP_TOKEN"
+claude mcp add --transport http a11 https://a11adgen.gamingcomputing.workers.dev/mcp
 ```
+
+Then run `/mcp` in Claude Code and choose a11 to sign in. For a script that cannot open a browser, the old bearer token still works: add `--header "Authorization: Bearer $A11_MCP_TOKEN"` and skip the sign-in.
 
 ## 7. Claude plan facts (checked 2026-11-06)
 
@@ -152,7 +154,7 @@ Phase 0 measures the real fal cost at 1536x1920 high and the Claude usage per ba
 |---|---|
 | `main` branch | Created 2026-11-06 (owner yes). The GitHub default branch is `main` (owner confirmed 07-11-2026). |
 | First real client | Cat & the Fiddle (https://www.catandthefiddle.com/), product Fickle Feline 2.0 Cheesecake (owner, 07-11-2026). v1 made ads for this product too, and the owner's marks on them are in the gold set. |
-| MCP auth | OAuth 2.1 (owner, 07-11-2026: "safety first", take the agent's recommendation). Needs one free KV namespace. Until it ships, the plugin reads the bearer token from `A11_MCP_TOKEN`. |
+| MCP auth | OAuth 2.1 (owner, 07-11-2026: "safety first", take the agent's recommendation). Built 07-11-2026 with one free KV namespace (`a11adgen-oauth`). The old bearer token still works for scripts. |
 | Studio site (a11studio.pro) | Not touched by this repo's agents. Another agent handles it and the owner decides its copy (owner, 07-11-2026). |
 | Cloudflare plan | Workers Free (owner, 2026-11-06). Limits in `AGENTS.md` §6. |
 | Cloud session network | Unrestricted. The Worker calls fal and Exa, not the session. |

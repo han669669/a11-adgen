@@ -14,7 +14,7 @@ async function sha256Hex(s: string): Promise<string> {
 }
 
 /** Phase 0 auth: the bearer token's SHA-256 must match MCP_TOKEN_SHA256. */
-async function tokenOk(request: Request, expectedHash: string | undefined): Promise<boolean> {
+export async function tokenOk(request: Request, expectedHash: string | undefined): Promise<boolean> {
   if (!expectedHash || expectedHash.length !== 64) return false;
   const got = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? "";
   if (!got) return false;
