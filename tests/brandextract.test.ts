@@ -168,7 +168,9 @@ describe("brand_extract", () => {
       "https://r.test/a.png": { body: "", type: "image/png", status: 302, location: "https://cdn.r.test/a.png" },
       "https://cdn.r.test/a.png": { body: "x", type: "image/png" },
     });
-    expect((await brandExtract({ url: "https://r.test/" })).logoCandidates).toEqual([{ url: "https://r.test/a.png", kind: "header" }]);
+    const followed = await brandExtract({ url: "https://r.test/" });
+    expect(asked).toContain("https://cdn.r.test/a.png"); // the probe really followed the https hop
+    expect(followed.logoCandidates).toEqual([{ url: "https://r.test/a.png", kind: "header" }]);
     stub({
       "https://r.test/": { body: LOGO_PAGE("/a.png"), type: "text/html" },
       "https://r.test/a.png": { body: "", type: "image/png", status: 302, location: "http://r.test/plain.png" },
@@ -193,6 +195,41 @@ describe("brand_extract", () => {
     await expect(brandExtract({ url: "https://10.0.0.1/" })).rejects.toThrow();
     expect(asked).not.toContain("https://localhost/");
     expect(asked).not.toContain("https://10.0.0.1/");
+  });
+
+  it("refuses a page that redirects to a private host, and never requests that host", async () => {
+    for (const to of ["https://127.0.0.1/", "https://169.254.169.254/latest", "http://r.test/plain"]) {
+      stub({ "https://pr.test/": { body: "", type: "text/html", status: 302, location: to }, [to]: { body: "<html></html>", type: "text/html" } });
+      await expect(brandExtract({ url: "https://pr.test/" }), to).rejects.toThrow();
+      expect(asked, to).not.toContain(to);
+    }
+  });
+
+  it("leaves out a linked SVG logo file (brand_save refuses SVG) and says so", async () => {
+    stub({ "https://v.test/": { body: LOGO_PAGE("/logo.svg"), type: "text/html" }, "https://v.test/logo.svg": { body: "<svg/>", type: "image/svg+xml" } });
+    const r = await brandExtract({ url: "https://v.test/" });
+    expect(r.logoCandidates).toEqual([]);
+    expect(r.missing).toContain("logo");
+    expect(r.warnings.join(" ")).toMatch(/SVG file/);
+  });
+
+  it("tries the logo-named images on the page when the header logo file is dead", async () => {
+    const page = `<html><head><title>Fox & Co</title></head><body><header><a href="/"><img src="/gone.png" alt=""></a></header><main><img src="/brand/logo-main.png" alt=""></main></body></html>`;
+    stub({
+      "https://d.test/": { body: page, type: "text/html" },
+      "https://d.test/gone.png": { body: "no", type: "text/html", status: 404 },
+      "https://d.test/brand/logo-main.png": { body: "x", type: "image/png" },
+    });
+    const r = await brandExtract({ url: "https://d.test/" });
+    expect(r.logoCandidates).toEqual([{ url: "https://d.test/brand/logo-main.png", kind: "guess" }]);
+    expect(r.warnings.join(" ")).toMatch(/guesses/);
+  });
+
+  it("does not list colours as missing when the CSS holds one brand colour", async () => {
+    stub({ "https://one.test/": { body: `<html><head><style>a{color:#e63946}</style></head></html>`, type: "text/html" } });
+    const r = await brandExtract({ url: "https://one.test/" });
+    expect(r.colours.map((c) => c.hex)).toContain("#E63946");
+    expect(r.missing).not.toContain("colours");
   });
 
   it("uses the JSON-LD Organization logo, and lists one file once when a CDN names it at many sizes", async () => {

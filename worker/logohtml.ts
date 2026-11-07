@@ -50,8 +50,10 @@ function balanced(html: string, start: number, name: string): string {
 /** True when an inline SVG draws something of its own: it has a shape, and no <use> that points at a symbol outside it (an icon sprite). */
 function drawsItself(svg: string): boolean {
   if (!svg || svg.length > SVG_MAX_CHARS) return false;
-  for (const m of svg.matchAll(/<use\b[^>]*(?:xlink:)?href\s*=\s*["']#([^"']+)["']/gi)) {
-    const id = m[1]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (const m of svg.matchAll(/<use\b[^>]*(?:xlink:)?href\s*=\s*["']([^"']+)["']/gi)) {
+    const ref = m[1]!;
+    if (!ref.startsWith("#")) return false; // "/icons.svg#menu" is a sprite file
+    const id = ref.slice(1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     if (!new RegExp(`\\sid\\s*=\\s*["']${id}["']`).test(svg)) return false;
   }
   return /<(path|polygon|rect|circle|ellipse|text|g|use|polyline)\b/i.test(svg);
@@ -72,7 +74,8 @@ const ICON_MAX_UNITS = 24;
 /** True when an inline SVG is a UI icon: its own class, id or label names an icon and not a logo, or it has no logo label and an icon-sized viewBox. */
 export function isUiIconSvg(svg: string): boolean {
   const open = svg.match(/^<svg\b[^>]*>/i)?.[0] ?? "";
-  const label = ["class", "id", "aria-label", "data-testid"].map((a) => attr(open, a) ?? "").join(" ").toLowerCase();
+  const title = svg.match(/<title\b[^>]*>([^<]*)</i)?.[1] ?? "";
+  const label = ["class", "id", "aria-label", "data-testid"].map((a) => attr(open, a) ?? "").join(" ").concat(" ", title).toLowerCase();
   if (svgNamesLogo(svg)) return false;
   if (UI_ICON.test(label)) return true;
   const vb = (attr(open, "viewBox") ?? attr(open, "viewbox") ?? "").split(/[\s,]+/).map(Number);
@@ -93,9 +96,9 @@ const imagePath = (url: string) => {
   }
 };
 
-/** True when a header <img> is a UI icon: its class, id, alt or label, or a folder or file name of its path, names an icon. A name with "logo", "brand" or "wordmark" is never an icon. */
+/** True when a header <img> is a UI icon: its class, id, alt, title, test id or label, or a folder or file name of its path, names an icon. A name with "logo", "brand" or "wordmark" is never an icon. */
 export function isUiIconImg(img: string, url: string): boolean {
-  const label = ["class", "id", "alt", "aria-label"].map((a) => attr(img, a) ?? "").join(" ").toLowerCase();
+  const label = ["class", "id", "alt", "aria-label", "title", "data-testid"].map((a) => attr(img, a) ?? "").join(" ").toLowerCase();
   const path = imagePath(url);
   if (/logo|brand|wordmark/.test(`${label} ${path}`)) return false;
   return UI_ICON.test(label) || UI_ICON.test(path);
@@ -146,26 +149,40 @@ function logosIn(region: string, pageUrl: string, brand: string): HeaderLogo[] {
     const name = m[1]!.toLowerCase();
     // The logo itself, or the first SVG or image inside the container element (never past its close tag).
     const scope = name === "img" ? tag : name === "svg" ? balanced(region, at, "svg") : balanced(region, at, name).slice(0, 8_000);
-    const svgAt = scope.search(/<svg\b/i);
-    const imgAt = scope.search(/<img\b/i);
-    if (svgAt >= 0 && (imgAt < 0 || svgAt < imgAt)) {
-      const first = balanced(region, at + svgAt, "svg");
-      // A box (not a link) with several SVGs is a picture made of parts: one unnamed part is not the logo (IRVINS mascot).
-      if (name !== "a" && name !== "svg" && (scope.match(/<svg\b/gi) ?? []).length >= 2 && !svgNamesLogo(first)) continue;
-      if (drawsItself(first) && !isUiIconSvg(first) && !seen.has(first)) {
-        seen.add(first);
-        out.push({ kind: "svg" });
-      }
-    } else if (imgAt >= 0) {
-      const img = scope.slice(imgAt).match(/^<img\b[^>]*>/i)?.[0] ?? "";
-      // A lazy-loaded logo has a data: placeholder in src and the real file in data-src or srcset.
-      const src = [attr(img, "src"), attr(img, "data-src"), (attr(img, "srcset") ?? "").split(/\s+/)[0], (attr(img, "data-srcset") ?? "").split(/\s+/)[0]].find((x) => !!x && !x.startsWith("data:"));
-      if (!src) continue;
-      try {
-        const url = new URL(decode(src), pageUrl).toString();
-        if (/^https?:/.test(url) && !/\.ico(\?|$)/i.test(url) && !isUiIconImg(img, url) && !seen.has(url)) seen.add(url), out.push({ kind: "img", url });
-      } catch {
-        continue;
+    // A decorative SVG before the wordmark does not hide the wordmark: each drawable is tried in page order, the first that passes is the logo.
+    const svgCount = (scope.match(/<svg\b/gi) ?? []).length;
+    let pos = 0;
+    while (pos < scope.length) {
+      const rest = scope.slice(pos);
+      const svgAt = rest.search(/<svg\b/i);
+      const imgAt = rest.search(/<img\b/i);
+      if (svgAt < 0 && imgAt < 0) break;
+      if (svgAt >= 0 && (imgAt < 0 || svgAt < imgAt)) {
+        const first = balanced(scope, pos + svgAt, "svg");
+        pos += svgAt + Math.max(first.length, 4);
+        // A box (not a link) with several SVGs is a picture made of parts: one unnamed part is not the logo (IRVINS mascot).
+        if (name !== "a" && name !== "svg" && svgCount >= 2 && !svgNamesLogo(first)) continue;
+        if (drawsItself(first) && !isUiIconSvg(first) && !seen.has(first)) {
+          seen.add(first);
+          out.push({ kind: "svg" });
+          break;
+        }
+      } else {
+        const img = rest.slice(imgAt).match(/^<img\b[^>]*>/i)?.[0] ?? "";
+        pos += imgAt + Math.max(img.length, 4);
+        // A lazy-loaded logo has a data: placeholder in src and the real file in data-src or srcset.
+        const src = [attr(img, "src"), attr(img, "data-src"), (attr(img, "srcset") ?? "").split(/\s+/)[0], (attr(img, "data-srcset") ?? "").split(/\s+/)[0]].find((x) => !!x && !x.startsWith("data:"));
+        if (!src) continue;
+        try {
+          const url = new URL(decode(src), pageUrl).toString();
+          if (/^https?:/.test(url) && !/\.ico(\?|$)/i.test(url) && !isUiIconImg(img, url) && !seen.has(url)) {
+            seen.add(url);
+            out.push({ kind: "img", url });
+            break;
+          }
+        } catch {
+          continue;
+        }
       }
     }
   }
@@ -185,15 +202,19 @@ const jsonLdBlocks = (html: string): unknown[] =>
 
 type Org = { name?: string; logo?: string };
 function organization(html: string): Org {
+  let name: string | undefined;
   for (const b of jsonLdBlocks(html)) {
     if (!b || typeof b !== "object") continue;
     const o = b as Record<string, unknown>;
     const types = ([] as unknown[]).concat(o["@type"] ?? []);
     if (!types.some((t) => t === "Organization" || t === "Brand" || t === "Store" || t === "OnlineStore")) continue;
-    const logo = o.logo && typeof o.logo === "object" ? (o.logo as { url?: unknown }).url : o.logo;
-    return { name: typeof o.name === "string" ? o.name.trim() : undefined, logo: typeof logo === "string" ? logo : undefined };
+    const l = o.logo && typeof o.logo === "object" ? (o.logo as { url?: unknown; contentUrl?: unknown }) : undefined;
+    const logo = l ? (typeof l.url === "string" && l.url ? l.url : l.contentUrl) : o.logo;
+    name ??= typeof o.name === "string" && o.name.trim() ? o.name.trim() : undefined;
+    // A node with no usable logo does not stop the search: a later Organization in the same graph may hold it.
+    if (typeof logo === "string" && logo) return { name, logo };
   }
-  return {};
+  return { name };
 }
 
 /** The site's own brand name: og:site_name, else the JSON-LD Organization name, else the start of the title. "" when none. */

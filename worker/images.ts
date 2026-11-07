@@ -11,12 +11,13 @@ const IMAGE_REDIRECTS = 5;
  */
 export async function fetchHttpsImage(url: string, what: string): Promise<Response> {
   let at = url;
+  const signal = AbortSignal.timeout(15_000); // one bound for the whole chain, not one per hop
   let res!: Response;
   for (let hop = 0; hop <= IMAGE_REDIRECTS; hop++) {
     const u = new URL(at);
     if (u.protocol !== "https:") throw new Error(hop === 0 ? `${what} URL must use HTTPS.` : `${what} URL redirected to a non-HTTPS address.`);
     if (!isPublicHost(u.hostname)) throw new Error(`${what} URL must point at a public host.`);
-    res = await fetch(at, { headers: { "user-agent": "Mozilla/5.0 (a11adgen)" }, redirect: "manual", signal: AbortSignal.timeout(15_000) });
+    res = await fetch(at, { headers: { "user-agent": "Mozilla/5.0 (a11adgen)" }, redirect: "manual", signal });
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
       await res.body?.cancel();

@@ -19,8 +19,9 @@ export function isPublicHost(hostname: string): boolean {
     return true;
   }
   if (h.includes(":")) {
-    // IPv6 literal: loopback, unspecified, unique-local (fc00::/7), link-local (fe80::/10), site-local (fec0::/10), IPv4-mapped.
-    if (h === "::1" || h === "::" || /^f[cd]/.test(h) || /^fe[89a-f]/.test(h) || h.startsWith("::ffff:")) return false;
+    // IPv6 literal: anything that starts "::" (loopback, unspecified, IPv4-compatible and IPv4-mapped, as "::7f00:1"),
+    // unique-local (fc00::/7), link-local (fe80::/10), site-local (fec0::/10). No public address starts "::".
+    if (h.startsWith("::") || /^f[cd]/.test(h) || /^fe[89a-f]/.test(h)) return false;
     return true;
   }
   return true;

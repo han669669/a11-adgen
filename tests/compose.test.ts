@@ -67,7 +67,11 @@ describe("compose_final input checks", () => {
     expect(f).not.toHaveBeenCalled();
   });
   it("refuses a logo that redirects to an internal host", async () => {
-    vi.stubGlobal("fetch", async () => ({ ...logoResponse("x"), ok: false, status: 301, headers: new Headers({ location: "https://127.0.0.1/logo.png" }), body: null }));
+    // The mock fails on any URL but the first, so the test proves the fence runs before the internal request.
+    vi.stubGlobal("fetch", async (u: string) => {
+      if (String(u) !== "https://example.com/logo.png") throw new Error(`unexpected request to ${u}`);
+      return { ...logoResponse("x"), ok: false, status: 301, headers: new Headers({ location: "https://127.0.0.1/logo.png" }), body: null };
+    });
     await expect(composeFinal(envWith("final", "done"), input())).rejects.toThrow("public host");
   });
   it("follows a safe https redirect by hand", async () => {
@@ -77,7 +81,7 @@ describe("compose_final input checks", () => {
         : logoResponse(String(u)),
     );
     const out = await composeFinal(envWith("final", "done"), input());
-    expect(out.key).toMatch(/-c\d+\.jpg$/);
+    expect(out.key).toMatch(/-c\d{13}\d+\.jpg$/);
   });
 });
 
