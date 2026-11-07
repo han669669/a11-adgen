@@ -51,7 +51,7 @@ Three ads per batch: 1 tof, 1 mof, 1 bof (owner, 07-11-2026). The database allow
 2. Burst: at least 8 ideas per stage before you pick. Ideas cost nothing; drafts cost money.
 3. Kill: apply §2. Most ideas must die here. If fewer than the needed picks survive, write more ideas. Do not lower the bar.
 4. Mix: at least 1 of the 3 picks in a native look (not the beige studio look).
-5. Draft: 3 `low` drafts per picked idea, with the packshot as the reference. When the ad shows food, also pass the kit's texture photo and put the kit's food words in the prompt.
+5. Draft: 3 `low` drafts per picked idea, with the packshot as the reference. When the ad shows food, also pass the kit's texture photo and put the kit's food words in the prompt. Say in the prompt that the texture photo is a texture cue only: do not copy its amount of food or its state.
 6. Pick (D2, Claude): judge each draft against §2 first, craft second. Pick one per idea with `picks_save`, then `final_render`.
 7. Food truth (§6): `food_fix` on every final that shows food, then the food check. Repeat until the food matches. Then `compose_final`.
 8. When a final fails §2, say so in the report. Do not send it.
