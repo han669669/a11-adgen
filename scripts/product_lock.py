@@ -51,9 +51,11 @@ def alpha(size, scale, square_top=False):
     return m.resize(size, Image.LANCZOS)
 
 
-def alpha_from_png(path, box, size):
+def alpha_from_png(path, box, size, packshot_size=None):
     """The product's own silhouette from a mask file (made by `cutout`), cropped like the piece and resized to it."""
     m = Image.open(path).convert("L")
+    if packshot_size is not None and m.size != packshot_size:
+        sys.exit(f"{path} is {m.size[0]}x{m.size[1]} but the packshot is {packshot_size[0]}x{packshot_size[1]}: make the mask from this packshot with `cutout`.")
     return m.crop(box).resize(size, Image.LANCZOS)
 
 
@@ -63,6 +65,15 @@ def cutout(a):
     brightness above --light-min) that is joined to the picture's border is backdrop; everything else is the product.
     The mask is opened (--open px) and eroded by 1 px (no specks, thin lines or fringe), reduced to its largest piece, and softened a little."""
     from PIL import ImageFilter
+    if a.open < 1 or a.open % 2 == 0:
+        sys.exit("--open must be a positive odd integer")
+    if not np.isfinite(a.smooth) or a.smooth < 0:
+        sys.exit("--smooth must be finite and zero or greater")
+    if a.erode < 0:
+        sys.exit("--erode must be zero or greater")
+    edges = {e.strip() for e in a.edges.split(",")}
+    if not edges <= {"top", "bottom", "left", "right"}:
+        sys.exit("--edges takes top, bottom, left, right, separated by commas")
     im = Image.open(a.packshot).convert("RGB")
     arr = np.asarray(im).astype(int)
     H, W = arr.shape[:2]
@@ -76,12 +87,17 @@ def cutout(a):
             c = np.pad(np.cumsum(np.cumsum(np.pad(v, p, mode="edge"), 0), 1), ((1, 0), (1, 0)))
             return (c[k:, k:] - c[:-k, k:] - c[k:, :-k] + c[:-k, :-k]) / (k * k)
         smooth = np.sqrt(np.maximum(box(lum ** 2) - box(lum) ** 2, 0)) < a.smooth
-    border = [(x, y) for x in range(W) for y in (0, H - 1)] + [(x, y) for y in range(H) for x in (0, W - 1)]
+    border = (
+        ([(x, 0) for x in range(W)] if "top" in edges else [])
+        + ([(x, H - 1) for x in range(W)] if "bottom" in edges else [])
+        + ([(0, y) for y in range(H)] if "left" in edges else [])
+        + ([(W - 1, y) for y in range(H)] if "right" in edges else [])
+    )
 
     def backdrop(cls):
         b = Image.fromarray((cls * 255).astype("uint8"), "L")
         out = np.zeros((H, W), bool)
-        for s in border[:: max(1, a.seed_step)]:
+        for s in border:
             if b.getpixel(s) == 255 and not out[s[1], s[0]]:
                 t = b.copy()
                 ImageDraw.floodfill(t, s, 128)
@@ -111,7 +127,7 @@ def cutout(a):
     soft = Image.fromarray((best * 255).astype("uint8"), "L").filter(ImageFilter.GaussianBlur(0.9))
     soft.point(lambda v: 0 if v < 110 else min(255, (v - 110) * 255 // 110)).save(a.out)  # drops the faint rim a blurred hairline leaves
     ys, xs = np.where(best)
-    print(f"{a.out}: product box x {xs.min()},{xs.max()} y {ys.min()},{ys.max()} ({int(best.sum())} px of {W * H}). Use --box {xs.min()},{ys.min()},{xs.max()},{ys.max()} --alpha {a.out}")
+    print(f"{a.out}: product box x {xs.min()},{xs.max() + 1} y {ys.min()},{ys.max() + 1} ({int(best.sum())} px of {W * H}). Use --box {xs.min()},{ys.min()},{xs.max() + 1},{ys.max() + 1} --alpha {a.out}")
 
 
 def cut(pack, box, band_top=None):
@@ -128,7 +144,7 @@ def skeleton(a):
     jar_h = round(H * a.jar_height)
     scale = jar_h / (y1 - y0 + 2 * PAD)
     piece = piece.resize((round(piece.width * scale), round(piece.height * scale)), Image.LANCZOS)
-    mask = alpha_from_png(a.alpha, (x0 - PAD, y0 - PAD, x1 + PAD, y1 + PAD), piece.size) if a.alpha else alpha(piece.size, scale)
+    mask = alpha_from_png(a.alpha, (x0 - PAD, y0 - PAD, x1 + PAD, y1 + PAD), piece.size, pack.size) if a.alpha else alpha(piece.size, scale)
     canvas = Image.new("RGB", (W, H), rgb(a.bg))
     pitch = piece.width * (1 + a.gap)
     total = pitch * (a.count - 1) + piece.width
@@ -168,7 +184,7 @@ def swap(a):
     piece = piece.resize((round(piece.width * scale), round(piece.height * scale)), Image.LANCZOS)
     if a.alpha and a.lower_only:
         sys.exit("--alpha cannot be combined with --lower-only")
-    mask = alpha_from_png(a.alpha, (x0 - PAD, y0 - PAD, x1 + PAD, y1 + PAD), piece.size) if a.alpha else alpha(piece.size, scale, square_top=a.lower_only)
+    mask = alpha_from_png(a.alpha, (x0 - PAD, y0 - PAD, x1 + PAD, y1 + PAD), piece.size, pack.size) if a.alpha else alpha(piece.size, scale, square_top=a.lower_only)
     ytop = obase - piece.height + round(PAD * scale)
     # Paint the old product's area with the backdrop (a blend of the columns just outside it), then paste the real one.
     pad, probe = 8, 14
@@ -418,7 +434,7 @@ def main():
     c.add_argument("--open", type=int, default=3, help="odd size of the opening filter: thin lines narrower than this are removed (3 keeps fine edges, 7 removes a horizon line)")
     c.add_argument("--smooth", type=float, default=0, help="0 = off. Above 0, a dark pixel counts as backdrop only where the picture is smooth (local brightness std below this, 2.0 works): keeps a dark textured product, such as a brownie, on a black backdrop")
     c.add_argument("--erode", type=int, default=1, help="how many 1 px erosions to apply at the end (more removes a dark fringe of backdrop)")
-    c.add_argument("--seed-step", type=int, default=7, help="try every Nth border pixel as a flood fill start")
+    c.add_argument("--edges", default="top,bottom,left,right", help="which picture edges the backdrop may touch (comma list). Drop an edge where a dark or pale part of the product touches it, so it is not read as backdrop")
     c.set_defaults(fn=cutout)
     d = sub.add_parser("pad45", help="pad a square packshot to 4:5 for a model edit")
     d.add_argument("--packshot", required=True)
