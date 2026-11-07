@@ -51,9 +51,12 @@ export function isoWeek(d: Date): number {
 /** The owner and the clients work in Singapore (UTC+8, no daylight saving). A new ISO week starts there on Monday 00:00, which is Sunday 16:00 UTC. isoWeek reads UTC fields, so shift the clock by 8 hours first. */
 export const singaporeClock = (d: Date) => new Date(d.getTime() + 8 * 3_600_000);
 
-/** a11_W46_wongi_tof_c03_v1: week, brand, stage, idea number, pack version. The client uses these names, so results map back. */
-export function adName(week: number, brandSlug: string, stage: string, n: number, version: number): string {
-  return `a11_W${String(week).padStart(2, "0")}_${brandSlug.replace(/-/g, "")}_${stage}_c${String(n).padStart(2, "0")}_v${version}`;
+/**
+ * a11_W46_wongi_b02_tof_c03_v1: week, brand, the brand's batch number, stage, idea number, pack version. The client uses these names, so results map back.
+ * The idea number and the version restart in each batch. The batch number keeps two batches of one brand apart, in one week or across weeks.
+ */
+export function adName(week: number, brandSlug: string, batchNo: number, stage: string, n: number, version: number): string {
+  return `a11_W${String(week).padStart(2, "0")}_${brandSlug.replace(/-/g, "")}_b${String(batchNo).padStart(2, "0")}_${stage}_c${String(n).padStart(2, "0")}_v${version}`;
 }
 
 /** Numbers in a text: S$8.90, 35, 4, 70g. A trailing dot or comma is punctuation, not part of the number. */
@@ -81,9 +84,12 @@ export async function packPublish(
   a: { batchId: string; ads: PackAdInput[]; launchPlan?: string; healthProduct?: boolean; at?: Date },
 ) {
   const b = await env.DB.prepare(
-    `SELECT b.id, b.label, b.subject_id, br.slug, br.name FROM batches b JOIN brands br ON br.id = b.brand_id WHERE b.id = ?`,
-  ).bind(a.batchId).first<{ id: string; label: string; subject_id: string; slug: string; name: string }>();
+    `SELECT b.id, b.label, b.subject_id, b.brand_id, b.created_at, br.slug, br.name FROM batches b JOIN brands br ON br.id = b.brand_id WHERE b.id = ?`,
+  ).bind(a.batchId).first<{ id: string; label: string; subject_id: string; brand_id: string; created_at: string; slug: string; name: string }>();
   if (!b) throw new InputError("No such batch.");
+  // The batch's place among the brand's batches, oldest first (index batches_brand). It never changes, so every version of a pack keeps it.
+  const batchNo = (await env.DB.prepare("SELECT COUNT(*) AS n FROM batches WHERE brand_id = ? AND (created_at < ? OR (created_at = ? AND id <= ?))")
+    .bind(b.brand_id, b.created_at, b.created_at, b.id).first<{ n: number }>())!.n;
   const facts = (await env.DB.prepare("SELECT label, value, quote, source_url FROM facts WHERE subject_id = ? ORDER BY id LIMIT 200")
     .bind(b.subject_id).all<FactRow>()).results;
   const week = isoWeek(singaporeClock(a.at ?? new Date()));
@@ -134,7 +140,7 @@ export async function packPublish(
   // Two publishes for one batch at the same moment can pick the same version. The unique key refuses the second; it takes the next one.
   for (let attempt = 0; ; attempt++) {
     const version = ((await env.DB.prepare("SELECT MAX(version) AS v FROM packs WHERE batch_id = ?").bind(a.batchId).first<{ v: number | null }>())?.v ?? 0) + 1;
-    const named = { ...content, ads: ads.map((x, i) => ({ ...x, name: adName(week, b.slug, x.stage, ideaNumbers[i]!, version) })) };
+    const named = { ...content, ads: ads.map((x, i) => ({ ...x, name: adName(week, b.slug, batchNo, x.stage, ideaNumbers[i]!, version) })) };
     try {
       await env.DB.prepare("INSERT INTO packs (id, batch_id, version, token_hash, title, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
         .bind(id, a.batchId, version, await sha256Hex(token), `${b.name} ${b.label} v${version}`, JSON.stringify(named), now()).run();
