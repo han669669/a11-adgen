@@ -105,6 +105,8 @@ def cutout(a):
         return out
 
     bg = backdrop((mx < a.dark_max) & (smooth if smooth is not None else True)) | backdrop((sat < a.light_sat) & (mx > a.light_min))
+    if not bg.any():
+        sys.exit("no backdrop found on the chosen --edges. Check --dark-max, --light-sat and --edges (an edge the product fills is not backdrop).")
     m = Image.fromarray(((~bg) * 255).astype("uint8"), "L").filter(ImageFilter.MinFilter(a.open)).filter(ImageFilter.MaxFilter(a.open))
     for _ in range(a.erode):
         m = m.filter(ImageFilter.MinFilter(3))
