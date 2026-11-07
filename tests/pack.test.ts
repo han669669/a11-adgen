@@ -201,7 +201,7 @@ describe("client portal", () => {
     return { ...m, path: new URL(r.link).pathname, r, finals };
   }
 
-  it("shows the pack, with private headers and no scripts", async () => {
+  it("shows the pack, with private headers and one hashed script", async () => {
     const { env, path } = await published({ healthProduct: true });
     const r = await get(env, path);
     expect(r.status).toBe(200);
@@ -215,11 +215,15 @@ describe("client portal", () => {
     expect(html).not.toMatch(/https?:\/\/fonts/);
     expect(html).toContain("HSA");
     expect(html).toContain("Caramel Pop Barley 70g S$8.90");
-    expect(html).not.toContain("<script");
+    expect(html.match(/<script/g)).toHaveLength(1); // only the file form helper, allowed by its hash
+    expect(html).not.toMatch(/<script[^>]*\ssrc=/);
     expect(r.headers.get("x-robots-tag")).toMatch(/noindex/);
     expect(r.headers.get("cache-control")).toBe("private, no-store");
     expect(r.headers.get("referrer-policy")).toBe("no-referrer");
     expect(r.headers.get("content-security-policy")).toMatch(/default-src 'none'/);
+    expect(/script-src[^;]*/.exec(r.headers.get("content-security-policy")!)![0]).not.toContain("unsafe");
+    const hash = `sha256-${Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(/<script>([\s\S]*?)<\/script>/.exec(html)![1]!))).toString("base64")}`;
+    expect(r.headers.get("content-security-policy")).toContain(`script-src '${hash}'`);
     expect(r.headers.get("content-security-policy")).toMatch(/font-src 'self'/);
   });
 
@@ -244,13 +248,14 @@ describe("client portal", () => {
     expect(bytes.length).toBeGreaterThan(20_000);
   });
 
-  it("puts each sentence of the launch plan on its own line and lets the client enlarge the pictures without scripts", async () => {
+  it("puts each sentence of the launch plan on its own line and lets the client enlarge the pictures without script", async () => {
     const { env, path } = await published({ launchPlan: "Run all ads for 72 hours. Pause any ad under 1,000 impressions at S$8.90! Send us the CSV.\nThank you." });
     const html = await (await get(env, path)).text();
     expect(html).toContain('<ul class="plan"><li>Run all ads for 72 hours.</li><li>Pause any ad under 1,000 impressions at S$8.90!</li><li>Send us the CSV.</li><li>Thank you.</li></ul>');
     expect(html).toContain('href="#view-1"');
     expect(html).toContain('id="view-1"');
-    expect(html).not.toContain("<script");
+    expect(html.match(/<script/g)).toHaveLength(1); // only the file form helper, allowed by its hash
+    expect(html).not.toMatch(/<script[^>]*\ssrc=/);
     expect(sentencesOf(pack.DEFAULT_LAUNCH_PLAN)).toHaveLength(5);
     expect(sentencesOf('He said "go now." Then (really) stop. Next one.')).toEqual(['He said "go now."', "Then (really) stop.", "Next one."]);
   });

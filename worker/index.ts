@@ -2,6 +2,7 @@ import type { Env } from "./env";
 import { handleApi } from "./api";
 import { handleMcp } from "./mcp";
 import { handleComment, handlePortal, handleUpload } from "./portal";
+import { FILES_PER_SEND } from "./uploads";
 
 /** A Worker bundle on the Free plan is at most 3 MB. */
 const STAGE_MAX_BYTES = 3_000_000;
@@ -113,7 +114,7 @@ export default {
 
     // Client portal: a pack page and its pictures, behind an unguessable token (no login).
     const portal = /^\/c\/([0-9a-f]{48})(?:\/ad\/(\d{1,2})\.(jpg|png))?$/.exec(url.pathname);
-    if (portal && request.method === "GET") return handlePortal(env, portal[1]!, portal[2], portal[3], url.searchParams.get("sent") === "1", url.searchParams.get("uploaded") === "1");
+    if (portal && request.method === "GET") return handlePortal(env, portal[1]!, portal[2], portal[3], url.searchParams.get("sent") === "1", Math.min(FILES_PER_SEND, Math.max(0, Math.floor(Number(url.searchParams.get("uploaded"))) || 0)));
     const commentPost = /^\/c\/([0-9a-f]{48})\/comment$/.exec(url.pathname);
     if (commentPost && request.method === "POST") return handleComment(env, request, commentPost[1]!);
     const uploadPost = /^\/c\/([0-9a-f]{48})\/upload$/.exec(url.pathname);
