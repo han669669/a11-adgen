@@ -1,5 +1,6 @@
 import type { Env } from "./env";
 import { COMMENT_MAX, commentAdd } from "./comments";
+import { uploadAdd } from "./uploads";
 import { FONT_PATH } from "./font";
 import { packByToken, type PackContent } from "./pack";
 
@@ -35,7 +36,7 @@ code{font:inherit;font-weight:600;background:#efe6da;padding:1px 6px;border-radi
 .facts{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:10px}.facts li{background:#fff;border:1px solid #e6dccd;border-radius:10px;padding:12px 14px;font-size:.95rem;overflow-wrap:anywhere}
 .facts .n{display:inline-block;margin-bottom:6px;padding:1px 10px;border-radius:6px;background:#efe6da;font-size:1.15rem;font-weight:700}
 .facts .what{margin:0 0 4px}.facts .what b{font-weight:700}.facts .q{margin:0 0 6px;font-size:.9rem}.facts .src{display:block;font-size:.85rem;overflow-wrap:anywhere}
-.cm{margin-top:12px;display:grid;gap:10px;max-width:60ch}.cm select,.cm textarea{font:inherit;padding:10px;border:1px solid #e6dccd;border-radius:8px;background:#fff;color:inherit;width:100%}.cm textarea{min-height:120px}.cm button{font:inherit;justify-self:start;padding:9px 16px;border:0;border-radius:8px;background:#2b1d14;color:#fff;font-weight:600;cursor:pointer}.ok{background:#e8f1e4;border-radius:8px;padding:10px 14px;max-width:60ch}
+.cm{margin-top:12px;display:grid;gap:10px;max-width:60ch}.cm select,.cm textarea{font:inherit;padding:10px;border:1px solid #e6dccd;border-radius:8px;background:#fff;color:inherit;width:100%}.cm textarea{min-height:120px}.cm button{font:inherit;justify-self:start;padding:9px 16px;border:0;border-radius:8px;background:#2b1d14;color:#fff;font-weight:600;cursor:pointer}.cm input[type=file]{font:inherit;padding:8px;border:1px solid #e6dccd;border-radius:8px;background:#fff;width:100%}.ok{background:#e8f1e4;border-radius:8px;padding:10px 14px;max-width:60ch}
 a{color:inherit}
 .foot{margin-top:48px;font-size:.85rem}
 .lb{display:none;position:fixed;inset:0;z-index:10;background:#140c07;animation:fade .2s}.lb:has(.slide:target){display:block}
@@ -75,7 +76,7 @@ const link = (url: string) => (/^https?:\/\//i.test(url) ? `<a href="${esc(url)}
 const ZOOM = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#2b1d14" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2H14v4.5M6.5 14H2V9.5M14 2L9 7M2 14l5-5"/></svg>`;
 
 /** The pack page for a client. Every value is escaped: the copy can carry text that came from the web. */
-export function renderPack(token: string, title: string, c: PackContent, sent = false): string {
+export function renderPack(token: string, title: string, c: PackContent, sent = false, uploaded = false): string {
   const version = /\bv(\d+)$/.exec(title)?.[1];
   const n = c.ads.length;
   const ads = c.ads
@@ -117,15 +118,16 @@ export function renderPack(token: string, title: string, c: PackContent, sent = 
 <ol class="steps"><li>Download the picture.</li><li>Paste the text into Meta Ads Manager.</li><li>Copy the ad name exactly.</li><li>Follow the launch plan below.</li></ol>
 <h2 style="margin-top:32px">Launch plan</h2><ul class="plan">${sentences(c.launchPlan).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>${c.healthNote ? `<p>${esc(c.healthNote)}</p>` : ""}${facts}
 <h2 id="comments">Tell us what you think</h2>${sent ? '<p class="ok">Thank you. We got your comment.</p>' : ""}<form class="cm" method="post" action="/c/${token}/comment"><label for="cm-ad">About</label><select id="cm-ad" name="ad"><option value="">The whole pack</option>${c.ads.map((a, i) => `<option value="${i + 1}">Ad ${i + 1}: ${esc(a.headline)}</option>`).join("")}</select><label for="cm-body">Your comment</label><textarea id="cm-body" name="body" required maxlength="${COMMENT_MAX}"></textarea><button type="submit">Send comment</button></form>
+<h2 id="results">Send us your results</h2><p class="muted">After your ads run, send a screenshot from Meta Ads Manager (PNG, JPG or WebP) or a CSV file. It shows each ad name with its impressions and clicks. The file must be under 3 MB.</p>${uploaded ? '<p class="ok">Thank you. We got your file.</p>' : ""}<form class="cm" method="post" enctype="multipart/form-data" action="/c/${token}/upload"><label for="up-file">Your file</label><input id="up-file" type="file" name="file" required accept="image/png,image/jpeg,image/webp,.csv,text/csv"><button type="submit">Send file</button></form>
 <p class="foot muted">This page is private. Only people with this link can see it.</p><div class="lb" aria-label="Ads, full size"><div class="track">${slides}</div></div>
 </main></body></html>`;
 }
 
 /** GET /c/<token> (the page) and /c/<token>/ad/<n>.jpg|png (the pictures). Unknown or revoked links answer 404. */
-export async function handlePortal(env: Env, token: string, ad: string | undefined, ext: string | undefined, sent = false): Promise<Response> {
+export async function handlePortal(env: Env, token: string, ad: string | undefined, ext: string | undefined, sent = false, uploaded = false): Promise<Response> {
   const pack = await packByToken(env, token);
   if (!pack) return new Response("Not found", { status: 404, headers: PRIVATE });
-  if (!ad) return new Response(renderPack(token, pack.title, pack.content, sent), { headers: { ...PRIVATE, "content-type": "text/html; charset=utf-8", "content-security-policy": PAGE_CSP } });
+  if (!ad) return new Response(renderPack(token, pack.title, pack.content, sent, uploaded), { headers: { ...PRIVATE, "content-type": "text/html; charset=utf-8", "content-security-policy": PAGE_CSP } });
   const item = pack.content.ads[Number(ad) - 1];
   if (!item) return new Response("Not found", { status: 404, headers: PRIVATE });
   const obj = await env.MEDIA.get(item.imageKey);
@@ -142,5 +144,13 @@ export async function handleComment(env: Env, request: Request, token: string): 
   const r = await commentAdd(env, request, token);
   if (r.ok) return new Response(null, { status: 303, headers: { ...PRIVATE, location: `/c/${token}?sent=1#comments` } });
   const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Comment not sent</title></head><body style="font:16px/1.6 system-ui,sans-serif;margin:24px"><p>${esc(r.message)}</p>${r.status === 404 ? "" : `<p><a href="/c/${token}#comments">Go back</a></p>`}</body></html>`;
+  return new Response(page, { status: r.status, headers: { ...PRIVATE, "content-type": "text/html; charset=utf-8", "content-security-policy": PAGE_CSP } });
+}
+
+/** POST /c/<token>/upload: save the client's results file, then go back to the page. */
+export async function handleUpload(env: Env, request: Request, token: string): Promise<Response> {
+  const r = await uploadAdd(env, request, token);
+  if (r.ok) return new Response(null, { status: 303, headers: { ...PRIVATE, location: `/c/${token}?uploaded=1#results` } });
+  const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>File not sent</title></head><body style="font:16px/1.6 system-ui,sans-serif;margin:24px"><p>${esc(r.message)}</p>${r.status === 404 ? "" : `<p><a href="/c/${token}#results">Go back</a></p>`}</body></html>`;
   return new Response(page, { status: r.status, headers: { ...PRIVATE, "content-type": "text/html; charset=utf-8", "content-security-policy": PAGE_CSP } });
 }
