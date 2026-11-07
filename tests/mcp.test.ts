@@ -3,7 +3,7 @@ import type { Env } from "../worker/env";
 import { handleMcp, TOOLS } from "../worker/mcp";
 import { validate } from "../worker/schema";
 
-const env = {} as Env;
+const env = { PUBLIC_BASE_URL: "https://x.example" } as Env;
 const post = (body: unknown) =>
   handleMcp(new Request("https://x/mcp", { method: "POST", body: JSON.stringify(body) }), env);
 
@@ -11,8 +11,17 @@ describe("mcp handler", () => {
   it("answers initialize with a supported version", async () => {
     const r = await post({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2099-01-01" } });
     const j: any = await r.json();
-    expect(j.result.protocolVersion).toBe("2025-06-18");
+    expect(j.result.protocolVersion).toBe("2025-11-25");
     expect(j.result.capabilities.tools).toBeDefined();
+  });
+  it("gives the connector icons only on protocol 2025-11-25", async () => {
+    const ask = async (v: string) =>
+      ((await (await post({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: v } })).json()) as any).result;
+    const next = await ask("2025-11-25");
+    expect(next.serverInfo.icons.map((i: any) => i.src)).toEqual(["https://x.example/icon.png", "https://x.example/icon.svg"]);
+    const old = await ask("2025-06-18");
+    expect(old.protocolVersion).toBe("2025-06-18");
+    expect(old.serverInfo.icons).toBeUndefined();
   });
   it("returns 202 for a notification", async () => {
     const r = await post({ jsonrpc: "2.0", method: "notifications/initialized" });
