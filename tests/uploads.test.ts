@@ -188,6 +188,30 @@ describe("client results upload", () => {
     await expect(t.run(env, validate(t.inputSchema, { key: render }))).rejects.toThrow("the limit is");
   });
 
+  it("image_get says so in plain words for an upload over 20 MB, without calling the reducer", async () => {
+    const { env } = await makeEnv();
+    const big = new Uint8Array(25_000_000);
+    big.set(PNG);
+    await send(env, new Blob([big], { type: "image/png" }));
+    const key = (await call(env, "uploads_get", { brand: "won-gi" })).files[0].imageKey;
+    let called = false;
+    const IMAGES = { input: () => ((called = true), { transform: () => IMAGES.input(), output: async () => ({ response: () => new Response("x") }) }) };
+    const t = TOOLS.find((x) => x.name === "image_get")!;
+    await expect(t.run({ ...env, IMAGES } as unknown as Env, validate(t.inputSchema, { key }))).rejects.toThrow(/reads at most 20000000 bytes.*smaller screenshot/);
+    expect(called).toBe(false);
+  });
+
+  it("image_get turns a reducer failure into a plain message", async () => {
+    const { env } = await makeEnv();
+    const big = new Uint8Array(5_000_000);
+    big.set(PNG);
+    await send(env, new Blob([big], { type: "image/png" }));
+    const key = (await call(env, "uploads_get", { brand: "won-gi" })).files[0].imageKey;
+    const IMAGES = { input: () => ({ transform: () => IMAGES.input(), output: async () => { throw new Error("Network connection lost."); } }) };
+    const t = TOOLS.find((x) => x.name === "image_get")!;
+    await expect(t.run({ ...env, IMAGES } as unknown as Env, validate(t.inputSchema, { key }))).rejects.toThrow(/could not be reduced for a preview \(Network connection lost\.\)/);
+  });
+
   it("image_get tries a smaller reduction when the first one is still over 3 MB", async () => {
     const { env } = await makeEnv();
     const big = new Uint8Array(5_000_000);
