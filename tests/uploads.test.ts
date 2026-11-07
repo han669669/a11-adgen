@@ -12,7 +12,8 @@ import { fakeD1 } from "./helpers/d1";
 
 const TOKEN = "b".repeat(48);
 const sha = async (s: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))).map((b) => b.toString(16).padStart(2, "0")).join("");
-const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+// A real 1x1 PNG (decodes in any viewer).
+const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
 const CSV = "Ad name,Impressions,Clicks\na11_W45_wongi_b01_tof_c01_v1,2000,60\n";
 
 async function makeEnv() {
@@ -86,7 +87,7 @@ describe("client results upload", () => {
     const g = await call(env, "uploads_get", { brand: "won-gi" });
     expect(g.files).toHaveLength(2);
     expect(g.files.every((f: any) => f.kind === "image")).toBe(true);
-    const keys = g.files.map((f: any) => f.imageKey as string).sort();
+    const keys = g.files.map((f: any) => f.imageKey as string).sort((a: string, b: string) => a.split(".").pop()!.localeCompare(b.split(".").pop()!));
     expect(keys.map((k: string) => k.split(".").pop())).toEqual(["jpg", "webp"]);
     expect(store.get(keys[0]!)?.type).toBe("image/jpeg");
     expect(store.get(keys[1]!)?.type).toBe("image/webp");
@@ -181,10 +182,36 @@ describe("client results upload", () => {
     const t = TOOLS.find((x) => x.name === "image_get")!;
     const r = await t.run({ ...env, IMAGES } as unknown as Env, validate(t.inputSchema, { key }));
     expect(r.content[0]).toMatchObject({ type: "image", mimeType: "image/jpeg" });
-    expect(seen).toEqual([{ width: 2000, fit: "scale-down" }, { format: "image/jpeg", quality: 80 }]);
+    expect(seen).toEqual([{ width: 2000, height: 6000, fit: "scale-down" }, { format: "image/jpeg", quality: 80 }]);
     const render = "renders/11111111-1111-4111-8111-111111111111/1.jpg";
     store.set(render, { bytes: big, type: "image/jpeg" });
     await expect(t.run(env, validate(t.inputSchema, { key: render }))).rejects.toThrow("the limit is");
+  });
+
+  it("image_get tries a smaller reduction when the first one is still over 3 MB", async () => {
+    const { env } = await makeEnv();
+    const big = new Uint8Array(5_000_000);
+    big.set(PNG);
+    await send(env, new Blob([big], { type: "image/png" }));
+    const key = (await call(env, "uploads_get", { brand: "won-gi" })).files[0].imageKey;
+    const seen: unknown[] = [];
+    let n = 0;
+    const IMAGES = { input: () => ({ transform: (o: unknown) => (seen.push(o), IMAGES.input()), output: async (o: unknown) => (seen.push(o), { response: () => new Response(new Uint8Array(++n === 1 ? 3_500_000 : 1000)) }) }) };
+    const t = TOOLS.find((x) => x.name === "image_get")!;
+    const r = await t.run({ ...env, IMAGES } as unknown as Env, validate(t.inputSchema, { key }));
+    expect(r.content[0]).toMatchObject({ type: "image", mimeType: "image/jpeg" });
+    expect(seen).toEqual([
+      { width: 2000, height: 6000, fit: "scale-down" }, { format: "image/jpeg", quality: 80 },
+      { width: 1400, height: 4000, fit: "scale-down" }, { format: "image/jpeg", quality: 60 },
+    ]);
+  });
+
+  it("an over-limit post is refused before any file is written", async () => {
+    const { env, store } = await makeEnv();
+    for (let i = 0; i < UPLOADS_PER_DAY; i++) expect((await send(env, new Blob([PNG]))).status).toBe(303);
+    const puts = store.size;
+    expect((await send(env, new Blob([PNG]))).status).toBe(429);
+    expect(store.size).toBe(puts);
   });
 
   it("the results prompt reads the uploads before it reads the numbers", () => {

@@ -874,9 +874,21 @@ export const TOOLS: Tool[] = [
       let mimeType = obj.httpMetadata?.contentType ?? "image/jpeg";
       if (obj.size <= MAX_IMAGE_BYTES) data = await obj.arrayBuffer();
       else if (a.key.startsWith("uploads/")) {
-        // A client's upload can be up to 30 MB. MCP carries 3 MB, so it is shown reduced (2000 px wide, JPEG). The stored file is not changed.
-        const small = await env.IMAGES.input(obj.body).transform({ width: 2000, fit: "scale-down" }).output({ format: "image/jpeg", quality: 80 });
-        data = await small.response().arrayBuffer();
+        // A client's upload can be up to 30 MB. MCP carries 3 MB, so it is shown reduced as a JPEG. The stored file is not changed.
+        // Width and height are both bounded (a tall screenshot is mostly height). A second, smaller try reads the object again: a body can be read once.
+        const tries = [
+          { width: 2000, height: 6000, quality: 80 },
+          { width: 1400, height: 4000, quality: 60 },
+        ];
+        let reduced: ArrayBuffer | null = null;
+        for (const [i, t] of tries.entries()) {
+          const src = i === 0 ? obj : await env.MEDIA.get(a.key);
+          if (!src) throw new Error(`No image at ${a.key}.`);
+          const out = await env.IMAGES.input(src.body).transform({ width: t.width, height: t.height, fit: "scale-down" }).output({ format: "image/jpeg", quality: t.quality });
+          reduced = await out.response().arrayBuffer();
+          if (reduced.byteLength <= MAX_IMAGE_BYTES) break;
+        }
+        data = reduced!;
         mimeType = "image/jpeg";
         if (data.byteLength > MAX_IMAGE_BYTES) throw new Error(`Image is ${obj.size} bytes and still ${data.byteLength} reduced; the limit is ${MAX_IMAGE_BYTES}.`);
       } else throw new Error(`Image is ${obj.size} bytes; the limit is ${MAX_IMAGE_BYTES}.`);

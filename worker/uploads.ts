@@ -53,6 +53,7 @@ export async function uploadAdd(env: Env, request: Request, token: string): Prom
   if (request.headers.get("sec-fetch-site") === "cross-site") return { ok: false, status: 403, message: "Not allowed." };
   const pack = await packByToken(env, token);
   if (!pack) return { ok: false, status: 404, message: "Not found." };
+  const tooMany = { ok: false as const, status: 429, message: "That is a lot of files for one day. Please try again tomorrow." };
   const tooBig = { ok: false as const, status: 413, message: "That file is too big. Please send one under 30 MB." };
   const ct = request.headers.get("content-type") ?? "";
   if (!/^multipart\/form-data\s*;/i.test(ct)) return { ok: false, status: 400, message: "Choose a file first." };
@@ -69,19 +70,28 @@ export async function uploadAdd(env: Env, request: Request, token: string): Prom
   const file = form.get("file");
   if (!(file instanceof File) || file.size === 0) return { ok: false, status: 400, message: "Choose a file first." };
   if (file.size > UPLOAD_MAX_BYTES) return tooBig;
+  // Check the quota before any big work (sniff and R2 write). The atomic insert below still decides a race between two requests.
+  const since = new Date(Date.now() - 86_400_000).toISOString();
+  const used = await env.DB.prepare("SELECT COUNT(*) AS n FROM uploads WHERE pack_id = ? AND created_at > ?").bind(pack.id, since).first<{ n: number }>();
+  if ((used?.n ?? 0) >= UPLOADS_PER_DAY) return tooMany;
   const kind = await sniff(file);
   if (!kind) return { ok: false, status: 415, message: "Please send a screenshot (PNG, JPG or WebP) or a CSV file." };
   const id = crypto.randomUUID();
   const key = `uploads/${pack.id}/${id}.${kind.ext}`;
   await env.MEDIA.put(key, file, { httpMetadata: { contentType: kind.type } });
   // One statement: the count and the insert cannot be split by a second request.
-  const since = new Date(Date.now() - 86_400_000).toISOString();
-  const r = await env.DB.prepare(
-    "INSERT INTO uploads (id, pack_id, r2_key, kind, bytes, file_name, created_at) SELECT ?, ?, ?, ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM uploads WHERE pack_id = ? AND created_at > ?) < ?",
-  ).bind(id, pack.id, key, kind.kind, file.size, cleanName(file.name), now(), pack.id, since, UPLOADS_PER_DAY).run();
+  let r;
+  try {
+    r = await env.DB.prepare(
+      "INSERT INTO uploads (id, pack_id, r2_key, kind, bytes, file_name, created_at) SELECT ?, ?, ?, ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM uploads WHERE pack_id = ? AND created_at > ?) < ?",
+    ).bind(id, pack.id, key, kind.kind, file.size, cleanName(file.name), now(), pack.id, since, UPLOADS_PER_DAY).run();
+  } catch (e) {
+    await env.MEDIA.delete(key); // no row: nothing points to the object
+    throw e;
+  }
   if (!r.meta.changes) {
     await env.MEDIA.delete(key); // nothing points to it
-    return { ok: false, status: 429, message: "That is a lot of files for one day. Please try again tomorrow." };
+    return tooMany;
   }
   return { ok: true };
 }
