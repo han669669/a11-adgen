@@ -90,7 +90,7 @@ export const TOOLS: Tool[] = [
   {
     name: "brand_extract",
     description:
-      "Read a brand's home page (HTTPS) and return CANDIDATES for the kit: colours used in its CSS (brand colours and neutrals, with counts), fonts, logo and icon image URLs, the share image, title and description. It reads the page source without a browser, so a page built by script shows less (see warnings). It saves nothing: you choose, then call brand_save.",
+      "Read a brand's home page (HTTPS) and return CANDIDATES for the kit: colours used in its CSS (brand colours and neutrals, with counts), fonts, logo candidates (each file checked live; kind header, organization or guess: look at a guess before you use it) and icon URLs, the share image, title, description and a missing list. It reads the page source without a browser, so a page built by script shows less (see warnings). An inline SVG logo has no file: ask the owner for it. Only public https hosts are fetched. It saves nothing: you choose, then call brand_save.",
     inputSchema: {
       type: "object",
       properties: { url: { type: "string", format: "uri", pattern: "^https://" } },
