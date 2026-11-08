@@ -41,7 +41,7 @@ draw();
 export const LIGHTBOX_JS = `(function(){
 var lb=document.querySelector(".lb"),track=lb&&lb.querySelector(".track");
 if(!lb||!track)return;
-var VIEW=/^#view-\\d+$/,pushed=false,y=0,last=null,sx=0,sy=0,mode=0,closing=false,lt=0,ly=0,vy=0;
+var VIEW=/^#view-\\d+$/,pushed=false,y=0,last=null,sx=0,sy=0,mode=0,closing=false,lt=0,ly=0,vy=0,tok=0;
 var EASE="cubic-bezier(.2,.8,.2,1)",BG="rgba(20,12,7,";
 function isOpen(){return VIEW.test(location.hash)}
 function paint(dy){
@@ -51,7 +51,7 @@ track.style.transform="translateY("+dy+"px) scale("+(1-p*.08)+")";
 track.style.opacity=String(1-p*.5);
 lb.style.backgroundColor=BG+(1-p*.8)+")"
 }
-function reset(){closing=false;track.style.transition="";track.style.transform="";track.style.opacity="";lb.style.transition="";lb.style.backgroundColor=""}
+function reset(){tok++;closing=false;track.style.transition="";track.style.transform="";track.style.opacity="";lb.style.transition="";lb.style.backgroundColor=""}
 function snap(){
 track.style.transition="transform .3s "+EASE+",opacity .3s "+EASE;lb.style.transition="background-color .3s "+EASE;
 track.style.transform="";track.style.opacity="";lb.style.backgroundColor=""
@@ -62,15 +62,16 @@ if(pushed)history.back();else location.replace(location.pathname+location.search
 }
 function dismiss(dy){
 if(window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches){close();return}
-closing=true;
+closing=true;var k=++tok;
 var out=Math.max(dy,0)+Math.round((window.innerHeight||800)*.35),ease=".22s cubic-bezier(.4,0,1,1)";
 track.style.transition="transform "+ease+",opacity "+ease;lb.style.transition="background-color .22s linear";
 track.style.transform="translateY("+out+"px) scale(.9)";track.style.opacity="0";lb.style.backgroundColor=BG+"0)";
-setTimeout(close,230);
-setTimeout(function(){if(closing)reset()},900)
+setTimeout(function(){if(k===tok)close()},230);
+setTimeout(function(){if(k===tok)reset()},900)
 }
 document.addEventListener("click",function(e){
 var t=e.target&&e.target.closest?e.target:null;if(!t)return;
+if(closing){if(t.closest("a"))e.preventDefault();return}
 var pic=t.closest("a.pic");
 if(pic){y=window.scrollY;pushed=true;last=pic;return}
 if(t.closest(".slide .x")){e.preventDefault();close();return}

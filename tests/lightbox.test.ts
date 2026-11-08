@@ -105,7 +105,7 @@ describe("enlarged view script, run against a fake page", () => {
     p.openByPicture();
     p.touch("touchstart", [[100, 100]]);
     p.touch("touchmove", [[102, 220]]);
-    expect(p.style.transform).toContain("translateY(120px)"); // the picture follows the finger
+    expect(p.style.transform).toMatch(/^translateY\(120px\) scale\(0\.97\d*\)$/); // the picture follows the finger and shrinks a little
     expect(p.lbStyle.backgroundColor).toMatch(/^rgba\(20,12,7,0\.[0-9]+\)$/); // the dark backdrop thins out
     p.touch("touchend", [], [[102, 260]]);
     expect(p.calls).toEqual([]); // not closed yet: the view is still sliding away
@@ -172,6 +172,33 @@ describe("enlarged view script, run against a fake page", () => {
     expect(d.style.opacity).toBe("0");
     vi.advanceTimersByTime(1000);
     expect(d.style.opacity).toBe("");
+  });
+
+  it("a timer from an earlier slide away cannot close the view that was opened after it", () => {
+    p.openByPicture();
+    p.touch("touchstart", [[100, 100]]);
+    p.touch("touchmove", [[100, 260]]);
+    p.touch("touchend", [], [[100, 260]]);
+    p.doc.fire("keydown", { key: "Escape" }); // closed by the key while the slide away runs
+    expect(p.calls.filter((c) => c === "back")).toHaveLength(1);
+    p.openByPicture(); // opened again at once
+    vi.advanceTimersByTime(1000); // the old 230 ms and 900 ms timers come due
+    expect(p.location.hash).toBe("#view-1");
+    expect(p.calls.filter((c) => c === "back")).toHaveLength(1);
+    expect(p.style.opacity).toBe("");
+  });
+
+  it("a tap on a link while the view slides away does nothing", () => {
+    p.openByPicture();
+    p.touch("touchstart", [[100, 100]]);
+    p.touch("touchmove", [[100, 260]]);
+    p.touch("touchend", [], [[100, 260]]);
+    const ev = p.click({ a: {}, ".slide .nav": { hash: "#view-2" } });
+    expect(ev.prevented).toBe(true);
+    expect(p.calls).toEqual([]); // no jump to another ad
+    const x = p.click({ ".slide .x": {}, a: {} });
+    expect(x.prevented).toBe(true);
+    expect(p.calls).toEqual([]); // the close already under way is not doubled
   });
 
   it("left and right arrow keys move one ad with no slide, like the arrow buttons", () => {
