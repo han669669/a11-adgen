@@ -5,6 +5,8 @@
   "compatibility_date": "2026-10-20",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  // No public per-version URLs. Set on purpose: when this field is missing, Wrangler sends no value and Cloudflare's default (on) can apply. The app is served from the main address only.
+  "preview_urls": false,
   // The live Worker holds two plain values set outside this file: MCP_TOKEN_SHA256 and SIGNUP_CODE_SHA256 (hashes only).
   // Without keep_vars, every deploy from this file would delete them, and /mcp would reject every token.
   "keep_vars": true,
