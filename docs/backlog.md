@@ -11,7 +11,7 @@ The owner decides what moves out of this list. An agent does not start a backlog
 | Alert the owner when a client comments or uploads | The owner sees feedback at once. | Backlog, 2026-11-08 |
 | Weekly client reminder (Cron job) | The client does not forget to send results. | Backlog, 2026-11-08 |
 | Cron job that checks the canon is healthy | Stops quiet drift in the house recipe. | Backlog, 2026-11-08 |
-| Close the `/mcp` bearer token door (OAuth only; the token then guards only the admin routes) | One less door for a bot to try. | Not now, 2026-11-08 |
+| Authentication hardening | Fewer doors to try. | Not now, 2026-11-08 |
 | Connector icon (the a11 logo) | The connector looks finished in the client list. | Pending |
 | `/favicon.ico` content type | Small tidy-up. | Pending |
 | A block for the two-finger sideways trackpad swipe on desktop | Avoids a stray back gesture in the app. | Optional |
