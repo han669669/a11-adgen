@@ -62,7 +62,7 @@ The automatic tests cover the posting and upload paths. Run a live write check o
 
 | Area | Check |
 |---|---|
-| GitHub | Secret scanning and push protection are on. Dependabot alerts are on. The `protect-main` ruleset is active with no bypass. No deploy key, webhook or app that nobody knows. |
+| GitHub | Secret scanning and push protection are on. Dependabot alerts are on. Read them back: `gh api repos/han669669/a11-adgen --jq .security_and_analysis` shows `enabled` for each. The `protect-main` ruleset is active with no bypass. No deploy key, webhook or app that nobody knows. |
 | Cloudflare | One member, with two-factor sign-in. R2 buckets have no public domain (`r2.dev` off, no custom domain). The token list has only tokens that someone uses. The build token has the smallest scopes. |
 | Worker | Secrets are `secret_text`. Plain values are hashes or settings only. Logs hold no secret. |
 | Dependencies | `npm audit` is clean. `package-lock.json` is committed. |
