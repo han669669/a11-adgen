@@ -654,7 +654,7 @@ export const TOOLS: Tool[] = [
   {
     name: "gold_score",
     description:
-      "Compare your blind use/pass answers on gold items with the owner's marks. Saves the run (note says what you tested, e.g. 'before canon change X') and shows the run before it. Agreement alone can be gamed (most marks are pass), so the result also shows the baseline of answering the more common mark for everything, and balanced accuracy: it must not fall when a canon or prompt change ships. Never answer gold items you have already seen marked.",
+      "Compare your blind use/pass answers on gold items with the owner's marks. Saves the run (note says what you tested, e.g. 'before canon change X') and shows the run before it. Agreement alone can be gamed (most marks are pass), so the result also shows the baseline of answering the more common mark for everything, and balanced accuracy: it must not fall by 0.04 or more when a canon or prompt change ships (a smaller move is noise). Never answer gold items you have already seen marked.",
     inputSchema: {
       type: "object",
       properties: {
