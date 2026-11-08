@@ -37,11 +37,57 @@ f.addEventListener("submit",function(){b.disabled=true;b.textContent="Sending. P
 window.addEventListener("pageshow",function(){files=[];i.value="";b.textContent="Send files";draw()});
 draw();
 })();`;
-const pageCsp = (scriptHash: string) => PAGE_CSP.replace("style-src", `script-src '${scriptHash}'; style-src`);
-let uploadJsHash: Promise<string> | undefined;
-/** The CSP hash source of UPLOAD_JS: 'sha256-<base64>'. */
-export const uploadScriptHash = () =>
-  (uploadJsHash ??= crypto.subtle.digest("SHA-256", new TextEncoder().encode(UPLOAD_JS)).then((d) => `sha256-${btoa(String.fromCharCode(...new Uint8Array(d)))}`));
+/** The second script on the pack page: how the enlarged view closes. Never by touching the picture. Close with the x button, the Esc key, or (touch) a swipe down from anywhere. Closing goes back to where the page was, never to an ad. It changes classes and styles only, loads nothing and talks to no server. */
+export const LIGHTBOX_JS = `(function(){
+var lb=document.querySelector(".lb"),track=lb&&lb.querySelector(".track");
+if(!lb||!track)return;
+var VIEW=/^#view-\\d+$/,pushed=false,y=0,last=null,sx=0,sy=0,mode=0;
+function isOpen(){return VIEW.test(location.hash)}
+function reset(){track.style.transition="";track.style.transform="";track.style.opacity=""}
+function snap(){track.style.transition="transform .2s,opacity .2s";track.style.transform="";track.style.opacity=""}
+function close(){
+if(!isOpen())return;
+if(pushed)history.back();else location.replace(location.pathname+location.search+"#")
+}
+document.addEventListener("click",function(e){
+var t=e.target&&e.target.closest?e.target:null;if(!t)return;
+var pic=t.closest("a.pic");
+if(pic){y=window.scrollY;pushed=true;last=pic;return}
+if(t.closest(".slide .x")){e.preventDefault();close();return}
+var nav=t.closest(".slide .nav");
+if(nav){e.preventDefault();location.replace(nav.hash)}
+});
+document.addEventListener("keydown",function(e){if(e.key==="Escape")close()});
+window.addEventListener("hashchange",function(){
+if(isOpen())return;
+pushed=false;reset();
+if(Math.abs(window.scrollY-y)>1&&last)window.scrollTo({top:y,left:0,behavior:"instant"});
+if(last){last.focus({preventScroll:true});last=null}
+});
+lb.addEventListener("touchstart",function(e){
+if(e.touches.length!==1){if(mode===1)snap();mode=2;return}
+sx=e.touches[0].clientX;sy=e.touches[0].clientY;mode=0
+},{passive:true});
+lb.addEventListener("touchmove",function(e){
+if(mode===2||e.touches.length!==1){if(mode===1)snap();mode=2;return}
+var dx=e.touches[0].clientX-sx,dy=e.touches[0].clientY-sy;
+if(mode===0){if(Math.abs(dx)<10&&Math.abs(dy)<10)return;mode=dy>0&&dy>Math.abs(dx)*1.2?1:2}
+if(mode===1){track.style.transition="none";track.style.transform="translateY("+dy+"px)";track.style.opacity=String(Math.max(.3,1-dy/400))}
+},{passive:true});
+function end(e){
+if(e.touches&&e.touches.length)return;
+var was=mode;mode=0;if(was!==1)return;
+var dy=e.changedTouches&&e.changedTouches.length?e.changedTouches[0].clientY-sy:0;
+if(e.type==="touchend"&&dy>90){close()}else snap()
+}
+lb.addEventListener("touchend",end,{passive:true});
+lb.addEventListener("touchcancel",end,{passive:true});
+})();`;
+const pageCsp = (scriptHashes: string[]) => PAGE_CSP.replace("style-src", `script-src ${scriptHashes.map((h) => `'${h}'`).join(" ")}; style-src`);
+const hashOf = (js: string) => crypto.subtle.digest("SHA-256", new TextEncoder().encode(js)).then((d) => `sha256-${btoa(String.fromCharCode(...new Uint8Array(d)))}`);
+let scriptHashes: Promise<string[]> | undefined;
+/** The CSP hash sources of the two page scripts: 'sha256-<base64>'. Upload script first. */
+export const pageScriptHashes = () => (scriptHashes ??= Promise.all([hashOf(UPLOAD_JS), hashOf(LIGHTBOX_JS)]));
 const PRIVATE = {
   "cache-control": "private, no-store",
   "referrer-policy": "no-referrer",
@@ -49,8 +95,8 @@ const PRIVATE = {
   "x-content-type-options": "nosniff",
 };
 
-// The page has no script (CSP). The enlarged view is CSS only: a link to #view-N shows the box (:target), and the slides sit in a
-// horizontal scroll-snap row, so a touch swipe moves between ads and the arrows do the same with a mouse.
+// The enlarged view opens with CSS: a link to #view-N shows the box (:target), and the slides sit in a horizontal scroll-snap row,
+// so a touch swipe moves between ads and the arrows do the same with a mouse. LIGHTBOX_JS only closes it (x, Esc, swipe down).
 const CSS = `@font-face{font-family:"Plus Jakarta Sans";src:url(${FONT_PATH}) format("woff2");font-weight:200 800;font-display:swap}
 *{box-sizing:border-box}html{scroll-behavior:smooth}
 body{font:16px/1.6 "Plus Jakarta Sans",system-ui,sans-serif;margin:0;background:#faf7f2;color:#2b1d14}body:has(.slide:target){overflow:hidden}
@@ -76,9 +122,8 @@ code{font:inherit;font-weight:600;background:#efe6da;padding:1px 6px;border-radi
 a{color:inherit}
 .foot{margin-top:48px;font-size:.85rem}
 .lb{display:none;position:fixed;inset:0;z-index:10;background:#140c07;animation:fade .2s}.lb:has(.slide:target){display:block}
-.track{display:flex;height:100%;overflow-x:auto;overflow-y:hidden;overscroll-behavior:contain;scroll-snap-type:x mandatory;scroll-behavior:smooth;scrollbar-width:none}.track::-webkit-scrollbar{display:none}
+.track{display:flex;height:100%;overflow-x:auto;overflow-y:hidden;overscroll-behavior:contain;scroll-snap-type:x mandatory;scroll-behavior:smooth;touch-action:pan-x;scrollbar-width:none}.track::-webkit-scrollbar{display:none}
 .slide{position:relative;flex:0 0 100%;height:100%;scroll-snap-align:center;scroll-snap-stop:always;outline:none}
-.slide .bg{position:absolute;inset:0;cursor:zoom-out}
 .slide img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none}
 .slide .x,.slide .nav,.slide .dl,.slide .count{position:absolute;z-index:1;color:#fff;text-decoration:none;background:rgba(20,12,7,.62);border-radius:99px;line-height:1}
 .slide .x{top:12px;right:12px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-size:1.6rem}
@@ -143,7 +188,7 @@ export function renderPack(token: string, title: string, c: PackContent, sent = 
       const base = `/c/${token}/ad/${i + 1}`;
       const prev = i > 0 ? `<a class="nav prev" href="#view-${i}" aria-label="Previous ad">&#8249;</a>` : "";
       const next = i < n - 1 ? `<a class="nav next" href="#view-${i + 2}" aria-label="Next ad">&#8250;</a>` : "";
-      return `<div class="slide" id="view-${i + 1}" role="dialog" aria-modal="true" aria-label="Ad ${i + 1} of ${n}, full size" tabindex="-1"><a class="bg" href="#ad-${i + 1}" aria-label="Close" tabindex="-1"></a><img src="${base}.jpg" alt="${esc(a.headline)}" loading="lazy"><a class="x" href="#ad-${i + 1}" aria-label="Close">&times;</a>${n > 1 ? `<span class="count">${i + 1} / ${n}</span>` : ""}${prev}${next}<a class="dl" href="${base}.jpg" download="${esc(a.name)}.jpg">Download JPEG</a></div>`;
+      return `<div class="slide" id="view-${i + 1}" role="dialog" aria-modal="true" aria-label="Ad ${i + 1} of ${n}, full size" tabindex="-1"><img src="${base}.jpg" alt="${esc(a.headline)}" loading="lazy"><a class="x" href="#ad-${i + 1}" aria-label="Close">&times;</a>${n > 1 ? `<span class="count">${i + 1} / ${n}</span>` : ""}${prev}${next}<a class="dl" href="${base}.jpg" download="${esc(a.name)}.jpg">Download JPEG</a></div>`;
     })
     .join("");
   // One card per number, not a table: a table is too narrow on a phone and breaks the numbers.
@@ -165,7 +210,7 @@ export function renderPack(token: string, title: string, c: PackContent, sent = 
 <h2 style="margin-top:32px">Launch plan</h2><ul class="plan">${sentences(c.launchPlan).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>${c.healthNote ? `<p>${esc(c.healthNote)}</p>` : ""}${facts}
 <h2 id="comments">Tell us what you think</h2>${sent ? '<p class="ok">Thank you. We got your comment.</p>' : ""}<form class="cm" method="post" action="/c/${token}/comment"><label for="cm-ad">About</label><select id="cm-ad" name="ad"><option value="">The whole pack</option>${c.ads.map((a, i) => `<option value="${i + 1}">Ad ${i + 1}: ${esc(a.headline)}</option>`).join("")}</select><label for="cm-body">Your comment</label><textarea id="cm-body" name="body" required maxlength="${COMMENT_MAX}"></textarea><button type="submit">Send comment</button></form>
 <h2 id="results">Send us your results</h2><p class="muted">After your ads run, send what Meta Ads Manager shows: screenshots (PNG, JPG or WebP), a CSV file or an Excel file (.xlsx). It shows each ad name with its impressions and clicks. You can choose many files at once.</p><p class="muted">Using Google Sheets? Open the sheet, then File, Download, Microsoft Excel (.xlsx).</p><p class="muted">Up to ${FILES_PER_SEND} files at a time. Each file under ${MB(UPLOAD_MAX_BYTES)} MB.</p>${uploaded ? `<p class="ok">Thank you. We got ${uploaded === 1 ? "your file" : `${uploaded} files`}.</p>` : ""}<form class="cm" id="up-form" method="post" enctype="multipart/form-data" action="/c/${token}/upload"><label for="up-file">Your files</label><div class="drop" id="up-drop"><input id="up-file" type="file" name="file" multiple required accept="image/png,image/jpeg,image/webp,.csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"><p class="muted">On a computer, you can also drop files here.</p></div><ul class="ups" id="up-list" aria-live="polite"></ul><p id="up-msg" class="muted" aria-live="polite"></p><button type="submit" id="up-send">Send files</button></form>${received.length ? `<h3 class="got">Files we received</h3><ul class="ups got" id="up-got">${received.map((r) => `<li><span>${esc(r.name)}</span><span class="muted">${esc(sgTime(r.at))}</span></li>`).join("")}</ul>` : ""}<script>${UPLOAD_JS}</script>
-<p class="foot muted">This page is private. Only people with this link can see it.</p><div class="lb" aria-label="Ads, full size"><div class="track">${slides}</div></div>
+<p class="foot muted">This page is private. Only people with this link can see it.</p><div class="lb" aria-label="Ads, full size"><div class="track">${slides}</div></div><script>${LIGHTBOX_JS}</script>
 </main></body></html>`;
 }
 
@@ -177,7 +222,7 @@ export async function handlePortal(env: Env, token: string, ad: string | undefin
     const since = new Date(Date.now() - RECEIVED_DAYS * 86_400_000).toISOString();
     const rows = await env.DB.prepare("SELECT file_name, created_at FROM uploads WHERE pack_id = ? AND created_at > ? ORDER BY created_at DESC, id LIMIT ?").bind(pack.id, since, RECEIVED_MAX).all<{ file_name: string; created_at: string }>();
     const received = rows.results.map((r) => ({ name: r.file_name, at: r.created_at }));
-    return new Response(renderPack(token, pack.title, pack.content, sent, uploaded, received), { headers: { ...PRIVATE, "content-type": "text/html; charset=utf-8", "content-security-policy": pageCsp(await uploadScriptHash()) } });
+    return new Response(renderPack(token, pack.title, pack.content, sent, uploaded, received), { headers: { ...PRIVATE, "content-type": "text/html; charset=utf-8", "content-security-policy": pageCsp(await pageScriptHashes()) } });
   }
   const item = pack.content.ads[Number(ad) - 1];
   if (!item) return new Response("Not found", { status: 404, headers: PRIVATE });
