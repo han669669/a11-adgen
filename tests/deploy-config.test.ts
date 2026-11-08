@@ -19,6 +19,11 @@ describe("wrangler.jsonc keeps the live Worker safe on every deploy", () => {
     expect(config.secrets.required).toEqual(expect.arrayContaining(["FAL_KEY", "EXA_API_KEY"]));
   });
 
+  it("keeps public per-version URLs off", () => {
+    // A deploy turns them on when the line is missing.
+    expect(config.preview_urls).toBe(false);
+  });
+
   it("does not put a secret value or a hash in the file", () => {
     // The names may appear in comments, but never as a key or value. A 64-hex hash must not appear anywhere, comments included.
     expect(JSON.stringify(config)).not.toMatch(/MCP_TOKEN_SHA256|SIGNUP_CODE_SHA256/);
