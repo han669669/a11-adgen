@@ -6,8 +6,9 @@ let png: Uint8Array | undefined;
 
 /** Answers /icon.svg, /icon.png and /favicon.ico (the PNG), or null for any other path. */
 export function iconResponse(path: string): Response | null {
-  const headers = { "cache-control": "public, max-age=86400" };
-  if (path === "/icon.svg") return new Response(ICON_SVG, { headers: { ...headers, "content-type": "image/svg+xml" } });
+  // nosniff stops a browser guessing another type. The CSP stops any script in the SVG if someone opens the file directly.
+  const headers = { "cache-control": "public, max-age=86400", "x-content-type-options": "nosniff" };
+  if (path === "/icon.svg") return new Response(ICON_SVG, { headers: { ...headers, "content-type": "image/svg+xml", "content-security-policy": "default-src 'none'; sandbox" } });
   if (path === "/icon.png" || path === "/favicon.ico") {
     png ??= Uint8Array.from(atob(ICON_PNG_B64), (c) => c.charCodeAt(0));
     return new Response(png, { headers: { ...headers, "content-type": "image/png" } });
