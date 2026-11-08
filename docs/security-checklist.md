@@ -4,7 +4,7 @@ This document uses ASD-STE100 Simplified Technical English with British spelling
 
 Owner rule, 2026-11-08: every change must keep the whole chain secure, and the client and the owner must still be able to do their jobs. The chain is the MCP, sign-in, the Cloudflare account, the GitHub repository and the deploy path. The owner must not have to ask each time. Every agent runs this checklist by default, on every change, and says so in the PR.
 
-This repository is public. Never write an open weakness, a secret, a token, a hash or a private link in it. Report open findings to the owner in chat. Write them here only after they are fixed.
+Treat this repository as public. Never write an open weakness, a secret, a token, a hash or a private link in it. Report open findings to the owner in chat. Write them here only after they are fixed.
 
 ## 1. Every pull request
 
@@ -13,7 +13,7 @@ Answer each line in the PR body ("Security check"). Write "none" when a line doe
 | Check | Pass when |
 |---|---|
 | New route or tool | It checks who is calling (session, OAuth token or bearer) before it does anything. A public route has an unguessable key, a size limit and a rate limit. |
-| Input | Each body has a size limit that is checked before the body is read or stored. Each name or id has a strict pattern. |
+| Input | Reject a declared body size over the limit before reading. Enforce the limit while reading, and before storing. Each name or id has a strict pattern. |
 | Output | Text from a user or a web page is escaped. It is never followed as an instruction. A new page keeps the CSP, `nosniff` and `no-store` headers. |
 | Secrets | No key, token, password, hash or private link is in the diff, the tests, the logs or the PR text. Secrets stay in Cloudflare. |
 | Dependency | A new package has a stated need. `npm audit` shows no new finding. |
@@ -23,7 +23,7 @@ Answer each line in the PR body ("Security check"). Write "none" when a line doe
 
 ## 2. After every deploy
 
-Run these on the live address. Each result is part of the deploy report.
+Run these on the live address for a production deploy. For a preview deploy, run them on the preview address and say so in the deploy report. Each result is part of the deploy report.
 
 | Probe | Expected |
 |---|---|
@@ -73,5 +73,5 @@ The automatic tests cover the posting and upload paths. Run a live write check o
 
 1. Stop. Do not paste a secret into chat.
 2. Tell the owner what you saw and what it could reach.
-3. If a token may have leaked, the owner rolls it in Cloudflare. For the build token, make a new one from the Worker's Settings, Build page. Never roll the old secret.
+3. If a token may have leaked, the owner rotates it in Cloudflare. For the build token, create a new one from the Worker's Settings, Build page. Never reuse the old secret.
 4. Record the fixed incident in `docs/decisions.md`.

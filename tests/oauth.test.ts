@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { hashPassword } from "../worker/auth";
 import type { Env } from "../worker/env";
 import entry from "../worker/entry";
+import { REGISTER_MAX_PER_HOUR } from "../worker/auth";
 import { REGISTRATION_MAX_BYTES, safeNext } from "../worker/oauth";
 import { fakeD1 } from "./helpers/d1";
 
@@ -272,10 +273,25 @@ describe("client registration size limit", () => {
     expect((await env.OAUTH_KV.list({ prefix: "client:" })).keys).toHaveLength(0);
   });
 
-  it("refuses a declared size over the limit without reading the body", async () => {
+  it("refuses a declared size over the limit", async () => {
     const env = await makeEnv();
     const r = await post(env, meta("a"), { "content-length": String(REGISTRATION_MAX_BYTES + 1) });
     expect(r.status).toBe(413);
+  });
+
+  it("limits registrations per hour for the whole Worker, and stores nothing past the limit", async () => {
+    const env = await makeEnv();
+    for (let i = 0; i < REGISTER_MAX_PER_HOUR; i++) expect((await post(env, meta(`App ${i}`))).status).toBe(201);
+    const r = await post(env, meta("One too many"));
+    expect(r.status).toBe(429);
+    expect(r.headers.get("retry-after")).toBe("3600");
+    expect((await env.OAUTH_KV.list({ prefix: "client:" })).keys).toHaveLength(REGISTER_MAX_PER_HOUR);
+  });
+
+  it("does not spend a registration slot on a refused oversize body", async () => {
+    const env = await makeEnv();
+    for (let i = 0; i < 5; i++) expect((await post(env, meta("x".repeat(REGISTRATION_MAX_BYTES + 1)))).status).toBe(413);
+    for (let i = 0; i < REGISTER_MAX_PER_HOUR; i++) expect((await post(env, meta(`App ${i}`))).status).toBe(201);
   });
 
   it("still registers a normal client", async () => {

@@ -1,6 +1,7 @@
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import app, { tokenOk } from "./index";
 import { handleMcp } from "./mcp";
+import { AuthError, reserveRegistration } from "./auth";
 import { MCP_SCOPE, boundRegistration, handleAuthorize, stillAllowed } from "./oauth";
 import type { Env } from "./env";
 import { fontResponse } from "./font";
@@ -68,11 +69,17 @@ function providerFor(env: Env): OAuthProvider<Env> {
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    // Open client registration: keep the body small, so nobody can fill the KV with large records.
+    // Open client registration: keep the body small and the rate low, so nobody can fill the KV with client records.
     if (request.method === "POST" && new URL(request.url).pathname === "/oauth/register") {
       const bounded = await boundRegistration(request);
       if (bounded instanceof Response) return bounded;
       request = bounded;
+      try {
+        await reserveRegistration(env);
+      } catch (e) {
+        if (!(e instanceof AuthError)) throw e;
+        return Response.json({ error: "temporarily_unavailable", error_description: e.message }, { status: 429, headers: { "retry-after": "3600", "cache-control": "no-store" } });
+      }
     }
     return providerFor(env).fetch(request, env, ctx);
   },

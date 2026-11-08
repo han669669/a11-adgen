@@ -109,7 +109,7 @@ Phase 0 auth: `/mcp` needs a bearer token. The Worker keeps only its SHA-256 (`M
 3. Before you push, run `npm run check` (typecheck, tests, build). All must pass.
 4. Never merge or deploy to production without the owner's yes.
 5. Commits and PR bodies in STE.
-6. **Security gate (owner rule, 2026-11-08).** Run `docs/security-checklist.md` on every change, without being asked. Put a "Security check" line in each PR body. After each deploy, run its live probes and check that the client and the owner can still do their jobs (its section 3). The repository is public: report open weaknesses to the owner in chat, never in a file.
+6. **Security gate (owner rule, 2026-11-08).** Run `docs/security-checklist.md` on every change, without being asked. Put a "Security check" line in each PR body. After each deploy, run its live probes and check that the client and the owner can still do their jobs (its section 3). Treat the repository as public: report open weaknesses to the owner in chat, never in a file.
 
 ---
 

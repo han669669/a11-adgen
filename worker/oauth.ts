@@ -1,6 +1,7 @@
 import { AuthorizationError, CimdFetchError, type ConsentDescription } from "@cloudflare/workers-oauth-provider";
 import { AuthError, allowed, currentUser, login } from "./auth";
 import type { Env } from "./env";
+import { TooLargeError, readCapped } from "./images";
 
 /**
  * The /authorize page of the MCP OAuth login. The library checks the client, the redirect URI and PKCE.
@@ -145,24 +146,12 @@ export const REGISTRATION_MAX_BYTES = 8192;
 export async function boundRegistration(request: Request): Promise<Request | Response> {
   const tooBig = () => Response.json({ error: "invalid_client_metadata", error_description: "Registration body too large" }, { status: 413, headers: { "cache-control": "no-store" } });
   if (Number(request.headers.get("content-length") ?? 0) > REGISTRATION_MAX_BYTES) return tooBig();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  const reader = request.body?.getReader();
-  while (reader) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > REGISTRATION_MAX_BYTES) {
-      await reader.cancel();
-      return tooBig();
-    }
-    chunks.push(value);
-  }
-  const body = new Uint8Array(size);
-  let at = 0;
-  for (const c of chunks) {
-    body.set(c, at);
-    at += c.byteLength;
+  let body: Uint8Array;
+  try {
+    body = await readCapped(request, "The registration", REGISTRATION_MAX_BYTES);
+  } catch (e) {
+    if (e instanceof TooLargeError) return tooBig();
+    throw e;
   }
   return new Request(request.url, { method: request.method, headers: request.headers, body });
 }
