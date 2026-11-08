@@ -1,6 +1,7 @@
 import { AuthorizationError, CimdFetchError, type ConsentDescription } from "@cloudflare/workers-oauth-provider";
 import { AuthError, allowed, currentUser, login } from "./auth";
 import type { Env } from "./env";
+import { TooLargeError, readCapped } from "./images";
 
 /**
  * The /authorize page of the MCP OAuth login. The library checks the client, the redirect URI and PKCE.
@@ -137,3 +138,20 @@ export async function handleAuthorize(request: Request, env: Env): Promise<Respo
 
 /** Re-check the allow-list on every call: an email removed from ALLOWED_EMAILS loses MCP access at once. */
 export const stillAllowed = (env: Env, email: unknown) => typeof email === "string" && allowed(env, email.toLowerCase());
+
+/** Client self-registration (RFC 7591) is open by design, so its body is small and bounded: a real client sends well under 1 KB. */
+export const REGISTRATION_MAX_BYTES = 8192;
+
+/** Read the registration body up to the limit. Returns a rebuilt request, or a 413 if the body is larger. Nothing past the limit is kept. */
+export async function boundRegistration(request: Request): Promise<Request | Response> {
+  const tooBig = () => Response.json({ error: "invalid_client_metadata", error_description: "Registration body too large" }, { status: 413, headers: { "cache-control": "no-store" } });
+  if (Number(request.headers.get("content-length") ?? 0) > REGISTRATION_MAX_BYTES) return tooBig();
+  let body: Uint8Array;
+  try {
+    body = await readCapped(request, "The registration", REGISTRATION_MAX_BYTES);
+  } catch (e) {
+    if (e instanceof TooLargeError) return tooBig();
+    throw e;
+  }
+  return new Request(request.url, { method: request.method, headers: request.headers, body });
+}

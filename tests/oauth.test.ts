@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { hashPassword } from "../worker/auth";
 import type { Env } from "../worker/env";
 import entry from "../worker/entry";
-import { safeNext } from "../worker/oauth";
+import { REGISTER_MAX_PER_HOUR } from "../worker/auth";
+import { REGISTRATION_MAX_BYTES, safeNext } from "../worker/oauth";
 import { fakeD1 } from "./helpers/d1";
 
 const ORIGIN = "https://a11adgen.gamingcomputing.workers.dev";
@@ -256,5 +257,47 @@ describe("safeNext", () => {
     const long = `/authorize?x=${"a".repeat(5000)}`;
     expect(safeNext(long)).toBe(long);
     for (const bad of ["https://evil.example", "//evil.example", "/api/me", "/authorize", "/authorize?\nx", "/authorize?a b", undefined, 5]) expect(safeNext(bad)).toBe("/authorize");
+  });
+});
+
+describe("client registration size limit", () => {
+  const post = (env: Env, body: string, headers: Record<string, string> = {}) =>
+    go(env, "/oauth/register", { method: "POST", headers: { "content-type": "application/json", ...headers }, body });
+  const meta = (name: string) => JSON.stringify({ client_name: name, redirect_uris: [REDIRECT], token_endpoint_auth_method: "none" });
+
+  it("refuses a registration body over the limit and stores nothing", async () => {
+    const env = await makeEnv();
+    const r = await post(env, meta("x".repeat(REGISTRATION_MAX_BYTES + 1)));
+    expect(r.status).toBe(413);
+    expect(((await r.json()) as { error: string }).error).toBe("invalid_client_metadata");
+    expect((await env.OAUTH_KV.list({ prefix: "client:" })).keys).toHaveLength(0);
+  });
+
+  it("refuses a declared size over the limit", async () => {
+    const env = await makeEnv();
+    const r = await post(env, meta("a"), { "content-length": String(REGISTRATION_MAX_BYTES + 1) });
+    expect(r.status).toBe(413);
+  });
+
+  it("limits registrations per hour for the whole Worker, and stores nothing past the limit", async () => {
+    const env = await makeEnv();
+    for (let i = 0; i < REGISTER_MAX_PER_HOUR; i++) expect((await post(env, meta(`App ${i}`))).status).toBe(201);
+    const r = await post(env, meta("One too many"));
+    expect(r.status).toBe(429);
+    expect(r.headers.get("retry-after")).toBe("3600");
+    expect((await env.OAUTH_KV.list({ prefix: "client:" })).keys).toHaveLength(REGISTER_MAX_PER_HOUR);
+  });
+
+  it("does not spend a registration slot on a refused oversize body", async () => {
+    const env = await makeEnv();
+    for (let i = 0; i < 5; i++) expect((await post(env, meta("x".repeat(REGISTRATION_MAX_BYTES + 1)))).status).toBe(413);
+    for (let i = 0; i < REGISTER_MAX_PER_HOUR; i++) expect((await post(env, meta(`App ${i}`))).status).toBe(201);
+  });
+
+  it("still registers a normal client", async () => {
+    const env = await makeEnv();
+    const r = await post(env, meta("Claude"));
+    expect(r.status).toBe(201);
+    expect((await env.OAUTH_KV.list({ prefix: "client:" })).keys).toHaveLength(1);
   });
 });

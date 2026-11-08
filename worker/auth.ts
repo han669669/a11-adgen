@@ -127,19 +127,34 @@ export async function login(env: Env, body: { email?: unknown; password?: unknow
 const SIGNUP_KEY = "~signup";
 
 /**
- * Reserve one try in login_failures, but only while fewer than MAX_FAILURES are active in the window.
+ * Reserve one try in login_failures, but only while fewer than `max` are active in the window (default MAX_FAILURES in FAILURE_WINDOW).
+ * `window` is a SQLite time modifier and must be a constant from this file, never user input.
  * One statement, so parallel tries cannot pass the limit, and a locked-out caller writes nothing.
  * The caller deletes the row when the try succeeds.
  */
-async function reserveAttempt(env: Env, key: string): Promise<number> {
+async function reserveAttempt(env: Env, key: string, max = MAX_FAILURES, window = FAILURE_WINDOW, message = "Too many tries. Wait 15 minutes."): Promise<number> {
   const res = await env.DB.prepare(
     `INSERT INTO login_failures (email, at)
-     SELECT ?, ? WHERE (SELECT COUNT(*) FROM login_failures WHERE email = ? AND at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '${FAILURE_WINDOW}')) < ?`,
+     SELECT ?, ? WHERE (SELECT COUNT(*) FROM login_failures WHERE email = ? AND at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '${window}')) < ?`,
   )
-    .bind(key, new Date().toISOString(), key, MAX_FAILURES)
+    .bind(key, new Date().toISOString(), key, max)
     .run();
-  if (res.meta.changes !== 1) throw new AuthError("Too many tries. Wait 15 minutes.", 429);
+  if (res.meta.changes !== 1) throw new AuthError(message, 429);
   return Number(res.meta.last_row_id);
+}
+
+/** login_failures key for client registrations at /oauth/register (not an email). */
+const REGISTER_KEY = "~register";
+export const REGISTER_MAX_PER_HOUR = 20;
+
+/**
+ * Client registration is open by design, so it is rate limited for the whole Worker: at most REGISTER_MAX_PER_HOUR an hour.
+ * A bot can use the limit up and block new app registrations for an hour. Existing connectors, refresh tokens and the bearer token are not affected.
+ * Throws AuthError 429 over the limit. Rows older than a day are removed.
+ */
+export async function reserveRegistration(env: Env): Promise<void> {
+  await env.DB.prepare("DELETE FROM login_failures WHERE email = ? AND at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day')").bind(REGISTER_KEY).run();
+  await reserveAttempt(env, REGISTER_KEY, REGISTER_MAX_PER_HOUR, "-1 hour", "Too many registrations. Try again later.");
 }
 
 function tokenFrom(request: Request): string | null {
