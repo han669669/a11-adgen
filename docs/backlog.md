@@ -12,7 +12,7 @@ The owner decides what moves out of this list. An agent does not start a backlog
 | Weekly client reminder (Cron job) | The client does not forget to send results. | Backlog, 2026-11-08 |
 | Cron job that checks the canon is healthy | Stops quiet drift in the house recipe. | Backlog, 2026-11-08 |
 | Authentication hardening | Fewer doors to try. | Not now, 2026-11-08 |
-| Connector icon (the a11 logo) | The connector looks finished in the client list. | Pending |
+| Connector icon (the a11 logo) in the claude.ai connector list | Cosmetic only. The server already publishes the logo (`serverInfo.icons`, `/icon.png`, `/favicon.ico`). claude.ai does not read it for custom connectors: it takes a favicon for the last two labels of the host, which is `workers.dev` for us (upstream issue `anthropics/claude-ai-mcp#152`, open on 2026-11-08). A fix needs a custom domain the owner owns, or Anthropic to read `serverInfo.icons`. | Parked, 2026-11-08. Wait for Anthropic. |
 | `/favicon.ico` content type | Small tidy-up. | Pending |
 | A block for the two-finger sideways trackpad swipe on desktop | Avoids a stray back gesture in the app. | Optional |
 | Account-owned build token, when Workers Builds supports it | A build token that does not depend on one user. | Later |

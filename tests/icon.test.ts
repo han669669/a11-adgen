@@ -15,6 +15,15 @@ describe("icon", () => {
     expect(r.headers.get("content-type")).toBe("image/svg+xml");
     expect(await r.text()).toContain("<svg");
   });
+  it("sends nosniff on every icon and a script-blocking CSP on the SVG", () => {
+    for (const path of ["/icon.png", "/favicon.ico", "/icon.svg"]) expect(iconResponse(path)!.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(iconResponse("/icon.svg")!.headers.get("content-security-policy")).toBe("default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    expect(iconResponse("/icon.png")!.headers.get("content-security-policy")).toBeNull();
+  });
+  it("keeps the SVG free of script, links and event handlers", async () => {
+    const svg = await iconResponse("/icon.svg")!.text();
+    expect(svg).not.toMatch(/<script|<foreignObject|<a[\s>]|\son\w+=|href=|javascript:/i);
+  });
   it("answers HEAD with the headers and no body", async () => {
     const { default: entry } = await import("../worker/entry");
     const r = await entry.fetch(new Request("https://x.example/icon.png", { method: "HEAD" }), { PUBLIC_BASE_URL: "https://x.example" } as any, {} as any);
