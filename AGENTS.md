@@ -16,7 +16,7 @@ This document uses ASD-STE100 Simplified Technical English with British spelling
 7. `docs/render-checklist.md`: the owner's picture notes from v1 (writing on props, scale, props, physics, hands, copy). Read it before you write a prompt, pick a draft or send a final.
 8. `docs/security-checklist.md`: the standing security gate. Run it on every change. The owner must not need to ask.
 
-The plan started in a Claude Code session on 2026-11-06 SGT. The plan page (private, owner only): https://claude.ai/artifact/9zyEqrUHpWa5xijAfU18K6. The files in `docs/` are the source of truth. When the page and the files disagree, the files win.
+The plan started in a Claude Code session on 2026-11-06 SGT. The plan page is in the owner's Claude account (private; its link is not kept in this public repo). The files in `docs/` are the source of truth. When the page and the files disagree, the files win.
 
 ---
 
@@ -47,7 +47,7 @@ The business: a11studio.pro sells 16 static ads per month (4 per week) for S$2,8
 | D1 | Claude Code is the only brain. No TheGrid, no other LLM API. | Every thinking step runs in Claude Code through the MCP server. The server never calls an LLM. When a plan limit stops a batch, the batch waits and resumes. |
 | D2 | Least human attention, with one human step. The owner does not pick ideas. Since 07-11-2026 (second change) he picks 1 of the 3 drafts for each idea. | Claude picks the ideas, ranks the drafts blind, then stops and shows the 3 drafts of each idea (chat or the board). The owner picks. Claude runs the finals. `taste_log` keeps what he chose and passed for each idea he picked a draft from, so Claude learns his taste. A pass on all 3 drafts goes in the batch notes. |
 | D3 | No access to client Meta ad accounts (a11 does not manage their ads). | Results come from the client: an Ads Manager screenshot or CSV export. Claude reads it. The learning loop must work without results too. |
-| D4 | Private repo `han669669/a11-adgen`. | |
+| D4 | Public repo `han669669/a11-adgen` (owner, 2026-11-08: public so cubic.dev reviews on its free tier; was private on 2026-11-06). Treat it as public: no secret, token, hash, private link or open weakness in it. | |
 | D5 | Port v1 data (marks, notes, Used ads) when it serves the goals. | Seeds the taste canon, the swipe file and the gold test set. |
 | D6 | Use the Cloudflare `workers.dev` subdomain. | `a11adgen.gamingcomputing.workers.dev`. The account subdomain is `gamingcomputing`. A bare `a11-adgen.workers.dev` is not possible. Owner chose the Worker name `a11adgen` (2026-11-06). Do not change the account subdomain: 3 other Workers use it. |
 | D7 | Secret keys: the owner gives them when you ask. | Ask only at the step that needs the key. Never ask him to paste a key in chat. See section 11. |
