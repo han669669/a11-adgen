@@ -20,7 +20,8 @@ describe("wrangler.jsonc keeps the live Worker safe on every deploy", () => {
   });
 
   it("does not put a secret value or a hash in the file", () => {
-    const text = JSON.stringify(config);
-    expect(text).not.toMatch(/MCP_TOKEN_SHA256|SIGNUP_CODE_SHA256|[0-9a-f]{64}/);
+    // The names may appear in comments, but never as a key or value. A 64-hex hash must not appear anywhere, comments included.
+    expect(JSON.stringify(config)).not.toMatch(/MCP_TOKEN_SHA256|SIGNUP_CODE_SHA256/);
+    expect(readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8")).not.toMatch(/[0-9a-f]{64}/i);
   });
 });
