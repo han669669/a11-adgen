@@ -127,7 +127,8 @@ export async function login(env: Env, body: { email?: unknown; password?: unknow
 const SIGNUP_KEY = "~signup";
 
 /**
- * Reserve one try in login_failures, but only while fewer than MAX_FAILURES are active in the window.
+ * Reserve one try in login_failures, but only while fewer than `max` are active in the window (default MAX_FAILURES in FAILURE_WINDOW).
+ * `window` is a SQLite time modifier and must be a constant from this file, never user input.
  * One statement, so parallel tries cannot pass the limit, and a locked-out caller writes nothing.
  * The caller deletes the row when the try succeeds.
  */
