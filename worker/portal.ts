@@ -72,6 +72,7 @@ code{font:inherit;font-weight:600;background:#efe6da;padding:1px 6px;border-radi
 .facts .what{margin:0 0 4px}.facts .what b{font-weight:700}.facts .q{margin:0 0 6px;font-size:.9rem}.facts .src{display:block;font-size:.85rem;overflow-wrap:anywhere}
 .cm{margin-top:12px;display:grid;gap:10px;max-width:60ch}.cm select,.cm textarea{font:inherit;padding:10px;border:1px solid #e6dccd;border-radius:8px;background:#fff;color:inherit;width:100%}.cm textarea{min-height:120px}.cm button{font:inherit;justify-self:start;padding:9px 16px;border:0;border-radius:8px;background:#2b1d14;color:#fff;font-weight:600;cursor:pointer}.cm input[type=file]{font:inherit;padding:8px;border:1px solid #e6dccd;border-radius:8px;background:#fff;width:100%}.ok{background:#e8f1e4;border-radius:8px;padding:10px 14px;max-width:60ch}
 .drop{border:2px dashed #e6dccd;border-radius:10px;padding:12px;background:#fffdf9}.drop.on{border-color:#2b1d14;background:#f6efe5}.drop p{margin:6px 0 0;font-size:.85rem}.ups{list-style:none;margin:0;padding:0;display:grid;gap:6px}.ups li{display:flex;gap:10px;align-items:center;justify-content:space-between;background:#fff;border:1px solid #e6dccd;border-radius:8px;padding:8px 12px;font-size:.92rem;overflow-wrap:anywhere}.ups li.bad,#up-msg.bad{color:#9b2c1d}.ups li.bad{border-color:#9b2c1d}.cm .ups button{background:transparent;color:inherit;border:1px solid currentColor;padding:4px 10px;font-size:.85rem;min-height:40px;flex:none}.cm button:disabled{opacity:.5;cursor:not-allowed}
+.got{margin:22px 0 8px;font-size:1rem}ul.got{margin:0 0 8px}ul.got li{font-size:.9rem}ul.got .muted{flex:none;font-size:.85rem}
 a{color:inherit}
 .foot{margin-top:48px;font-size:.85rem}
 .lb{display:none;position:fixed;inset:0;z-index:10;background:#140c07;animation:fade .2s}.lb:has(.slide:target){display:block}
@@ -111,7 +112,17 @@ const link = (url: string) => (/^https?:\/\//i.test(url) ? `<a href="${esc(url)}
 const ZOOM = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#2b1d14" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2H14v4.5M6.5 14H2V9.5M14 2L9 7M2 14l5-5"/></svg>`;
 
 /** The pack page for a client. Every value is escaped: the copy can carry text that came from the web. */
-export function renderPack(token: string, title: string, c: PackContent, sent = false, uploaded = 0): string {
+/** What the page lists as received: the name the client sent and when we saved it. Never the file itself. */
+export interface Received {
+  name: string;
+  at: string;
+}
+/** Singapore time, for the client: "8 Nov, 4:41 pm". */
+const sgTime = (iso: string) => new Date(iso).toLocaleString("en-GB", { timeZone: "Asia/Singapore", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
+const RECEIVED_DAYS = 14;
+const RECEIVED_MAX = 20;
+
+export function renderPack(token: string, title: string, c: PackContent, sent = false, uploaded = 0, received: Received[] = []): string {
   const version = /\bv(\d+)$/.exec(title)?.[1];
   const n = c.ads.length;
   const ads = c.ads
@@ -153,7 +164,7 @@ export function renderPack(token: string, title: string, c: PackContent, sent = 
 <ol class="steps"><li>Download the picture.</li><li>Paste the text into Meta Ads Manager.</li><li>Copy the ad name exactly.</li><li>Follow the launch plan below.</li></ol>
 <h2 style="margin-top:32px">Launch plan</h2><ul class="plan">${sentences(c.launchPlan).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>${c.healthNote ? `<p>${esc(c.healthNote)}</p>` : ""}${facts}
 <h2 id="comments">Tell us what you think</h2>${sent ? '<p class="ok">Thank you. We got your comment.</p>' : ""}<form class="cm" method="post" action="/c/${token}/comment"><label for="cm-ad">About</label><select id="cm-ad" name="ad"><option value="">The whole pack</option>${c.ads.map((a, i) => `<option value="${i + 1}">Ad ${i + 1}: ${esc(a.headline)}</option>`).join("")}</select><label for="cm-body">Your comment</label><textarea id="cm-body" name="body" required maxlength="${COMMENT_MAX}"></textarea><button type="submit">Send comment</button></form>
-<h2 id="results">Send us your results</h2><p class="muted">After your ads run, send what Meta Ads Manager shows: screenshots (PNG, JPG or WebP), a CSV file or an Excel file (.xlsx). It shows each ad name with its impressions and clicks. You can choose many files at once.</p><p class="muted">Using Google Sheets? Open the sheet, then File, Download, Microsoft Excel (.xlsx).</p><p class="muted">Up to ${FILES_PER_SEND} files at a time. Each file under ${MB(UPLOAD_MAX_BYTES)} MB.</p>${uploaded ? `<p class="ok">Thank you. We got ${uploaded === 1 ? "your file" : `${uploaded} files`}.</p>` : ""}<form class="cm" id="up-form" method="post" enctype="multipart/form-data" action="/c/${token}/upload"><label for="up-file">Your files</label><div class="drop" id="up-drop"><input id="up-file" type="file" name="file" multiple required accept="image/png,image/jpeg,image/webp,.csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"><p class="muted">On a computer, you can also drop files here.</p></div><ul class="ups" id="up-list" aria-live="polite"></ul><p id="up-msg" class="muted" aria-live="polite"></p><button type="submit" id="up-send">Send files</button></form><script>${UPLOAD_JS}</script>
+<h2 id="results">Send us your results</h2><p class="muted">After your ads run, send what Meta Ads Manager shows: screenshots (PNG, JPG or WebP), a CSV file or an Excel file (.xlsx). It shows each ad name with its impressions and clicks. You can choose many files at once.</p><p class="muted">Using Google Sheets? Open the sheet, then File, Download, Microsoft Excel (.xlsx).</p><p class="muted">Up to ${FILES_PER_SEND} files at a time. Each file under ${MB(UPLOAD_MAX_BYTES)} MB.</p>${uploaded ? `<p class="ok">Thank you. We got ${uploaded === 1 ? "your file" : `${uploaded} files`}.</p>` : ""}<form class="cm" id="up-form" method="post" enctype="multipart/form-data" action="/c/${token}/upload"><label for="up-file">Your files</label><div class="drop" id="up-drop"><input id="up-file" type="file" name="file" multiple required accept="image/png,image/jpeg,image/webp,.csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"><p class="muted">On a computer, you can also drop files here.</p></div><ul class="ups" id="up-list" aria-live="polite"></ul><p id="up-msg" class="muted" aria-live="polite"></p><button type="submit" id="up-send">Send files</button></form>${received.length ? `<h3 class="got">Files we received</h3><ul class="ups got" id="up-got">${received.map((r) => `<li><span>${esc(r.name)}</span><span class="muted">${esc(sgTime(r.at))}</span></li>`).join("")}</ul>` : ""}<script>${UPLOAD_JS}</script>
 <p class="foot muted">This page is private. Only people with this link can see it.</p><div class="lb" aria-label="Ads, full size"><div class="track">${slides}</div></div>
 </main></body></html>`;
 }
@@ -162,7 +173,12 @@ export function renderPack(token: string, title: string, c: PackContent, sent = 
 export async function handlePortal(env: Env, token: string, ad: string | undefined, ext: string | undefined, sent = false, uploaded = 0): Promise<Response> {
   const pack = await packByToken(env, token);
   if (!pack) return new Response("Not found", { status: 404, headers: PRIVATE });
-  if (!ad) return new Response(renderPack(token, pack.title, pack.content, sent, uploaded), { headers: { ...PRIVATE, "content-type": "text/html; charset=utf-8", "content-security-policy": pageCsp(await uploadScriptHash()) } });
+  if (!ad) {
+    const since = new Date(Date.now() - RECEIVED_DAYS * 86_400_000).toISOString();
+    const rows = await env.DB.prepare("SELECT file_name, created_at FROM uploads WHERE pack_id = ? AND created_at > ? ORDER BY created_at DESC, id LIMIT ?").bind(pack.id, since, RECEIVED_MAX).all<{ file_name: string; created_at: string }>();
+    const received = rows.results.map((r) => ({ name: r.file_name, at: r.created_at }));
+    return new Response(renderPack(token, pack.title, pack.content, sent, uploaded, received), { headers: { ...PRIVATE, "content-type": "text/html; charset=utf-8", "content-security-policy": pageCsp(await uploadScriptHash()) } });
+  }
   const item = pack.content.ads[Number(ad) - 1];
   if (!item) return new Response("Not found", { status: 404, headers: PRIVATE });
   const obj = await env.MEDIA.get(item.imageKey);

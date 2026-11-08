@@ -164,6 +164,47 @@ describe("client results upload", () => {
     expect(await page("?uploaded=1")).toContain("We got your file");
   });
 
+  it("lists the files we received on every load of the page: name and Singapore time, newest first, no delete", async () => {
+    const { env, raw } = await makeEnv();
+    const page = async () => (await worker.fetch(new Request(`https://w/c/${TOKEN}`), env)).text();
+    expect(await page()).not.toContain("Files we received");
+    expect((await send(env, new Blob([PNG], { type: "image/png" }), "My shot (1).png")).status).toBe(303);
+    // A refresh with no query still shows it.
+    const html = await page();
+    expect(html).toContain("Files we received");
+    expect(html).toContain("My shot 1.png"); // brackets are removed from names when saved
+    // The saved time is shown in Singapore time (UTC+8).
+    const add = (id: string, name: string, at: string, pack = "11111111-1111-4111-8111-111111111111") =>
+      raw.prepare("INSERT INTO uploads (id, pack_id, r2_key, kind, bytes, file_name, created_at) VALUES (?, ?, 'k', 'image', 1, ?, ?)").run(id, pack, name, at);
+    raw.prepare("DELETE FROM uploads").run();
+    const recent = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+    add("a", "old.png", recent(24 * 15));
+    add("b", "first.png", "2026-11-08T08:41:00.000Z");
+    add("c", "second.png", recent(0));
+    const list = await page();
+    expect(list).not.toContain("old.png");
+    expect(list.indexOf("second.png")).toBeLessThan(list.indexOf("first.png"));
+    expect(list).toContain("8 Nov, 4:41 pm");
+    expect(list).not.toMatch(/Delete|Remove file/);
+  });
+
+  it("the received list holds at most 20 files, escapes names, and shows only this link's files", async () => {
+    const { env, raw } = await makeEnv();
+    const other = "22222222-2222-4222-8222-222222222222";
+    raw.prepare("INSERT INTO packs (id, batch_id, version, token_hash, title, content, created_at) SELECT ?, batch_id, 2, 'x', 'WonGi W45 v2', content, 'n' FROM packs").run(other);
+    const add = (id: string, name: string, at: string, pack = "11111111-1111-4111-8111-111111111111") =>
+      raw.prepare("INSERT INTO uploads (id, pack_id, r2_key, kind, bytes, file_name, created_at) VALUES (?, ?, 'k', 'image', 1, ?, ?)").run(id, pack, name, at);
+    for (let i = 0; i < 25; i++) add(`m${i}`, `shot-${i}.png`, new Date(Date.now() - i * 60_000).toISOString());
+    add("x", "<b>x</b>.png", new Date().toISOString());
+    add("o", "someone-elses.png", new Date().toISOString(), other);
+    const html = await (await worker.fetch(new Request(`https://w/c/${TOKEN}`), env)).text();
+    expect(html.match(/<ul class="ups got" id="up-got">(.*?)<\/ul>/s)![1]!.match(/<li>/g)).toHaveLength(20);
+    expect(html).not.toContain("someone-elses.png");
+    expect(html).not.toContain("<b>x</b>");
+    expect(html).toContain("&lt;b&gt;x&lt;/b&gt;.png");
+    expect(html).not.toContain("shot-24.png");
+  });
+
   it("image_get can show an upload, and gives no public URL for it", async () => {
     const { env } = await makeEnv();
     await send(env, new Blob([PNG]));
