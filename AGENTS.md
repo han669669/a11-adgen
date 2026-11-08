@@ -15,6 +15,7 @@ This document uses ASD-STE100 Simplified Technical English with British spelling
 6. `docs/creative-playbook.md`: the bar for every ad (the option B test), the funnel stages and the batch process. Read it before you write ideas.
 7. `docs/render-checklist.md`: the owner's picture notes from v1 (writing on props, scale, props, physics, hands, copy). Read it before you write a prompt, pick a draft or send a final.
 8. `docs/security-checklist.md`: the standing security gate. Run it on every change. The owner must not need to ask.
+9. `docs/backlog.md`: ideas the owner parked, and ideas the owner declined. Do not start a parked item without the owner's say. Do not suggest a declined item again.
 
 The plan started in a Claude Code session on 2026-11-06 SGT. The plan page is in the owner's Claude account (private; its link is not kept in this public repo). The files in `docs/` are the source of truth. When the page and the files disagree, the files win.
 
