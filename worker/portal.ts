@@ -44,6 +44,7 @@ if(!lb||!track)return;
 var VIEW=/^#view-\\d+$/,pushed=false,y=0,last=null,sx=0,sy=0,mode=0;
 function isOpen(){return VIEW.test(location.hash)}
 function reset(){track.style.transition="";track.style.transform="";track.style.opacity=""}
+function snap(){track.style.transition="transform .2s,opacity .2s";track.style.transform="";track.style.opacity=""}
 function close(){
 if(!isOpen())return;
 if(pushed)history.back();else location.replace(location.pathname+location.search+"#")
@@ -64,19 +65,20 @@ if(Math.abs(window.scrollY-y)>1&&last)window.scrollTo({top:y,left:0,behavior:"in
 if(last){last.focus({preventScroll:true});last=null}
 });
 lb.addEventListener("touchstart",function(e){
-if(e.touches.length!==1){mode=2;return}
+if(e.touches.length!==1){if(mode===1)snap();mode=2;return}
 sx=e.touches[0].clientX;sy=e.touches[0].clientY;mode=0
 },{passive:true});
 lb.addEventListener("touchmove",function(e){
-if(mode===2||e.touches.length!==1){mode=2;return}
+if(mode===2||e.touches.length!==1){if(mode===1)snap();mode=2;return}
 var dx=e.touches[0].clientX-sx,dy=e.touches[0].clientY-sy;
 if(mode===0){if(Math.abs(dx)<10&&Math.abs(dy)<10)return;mode=dy>0&&dy>Math.abs(dx)*1.2?1:2}
 if(mode===1){track.style.transition="none";track.style.transform="translateY("+dy+"px)";track.style.opacity=String(Math.max(.3,1-dy/400))}
 },{passive:true});
 function end(e){
+if(e.touches&&e.touches.length)return;
 var was=mode;mode=0;if(was!==1)return;
 var dy=e.changedTouches&&e.changedTouches.length?e.changedTouches[0].clientY-sy:0;
-if(e.type==="touchend"&&dy>90){close()}else{track.style.transition="transform .2s,opacity .2s";track.style.transform="";track.style.opacity=""}
+if(e.type==="touchend"&&dy>90){close()}else snap()
 }
 lb.addEventListener("touchend",end,{passive:true});
 lb.addEventListener("touchcancel",end,{passive:true});

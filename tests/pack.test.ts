@@ -285,14 +285,10 @@ describe("client portal", () => {
     expect(two).toContain('class="dl"');
   });
 
-  it("the enlarged-view script closes by the x button, Esc and a swipe down, never by touching the picture, and only changes styles", async () => {
+  it("the enlarged-view script has no dangerous calls and loads nothing (what it does is run in tests/lightbox.test.ts)", async () => {
     const { LIGHTBOX_JS } = await import("../worker/portal");
     for (const bad of ["innerHTML", "outerHTML", "document.write", "eval(", "Function(", "fetch(", "XMLHttpRequest", "WebSocket", "sendBeacon", "import(", "localStorage", "cookie", "src="]) expect(LIGHTBOX_JS, bad).not.toContain(bad);
     expect(LIGHTBOX_JS).not.toContain("</script");
-    expect(LIGHTBOX_JS).toContain('"Escape"');
-    expect(LIGHTBOX_JS).toContain("touchmove");
-    expect(LIGHTBOX_JS).toContain(".slide .x");
-    expect(LIGHTBOX_JS).not.toContain(".bg");
   });
 
   it("escapes every value, including copy that carries markup", async () => {
