@@ -17,12 +17,12 @@ describe("icon", () => {
   });
   it("sends nosniff on every icon and a script-blocking CSP on the SVG", () => {
     for (const path of ["/icon.png", "/favicon.ico", "/icon.svg"]) expect(iconResponse(path)!.headers.get("x-content-type-options")).toBe("nosniff");
-    expect(iconResponse("/icon.svg")!.headers.get("content-security-policy")).toBe("default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    expect(iconResponse("/icon.svg")!.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
     expect(iconResponse("/icon.png")!.headers.get("content-security-policy")).toBeNull();
   });
   it("keeps the SVG free of script, links and event handlers", async () => {
     const svg = await iconResponse("/icon.svg")!.text();
-    expect(svg).not.toMatch(/<script|<foreignObject|<a[\s>]|\son\w+=|href=|javascript:/i);
+    expect(svg).not.toMatch(/<script|<foreignObject|<style|<a[\s/>]|\son\w+\s*=|\sstyle\s*=|href=|javascript:/i);
   });
   it("answers HEAD with the headers and no body", async () => {
     const { default: entry } = await import("../worker/entry");
