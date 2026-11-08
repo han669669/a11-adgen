@@ -4,7 +4,7 @@ There is no Cloudflare API token in the session (owner decision). Deploys go thr
 
 ## Automatic deploy (Workers Builds)
 
-Connected on 2026-11-08 (recorded in `docs/decisions.md`). The live Worker `a11adgen` is built and deployed by Cloudflare when a commit lands on `main`. No Cloudflare token is in the session. The manual steps below stay as the fallback. The first automatic deploy is not yet verified: until a row in `docs/decisions.md` says it passed, check every deploy by hand.
+Connected on 2026-11-08 (recorded in `docs/decisions.md`). The live Worker `a11adgen` is built and deployed by Cloudflare when a commit lands on `main`. No Cloudflare token is in the session. The manual steps below stay as the fallback. The first automatic deploy passed on 2026-11-08 (see `docs/decisions.md`). Still check each deploy as listed below.
 
 | Setting | Value | Why |
 |---|---|---|
@@ -20,8 +20,8 @@ Rules:
 
 - `main` needs a pull request and the cubic check. No force push, no deleting `main`. A push to `main` is a production deploy.
 - This path deploys the Worker only. The web app files in R2 `app/` (step 5 below) and D1 migrations (step 3 below) are still manual.
-- After each automatic deploy, check `/api/me` (401), the test portal link (200) and `spend_get` through `/mcp`.
-- Before the first automatic deploy, back up the live `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256` values. Read them in the dashboard (Worker, Settings, Variables and Secrets) and keep a copy in a private note. Do not commit them. The effect of `keep_vars` on these values is verified only after that first deploy.
+- After each automatic deploy, check `/api/me` (401), the test portal link (200) and `spend_get` through `/mcp`. Also read `GET /accounts/{id}/workers/scripts/a11adgen/subdomain`: `previews_enabled` must be `false`.
+- Keep a backup of the live `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256` values in a private note, and refresh it before any config change. Read them in the dashboard (Worker, Settings, Variables and Secrets). Do not commit them. `keep_vars` was verified on 2026-11-08: both values were still on the Worker, unchanged, after the first automatic deploy.
 - Known risk, accepted by the owner on 2026-11-08 (no expiry, and the scope below): the build token has no expiry, and `Workers Scripts: Edit` covers every Worker in this account, not only `a11adgen`. A leaked token could replace the code of any of them. It cannot directly call the zone, KV, R2 or D1 APIs, but replacement code can use the bindings of an affected Worker, including its secrets and data. Cloudflare Builds takes only user tokens today. A token limited to one Worker needs an account-owned token. When Builds supports those, switch to one limited to `a11adgen`, and give it an expiry.
 - Roll back by deploying the last good version in the dashboard (Worker, Deployments), or `PUT` it again with the connector. Plain values set outside the file (`MCP_TOKEN_SHA256`, `SIGNUP_CODE_SHA256`) are not in git. If one is lost, restore it from the backup. It is a hash, not a secret.
 
@@ -38,8 +38,9 @@ The steps below are for the live Worker `a11adgen` (D1 `a11adgen-db`, R2 `a11adg
    - `compatibility_date` `2026-10-20`, `compatibility_flags` `["nodejs_compat"]`;
    - the bindings in `wrangler.jsonc` (including `{ "type": "images", "name": "IMAGES" }` and the KV namespace `OAUTH_KV` = live `a11adgen-oauth` `e29131310aa446489fa715d74e1c35ff`, for `a11adgen` only; a preview deploy uses its own, see the Preview deploy table), plus `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256` as `plain_text` (hashes only; not in `wrangler.jsonc`);
    - `keep_bindings: ["secret_text"]`, so the owner's `FAL_KEY`, `EXA_API_KEY` and `ALLOWED_EMAILS` stay.
+   - After the upload, turn per-version URLs off: `POST /accounts/{id}/workers/scripts/<worker>/subdomain` with `{"enabled": true, "previews_enabled": false}`. A connector upload does not read `preview_urls` from `wrangler.jsonc`.
 5. Web app: `npm run build:app`, then `PUT /admin/app/<path>` on the target Worker (same bearer token) for each file in `dist/app`, `index.html` last. It saves to `app/` in that Worker's bucket, and the Worker serves the app from there. Old hashed files in `app/assets/` can stay; `index.html` points to the new ones.
-6. Smoke test: `spend_get` through `/mcp`, `/api/me` (401 without a session), and one call of each changed tool.
+6. Smoke test: `spend_get` through `/mcp`, `/api/me` (401 without a session), one call of each changed tool, and `previews_enabled` is `false` on the Worker's subdomain setting.
 
 ## One-time assets
 
