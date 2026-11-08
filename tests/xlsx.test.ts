@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { XlsxError, isXlsx, listZip, xlsxToCsv } from "../worker/xlsx";
+import { XlsxError, isXlsx, listZip, newWork, xlsxToCsv } from "../worker/xlsx";
 import { OPENPYXL_XLSX, XLSXWRITER_XLSX } from "./helpers/xlsxFixtures";
 import { fromB64, zip } from "./helpers/zip";
 
@@ -70,15 +70,6 @@ describe("xlsx reader", () => {
     expect(r.sheets[29]).toBe("S30");
   });
 
-  it("the unpacked byte cap covers all the sheets together: a later sheet that does not fit is left out, the first one is an error", async () => {
-    const filler = (n: number) => sheet(row("x") + " ".repeat(n));
-    const ok = await many([{ name: "A", xml: filler(6_000_000) }, { name: "B", xml: filler(6_000_000) }]); // 12 MB in all, over the 10 MB cap
-    const r = await xlsxToCsv(ok);
-    expect(r.sheets).toEqual(["A"]);
-    const bad = await many([{ name: "A", xml: filler(11_000_000) }]);
-    await expect(xlsxToCsv(bad)).rejects.toThrow(XlsxError);
-  });
-
   it("stops a zip bomb: a part that unpacks past the cap is refused, fast and without holding it", async () => {
     const bomb = await zip([{ name: "xl/workbook.xml", data: WORKBOOK }, { name: "xl/_rels/workbook.xml.rels", data: RELS }, { name: "xl/worksheets/sheet1.xml", data: new Uint8Array(60_000_000).fill(32) }]);
     expect(bomb.size).toBeLessThan(200_000); // small on disk, huge unpacked
@@ -114,35 +105,105 @@ describe("xlsx reader", () => {
   });
 
   it("never follows an entity or an include: text stays text", async () => {
-    const f = await book('<row><c t="inlineStr"><is><t>&lt;img src=x onerror=alert(1)&gt; &#x41;&#66; &bogus; &#99999999999;</t></is></c></row>', [{ name: "xl/sharedStrings.xml", data: '<!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><sst><si><t>&e;</t></si></sst>' }]);
-    expect((await xlsxToCsv(f)).csv).toBe("<img src=x onerror=alert(1)> AB &bogus; \n");
+    const f = await book(
+      '<row><c t="inlineStr"><is><t>&lt;img src=x onerror=alert(1)&gt; &#x41;&#66; &bogus; &#99999999999;</t></is></c><c t="s"><v>0</v></c><c t="s"><v>1</v></c></row>',
+      [{ name: "xl/sharedStrings.xml", data: '<!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><sst><si><t>&e;</t></si><si><t>&xi;<xi:include href="file:///etc/passwd"/></t></si></sst>' }],
+    );
+    // The entity stays the text "&e;", and the include stays text too (quoted): nothing from /etc/passwd is read.
+    const csv = (await xlsxToCsv(f)).csv;
+    expect(csv).toBe('<img src=x onerror=alert(1)> AB &bogus; ,&e;,"&xi;<xi:include href=""file:///etc/passwd""/>"\n');
+    expect(csv).not.toContain("root:");
   });
 
-  it("takes linear time on hostile XML (unclosed tags, nested tags, long runs): a client cannot hang a request", async () => {
-    const hostile = [
+  const zipOf = (xml: string, extra: { name: string; data: string }[] = []) => zip([{ name: "xl/workbook.xml", data: WORKBOOK }, { name: "xl/_rels/workbook.xml.rels", data: RELS }, { name: "xl/worksheets/sheet1.xml", data: xml }, ...extra]);
+
+  it("takes linear time on hostile XML (unclosed tags, nested tags, long runs) and refuses it: a client cannot hang a request", async () => {
+    const malformed = [
       "<sheetData><row>" + "<c ".repeat(1_500_000) + "</row></sheetData>",
       "<sheetData>" + "<row ".repeat(1_000_000),
       "<sheetData>" + "<row><c>".repeat(500_000),
       '<sheetData><row><c t="inlineStr"><is>' + "<rPh>".repeat(1_000_000) + "</is></c></row></sheetData>",
-      "<sheetData>" + '<row><c r="XFD1"><v>1</v></c></row>'.repeat(100_000) + "</sheetData>",
+      "<sheetData>" + '<row><c r="XFD1"><v>1</v></c></row>'.repeat(100_000) + "</sheetData>", // every cell is far to the right: nothing to read
     ];
-    for (const xml of hostile) {
-      const z = await zip([{ name: "xl/workbook.xml", data: WORKBOOK }, { name: "xl/_rels/workbook.xml.rels", data: RELS }, { name: "xl/worksheets/sheet1.xml", data: xml }]);
+    for (const xml of malformed) {
+      const z = await zipOf(xml);
       const t = Date.now();
-      await xlsxToCsv(z).catch((e) => expect(e).toBeInstanceOf(XlsxError));
+      await expect(xlsxToCsv(z)).rejects.toBeInstanceOf(XlsxError);
       expect(Date.now() - t).toBeLessThan(3000);
     }
-    // A hostile styles part and shared strings part too.
-    const z = await zip([
-      { name: "xl/workbook.xml", data: WORKBOOK },
-      { name: "xl/_rels/workbook.xml.rels", data: RELS },
-      { name: "xl/worksheets/sheet1.xml", data: sheet('<row><c t="s"><v>0</v></c></row>') },
-      { name: "xl/styles.xml", data: "<numFmt ".repeat(120_000) + "<cellXfs " + "<xf ".repeat(100_000) },
-      { name: "xl/sharedStrings.xml", data: "<si>".repeat(400_000) },
-    ]);
+    // A valid sheet with many rows is read, in good time.
+    const big = await zipOf("<sheetData>" + '<row><c r="A1" t="inlineStr"><is><t>x</t></is></c></row>'.repeat(100_000) + "</sheetData>");
     const t = Date.now();
-    await xlsxToCsv(z).catch((e) => expect(e).toBeInstanceOf(XlsxError));
+    expect((await xlsxToCsv(big)).csv.split("\n")).toHaveLength(100_001);
     expect(Date.now() - t).toBeLessThan(3000);
+    // A hostile styles part and shared strings part too.
+    for (const extra of [[{ name: "xl/styles.xml", data: "<numFmt ".repeat(120_000) + "<cellXfs " + "<xf ".repeat(100_000) }], [{ name: "xl/sharedStrings.xml", data: "<si>".repeat(400_000) }]]) {
+      const z = await zipOf('<sheetData><row><c t="s"><v>0</v></c></row></sheetData>', extra);
+      const t2 = Date.now();
+      await expect(xlsxToCsv(z)).rejects.toBeInstanceOf(XlsxError);
+      expect(Date.now() - t2).toBeLessThan(3000);
+    }
+  });
+
+  it("refuses a cut-off sheet instead of giving a part of a report", async () => {
+    const f = await zipOf('<sheetData><row><c t="inlineStr"><is><t>good</t></is></c></row><row><c t="inlineStr"><is><t>cut off here');
+    await expect(xlsxToCsv(f)).rejects.toBeInstanceOf(XlsxError);
+  });
+
+  it("leaves out a cell far to the right and never moves it onto another column", async () => {
+    const f = await zipOf('<sheetData><row><c r="A1" t="inlineStr"><is><t>a</t></is></c><c r="CCC1" t="inlineStr"><is><t>far</t></is></c><c r="B1" t="inlineStr"><is><t>b</t></is></c></row></sheetData>');
+    expect((await xlsxToCsv(f)).csv).toBe("a,b\n");
+  });
+
+  it("reads dates in a 1904 workbook from the 1904 start", async () => {
+    const styles = '<styleSheet><cellXfs><xf numFmtId="14"/></cellXfs></styleSheet>';
+    const wb = '<workbook xmlns:r="r"><workbookPr date1904="1"/><sheets><sheet name="Ads" sheetId="1" r:id="rId1"/></sheets></workbook>';
+    const f = await zip([{ name: "xl/workbook.xml", data: wb }, { name: "xl/_rels/workbook.xml.rels", data: RELS }, { name: "xl/styles.xml", data: styles }, { name: "xl/worksheets/sheet1.xml", data: sheet('<row><c r="A1" s="0"><v>0</v></c><c r="B1" s="0"><v>1461</v></c></row>') }]);
+    expect((await xlsxToCsv(f)).csv).toBe("1904-01-01,1908-01-01\n");
+  });
+
+  it("ignores XML comments and reads CDATA as plain text", async () => {
+    const f = await zipOf('<sheetData><row><c t="inlineStr"><is><t>keep</t></is></c><!-- <c t="inlineStr"><is><t>fake</t></is></c> --><c t="inlineStr"><is><t><![CDATA[a<c>&b]]></t></is></c></row></sheetData>');
+    expect((await xlsxToCsv(f)).csv).toBe("keep,a<c>&b\n");
+    await expect(xlsxToCsv(await zipOf("<sheetData><!-- never ended"))).rejects.toBeInstanceOf(XlsxError);
+  });
+
+  it("refuses a part whose real unpacked size is not the size the zip declares", async () => {
+    const f = await zip([{ name: "xl/workbook.xml", data: WORKBOOK }, { name: "xl/_rels/workbook.xml.rels", data: RELS }, { name: "xl/worksheets/sheet1.xml", data: sheet('<row><c t="inlineStr"><is><t>a</t></is></c></row>'), usize: 5 }]);
+    await expect(xlsxToCsv(f)).rejects.toBeInstanceOf(XlsxError);
+  });
+
+  it("quotes a cell that looks like one of the reader's own heading lines, so data cannot fake a sheet", async () => {
+    const f = await many([{ name: "Real", xml: sheet(row("# Sheet: fake")) }, { name: "Two", xml: sheet(row("# Not read: 99 more sheets")) }]);
+    const { csv } = await xlsxToCsv(f);
+    expect(csv.split("\n").filter((l) => l.startsWith("# Sheet:"))).toEqual(["# Sheet: Real", "# Sheet: Two"]);
+    expect(csv).toContain('"# Sheet: fake"');
+    expect(csv.split("\n").some((l) => l.startsWith("# Not read:"))).toBe(false);
+  });
+
+  it("the unpacked byte budget counts every part of the file, shared strings too", async () => {
+    const pad = (n: number) => " ".repeat(n);
+    const f = await zipOf('<sheetData><row><c t="s"><v>0</v></c></row></sheetData>' + pad(4_000_000), [{ name: "xl/sharedStrings.xml", data: "<sst><si><t>a</t></si></sst>" + pad(7_000_000) }]); // 11 MB in all
+    await expect(xlsxToCsv(f)).rejects.toThrow(XlsxError);
+  });
+
+  it("one send has one budget of Excel work: the file that would pass it is refused, and it says so", async () => {
+    const heavy = () => zipOf(sheet(row("v")) + " ".repeat(8_000_000)); // 8 MB unpacked, tiny on disk
+    const work = newWork();
+    expect((await xlsxToCsv(await heavy(), work)).csv).toBe("v\n");
+    expect((await xlsxToCsv(await heavy(), work)).csv).toBe("v\n");
+    await expect(xlsxToCsv(await heavy(), work)).rejects.toThrow(XlsxError); // 8 + 8 + 8 is over the 20 MB of one send
+  });
+
+  it("says in the text what it left out: sheets that did not fit, and rows past the text cap", async () => {
+    const filler = (n: number) => sheet(row("x") + " ".repeat(n));
+    const r = await xlsxToCsv(await many([{ name: "A", xml: filler(6_000_000) }, { name: "B", xml: filler(6_000_000) }]));
+    expect(r.sheets).toEqual(["A"]);
+    expect(r.csv).toBe("x\n# Not read: 1 more sheet (too much data)\n");
+    const line = "<row><c t=\"inlineStr\"><is><t>" + "y".repeat(100) + "</t></is></c></row>";
+    const cut = await xlsxToCsv(await zipOf("<sheetData>" + line.repeat(30_000) + "</sheetData>")); // 3 MB of text
+    expect(cut.csv.endsWith("# Cut: more rows were left out (too long)\n")).toBe(true);
+    expect(cut.csv.length).toBeLessThan(2_100_000);
   });
 
   it("lists entries of a stored zip", async () => {

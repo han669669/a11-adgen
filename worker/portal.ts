@@ -14,9 +14,9 @@ const MB = (n: number) => `${n / 1_000_000}`;
 export const UPLOAD_JS = `(function(){
 var f=document.getElementById("up-form"),i=document.getElementById("up-file"),l=document.getElementById("up-list"),b=document.getElementById("up-send"),z=document.getElementById("up-drop"),m=document.getElementById("up-msg");
 if(!f||!i||!l||!b||!z||!m||!window.DataTransfer)return;
-var FILE=${UPLOAD_MAX_BYTES},TOT=${SEND_MAX_BYTES},N=${FILES_PER_SEND},TYPE=/\\.(png|jpe?g|webp|csv|xlsx)$/i,files=[];
+var FILE=${UPLOAD_MAX_BYTES},TOT=${SEND_MAX_BYTES},N=${FILES_PER_SEND},TYPE=/\\.(png|jpe?g|webp|csv|xlsx)$/i,MIME=/^(image\\/(png|jpeg|webp)|text\\/csv|application\\/vnd\\.openxmlformats-officedocument\\.spreadsheetml\\.sheet)$/,EXT=/\\.[a-z0-9]{1,8}$/i,files=[];
 function mb(n){return n>=1e6?(n/1e6).toFixed(1)+" MB":Math.max(1,Math.round(n/1e3))+" KB"}
-function why(x,k){if(x.size===0)return "Empty file";if(x.size>FILE)return "Too big, over ${MB(UPLOAD_MAX_BYTES)} MB";if(!TYPE.test(x.name))return "Not a supported type";if(k>=N)return "Only "+N+" files at a time";return ""}
+function why(x,k){if(x.size===0)return "Empty file";if(x.size>FILE)return "Too big, over ${MB(UPLOAD_MAX_BYTES)} MB";if(!TYPE.test(x.name)&&!MIME.test(x.type)&&EXT.test(x.name))return "Not a supported type";if(k>=N)return "Only "+N+" files at a time";return ""}
 function sync(){var d=new DataTransfer();files.forEach(function(x){d.items.add(x)});i.files=d.files}
 function draw(){
 l.textContent="";var total=0,bad=0;

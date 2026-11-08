@@ -2,7 +2,7 @@ import { brandBySlug } from "./brand";
 import type { Env } from "./env";
 import { InputError } from "./schema";
 import { packByToken } from "./pack";
-import { XlsxError, isXlsx, xlsxToCsv } from "./xlsx";
+import { type Work, XlsxError, isXlsx, newWork, xlsxToCsv } from "./xlsx";
 
 const now = () => new Date().toISOString();
 
@@ -60,7 +60,7 @@ const TOO_MANY = "That is a lot of files for one day. Please try again tomorrow.
 const TYPES_HELP = "Please send a screenshot (PNG, JPG or WebP), a CSV file or an Excel file (.xlsx).";
 
 /** Check and save one file. A failure of this file never stops the others. */
-async function storeOne(env: Env, pack: { id: string }, file: File, since: string): Promise<FileOutcome> {
+async function storeOne(env: Env, pack: { id: string }, file: File, since: string, work: Work): Promise<FileOutcome> {
   const name = cleanName(file.name);
   const fail = (status: number, message: string, cause?: unknown): FileOutcome => ({ name, ok: false, status, message, cause });
   if (file.size === 0) return fail(400, "This file is empty.");
@@ -75,9 +75,10 @@ async function storeOne(env: Env, pack: { id: string }, file: File, since: strin
   if (kind.xlsx) {
     // The owner's tools read text, so every visible sheet is kept as CSV. The Excel file itself is not stored.
     try {
-      body = new Blob([(await xlsxToCsv(file)).csv], { type: "text/csv" });
+      body = new Blob([(await xlsxToCsv(file, work)).csv], { type: "text/csv" });
     } catch (e) {
       if (!(e instanceof XlsxError)) throw e;
+      if (e.message === "big") return fail(415, "That Excel file has too much data for us to read. Please save it as CSV, or send fewer Excel files at a time.");
       return fail(415, "We could not read that Excel file. Please save it as CSV, or send a screenshot.");
     }
   }
@@ -127,15 +128,22 @@ export async function uploadAdd(env: Env, request: Request, token: string): Prom
   // A browser with no choice sends one empty part with no name: that is "no file".
   const sent = form.getAll("file").filter((f): f is File => f instanceof File && !(f.size === 0 && f.name === ""));
   if (!sent.length) return { ok: false, status: 400, message: "Choose a file first." };
+  // The request length already includes form overhead, so the files themselves are counted here.
+  if (sent.reduce((total, file) => total + file.size, 0) > SEND_MAX_BYTES) return { ok: false, status: 413, message: "That is more than 30 MB in one go. Please send fewer files at a time." };
   const since = new Date(Date.now() - 86_400_000).toISOString();
   const files: FileOutcome[] = [];
+  const work = newWork(); // one budget of Excel work for the whole send
   for (const [n, file] of sent.entries()) {
     if (n >= FILES_PER_SEND) files.push({ name: cleanName(file.name), ok: false, status: 400, message: `Only ${FILES_PER_SEND} files can be sent at a time.` });
-    else files.push(await storeOne(env, pack, file, since).catch((cause): FileOutcome => ({ name: cleanName(file.name), ok: false, status: 500, message: "We could not save this file. Please try again.", cause })));
+    else files.push(await storeOne(env, pack, file, since, work).catch((cause): FileOutcome => ({ name: cleanName(file.name), ok: false, status: 500, message: "We could not save this file. Please try again.", cause })));
   }
-  if (files.some((f) => f.ok)) return { ok: true, files };
+  const fault = files.find((f): f is Extract<FileOutcome, { ok: false }> => !f.ok && f.status === 500);
+  if (files.some((f) => f.ok)) {
+    if (fault) console.error("client upload failed", fault.cause); // the good files are kept, the fault is still logged
+    return { ok: true, files };
+  }
+  if (fault) throw fault.cause; // a real fault, even if an earlier file failed a plain check: let the Worker log it
   const first = files[0] as Extract<FileOutcome, { ok: false }>;
-  if (first.status === 500) throw first.cause; // a real fault: let the Worker log it
   return { ok: false, status: first.status, message: files.length === 1 ? first.message : "None of those files could be saved.", files };
 }
 

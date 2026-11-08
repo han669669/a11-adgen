@@ -13,6 +13,8 @@ const CSV_MAX = 2_000_000;
 const MAX_COLUMNS = 2_000;
 /** The most sheets read from one workbook. */
 const MAX_SHEETS = 30;
+/** Unpacked bytes one send (up to 10 files) may spend on Excel files in all. Work is the CPU cost, and one send must not multiply it by ten. */
+const REQUEST_WORK = 20_000_000;
 
 export class XlsxError extends Error {}
 
@@ -20,6 +22,8 @@ interface ZipEntry {
   name: string;
   method: number;
   size: number;
+  /** The unpacked size the zip declares (checked after unpacking: a short or long part means a damaged or lying file). */
+  usize: number;
   offset: number;
   encrypted: boolean;
 }
@@ -49,7 +53,7 @@ export async function listZip(file: Blob): Promise<Map<string, ZipEntry> | null>
     if (p + 46 > cd.length || cv.getUint32(p, true) !== 0x02014b50) return null;
     const nameLen = cv.getUint16(p + 28, true);
     const name = new TextDecoder().decode(cd.subarray(p + 46, p + 46 + nameLen));
-    out.set(name, { name, method: cv.getUint16(p + 10, true), size: cv.getUint32(p + 20, true), offset: cv.getUint32(p + 42, true), encrypted: (cv.getUint16(p + 8, true) & 1) === 1 });
+    out.set(name, { name, method: cv.getUint16(p + 10, true), size: cv.getUint32(p + 20, true), usize: cv.getUint32(p + 24, true), offset: cv.getUint32(p + 42, true), encrypted: (cv.getUint16(p + 8, true) & 1) === 1 });
     p += 46 + nameLen + cv.getUint16(p + 30, true) + cv.getUint16(p + 32, true);
   }
   return out;
@@ -74,7 +78,8 @@ async function readPart(file: Blob, e: ZipEntry, max = PART_MAX): Promise<string
   const packed = file.slice(start, start + e.size);
   if (e.method === 0) {
     if (e.size > max) throw new XlsxError("big");
-    return new TextDecoder().decode(await packed.arrayBuffer());
+    if (e.size !== e.usize) throw new XlsxError("broken");
+    return plain(new TextDecoder().decode(await packed.arrayBuffer()));
   }
   if (e.method !== 8) throw new XlsxError("broken");
   const reader = packed.stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
@@ -94,13 +99,42 @@ async function readPart(file: Blob, e: ZipEntry, max = PART_MAX): Promise<string
   } catch (err) {
     throw err instanceof XlsxError ? err : new XlsxError("broken");
   }
+  if (total !== e.usize) throw new XlsxError("broken");
   const all = new Uint8Array(total);
   let at = 0;
   for (const c of chunks) {
     all.set(c, at);
     at += c.length;
   }
-  return new TextDecoder().decode(all);
+  return plain(new TextDecoder().decode(all));
+}
+
+/** The XML without comments, and with each CDATA block turned into escaped text, so the tag scan below sees only real elements. One pass. */
+function plain(xml: string): string {
+  if (!xml.includes("<!")) return xml;
+  let out = "";
+  let at = 0;
+  for (;;) {
+    const s = xml.indexOf("<!", at);
+    if (s < 0) return out + xml.slice(at);
+    out += xml.slice(at, s);
+    if (xml.startsWith("<!--", s)) {
+      const e = xml.indexOf("-->", s + 4);
+      if (e < 0) throw new XlsxError("broken");
+      at = e + 3;
+    } else if (xml.startsWith("<![CDATA[", s)) {
+      const e = xml.indexOf("]]>", s + 9);
+      if (e < 0) throw new XlsxError("broken");
+      out += xml.slice(s + 9, e).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      at = e + 3;
+    } else {
+      // <!DOCTYPE ...>: kept as it is. Nothing here expands an entity.
+      const e = xml.indexOf(">", s);
+      if (e < 0) throw new XlsxError("broken");
+      out += xml.slice(s, e + 1);
+      at = e + 1;
+    }
+  }
 }
 
 const unxml = (s: string) =>
@@ -117,7 +151,7 @@ const unxml = (s: string) =>
 const attr = (attrs: string, name: string) => new RegExp(`(?:^|\\s)${name}="([^"]*)"`).exec(attrs)?.[1];
 
 /**
- * One pass over the XML: each element <name ...>body</name> (or <name .../>), in order. It stops at the first element that is never closed.
+ * One pass over the XML: each element <name ...>body</name> (or <name .../>), in order. An element that is never closed is an error: a cut-off file must not give a part of a report.
  * No pattern here scans to the end of the text from every start: that would take quadratic time on a hostile file ("<c <c <c ..."). Every byte is read at most once.
  */
 function* elements(xml: string, name: string, withBody = true): Generator<{ attrs: string; body: string }> {
@@ -134,7 +168,7 @@ function* elements(xml: string, name: string, withBody = true): Generator<{ attr
       continue;
     }
     const end = xml.indexOf(">", s + open.length);
-    if (end < 0) return;
+    if (end < 0) throw new XlsxError("broken");
     const selfClosing = xml.charCodeAt(end - 1) === 47;
     const attrs = xml.slice(s + open.length, selfClosing ? end - 1 : end);
     if (selfClosing || !withBody) {
@@ -143,7 +177,7 @@ function* elements(xml: string, name: string, withBody = true): Generator<{ attr
       continue;
     }
     const stop = xml.indexOf(close, end + 1);
-    if (stop < 0) return;
+    if (stop < 0) throw new XlsxError("broken");
     yield { attrs, body: xml.slice(end + 1, stop) };
     at = stop + close.length;
   }
@@ -165,7 +199,12 @@ function without(xml: string, name: string): string {
 /** All text in a string item or an inline string. Phonetic hints are left out. */
 const textOf = (xml: string) => [...elements(without(xml, "rPh"), "t")].map((t) => unxml(t.body)).join("");
 
-const csvCell = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+/** UTF-8 bytes of a string (the CSV cap counts bytes, not characters). */
+const bytesOf = (s: string) => new TextEncoder().encode(s).byteLength;
+
+/** A cell that starts like one of this reader's own framing lines is quoted, so client data cannot fake a heading or a notice. */
+const FRAMING = /^# (Sheet|Not read|Cut):/;
+const csvCell = (v: string) => (FRAMING.test(v) || /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
 
 const BUILTIN_DATES = new Set([14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47]);
 
@@ -188,8 +227,11 @@ function dateStyles(styles: string): Set<number> {
   return out;
 }
 
-function serialToText(serial: number): string {
-  const d = new Date(Math.round(Date.UTC(1899, 11, 30) + serial * 86_400_000));
+const EPOCH_1900 = Date.UTC(1899, 11, 30);
+const EPOCH_1904 = Date.UTC(1904, 0, 1);
+
+function serialToText(serial: number, epoch: number): string {
+  const d = new Date(Math.round(epoch + serial * 86_400_000));
   if (Number.isNaN(d.getTime())) return String(serial);
   const iso = d.toISOString();
   return Number.isInteger(serial) ? iso.slice(0, 10) : `${iso.slice(0, 10)} ${iso.slice(11, 19)}`;
@@ -215,7 +257,6 @@ async function listSheets(zip: Map<string, ZipEntry>, workbook: string, rels: ()
   }
   const out: { name: string; path: string }[] = [];
   for (const s of elements(workbook, "sheet", false)) {
-    if (out.length >= MAX_SHEETS) break;
     if (/hidden/i.test(attr(s.attrs, "state") ?? "")) continue;
     const rid = attr(s.attrs, "r:id") ?? attr(s.attrs, "id");
     const path = rid && targets.get(rid);
@@ -224,14 +265,15 @@ async function listSheets(zip: Map<string, ZipEntry>, workbook: string, rels: ()
   // No usable link: fall back to the sheet files, in number order.
   if (!out.length) {
     const files = [...zip.keys()].filter((k) => /^xl\/worksheets\/sheet\d+\.xml$/.test(k)).sort((x, y) => Number(/\d+/.exec(x)![0]) - Number(/\d+/.exec(y)![0]));
-    for (const path of files.slice(0, MAX_SHEETS)) out.push({ name: `Sheet${/\d+/.exec(path)![0]}`, path });
+    for (const path of files) out.push({ name: `Sheet${/\d+/.exec(path)![0]}`, path });
   }
   return out;
 }
 
 /** One sheet's rows as CSV lines (formulas give their last saved value, dates give yyyy-mm-dd). Stops at `room` bytes of text. */
-function sheetLines(sheetXml: string, shared: string[], dates: Set<number>, room: number): string[] {
+function sheetLines(sheetXml: string, shared: string[], dates: Set<number>, epoch: number, room: number): { lines: string[]; cut: boolean } {
   const lines: string[] = [];
+  let cut = false;
   let size = 0;
   for (const row of elements(sheetXml, "row")) {
     const cells: string[] = [];
@@ -239,7 +281,8 @@ function sheetLines(sheetXml: string, shared: string[], dates: Set<number>, room
     for (const c of elements(row.body, "c")) {
       const tag = c.attrs;
       const body = c.body;
-      const col = Math.min(MAX_COLUMNS, Math.max(at, attr(tag, "r") ? columnOf(attr(tag, "r")!) : at));
+      const col = Math.max(at, attr(tag, "r") ? columnOf(attr(tag, "r")!) : at);
+      if (col >= MAX_COLUMNS) continue; // far to the right: left out, never moved onto another column
       const v = elements(body, "v").next().value?.body;
       const t = attr(tag, "t");
       let text = "";
@@ -248,7 +291,7 @@ function sheetLines(sheetXml: string, shared: string[], dates: Set<number>, room
         if (t === "s") text = shared[Number(v)] ?? "";
         else if (t === "b") text = v === "1" ? "TRUE" : "FALSE";
         else if (t === "str" || t === "e" || t === "d") text = unxml(v);
-        else if (dates.has(Number(attr(tag, "s") ?? -1)) && Number.isFinite(Number(v))) text = serialToText(Number(v));
+        else if (dates.has(Number(attr(tag, "s") ?? -1)) && Number.isFinite(Number(v))) text = serialToText(Number(v), epoch);
         else text = v;
       }
       while (cells.length < col) cells.push("");
@@ -258,51 +301,75 @@ function sheetLines(sheetXml: string, shared: string[], dates: Set<number>, room
     while (cells.length && cells[cells.length - 1] === "") cells.pop();
     if (!cells.length) continue;
     const line = cells.join(",");
-    size += line.length + 1;
-    if (size > room) break;
+    size += bytesOf(line) + 1;
+    if (size > room) {
+      cut = true;
+      break;
+    }
     lines.push(line);
   }
-  return lines;
+  return { lines, cut };
 }
+
+/** The unpacked bytes one request may spend on Excel files in all (every file also has its own cap). Pass one object to each file of a send. */
+export interface Work {
+  left: number;
+}
+export const newWork = (): Work => ({ left: REQUEST_WORK });
 
 /**
  * Every visible sheet of an .xlsx file as CSV text, in workbook order.
  * When more than one sheet has values, each one starts with a line "# Sheet: <name>". A workbook with one sheet gives plain CSV.
- * Bounds: at most MAX_SHEETS sheets, PART_MAX unpacked bytes in all the sheet files together, CSV_MAX bytes of text in all.
+ * Anything left out is said in the text: a line "# Not read: ..." for sheets, a line "# Cut: ..." for rows.
+ * Bounds: MAX_SHEETS sheets; PART_MAX unpacked bytes for the whole file (every part counts, shared strings too) and the same bytes taken from `work`; CSV_MAX bytes of text.
  */
-export async function xlsxToCsv(file: Blob): Promise<{ csv: string; sheets: string[] }> {
+export async function xlsxToCsv(file: Blob, work: Work = { left: PART_MAX }): Promise<{ csv: string; sheets: string[] }> {
   const zip = await listZip(file);
   if (!zip?.get("xl/workbook.xml")) throw new XlsxError("broken");
-  const part = async (name: string, max?: number) => {
+  let budget = Math.min(PART_MAX, work.left);
+  const part = async (name: string, cap = PART_MAX) => {
     const e = zip.get(name);
-    return e ? readPart(file, e, max) : undefined;
+    if (!e) return undefined;
+    const text = await readPart(file, e, Math.min(cap, budget));
+    budget -= e.usize; // readPart has checked that this is the real unpacked size
+    work.left -= e.usize;
+    return text;
   };
   const workbook = (await part("xl/workbook.xml", META_MAX))!;
-  const sheets = await listSheets(zip, workbook, async () => (await part("xl/_rels/workbook.xml.rels", META_MAX)) ?? "");
-  if (!sheets.length) throw new XlsxError("empty");
+  const all = await listSheets(zip, workbook, async () => (await part("xl/_rels/workbook.xml.rels", META_MAX)) ?? "");
+  if (!all.length) throw new XlsxError("empty");
+  const sheets = all.slice(0, MAX_SHEETS);
+  let skipped = all.length - sheets.length;
   const shared: string[] = [];
   for (const si of elements((await part("xl/sharedStrings.xml")) ?? "", "si")) shared.push(textOf(si.body));
   const dates = dateStyles((await part("xl/styles.xml", META_MAX)) ?? "");
-  const found: { name: string; lines: string[] }[] = [];
-  let budget = PART_MAX;
+  const epoch = /^(1|true)$/i.test(attr(elements(workbook, "workbookPr", false).next().value?.attrs ?? "", "date1904") ?? "") ? EPOCH_1904 : EPOCH_1900;
+  const found: { name: string; lines: string[]; cut: boolean }[] = [];
   let room = CSV_MAX;
-  for (const s of sheets) {
-    if (budget <= 0 || room <= 0) break;
+  for (const [i, s] of sheets.entries()) {
+    if (budget <= 0 || room <= 0) {
+      skipped += sheets.length - i;
+      break;
+    }
     let xml: string;
     try {
-      xml = (await part(s.path, budget))!;
+      xml = (await part(s.path))!;
     } catch (err) {
-      // A later sheet that is too big is left out. The first one is an error: nothing could be read.
-      if (found.length && err instanceof XlsxError && err.message === "big") break;
+      // A later sheet that does not fit is left out and said so. If nothing was read yet the file is refused.
+      if (found.length && err instanceof XlsxError && err.message === "big") {
+        skipped += sheets.length - i;
+        break;
+      }
       throw err;
     }
-    budget -= xml.length;
-    const lines = sheetLines(xml, shared, dates, room);
+    const { lines, cut } = sheetLines(xml, shared, dates, epoch, room);
     if (!lines.length) continue;
-    room -= lines.reduce((n, l) => n + l.length + 1, 0);
-    found.push({ name: headingName(s.name), lines });
+    room -= lines.reduce((n, l) => n + bytesOf(l) + 1, 0);
+    found.push({ name: headingName(s.name), lines, cut });
   }
   if (!found.length) throw new XlsxError("empty");
-  const csv = found.length === 1 ? found[0]!.lines.join("\n") + "\n" : found.map((f) => `# Sheet: ${f.name}\n${f.lines.join("\n")}\n`).join("\n");
+  const body = (f: (typeof found)[number]) => f.lines.join("\n") + "\n" + (f.cut ? "# Cut: more rows were left out (too long)\n" : "");
+  let csv = found.length === 1 ? body(found[0]!) : found.map((f) => `# Sheet: ${f.name}\n${body(f)}`).join("\n");
+  if (skipped) csv += `# Not read: ${skipped} more sheet${skipped === 1 ? "" : "s"} (too much data)\n`;
   return { csv, sheets: found.map((f) => f.name) };
 }

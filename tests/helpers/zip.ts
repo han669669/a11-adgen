@@ -1,5 +1,5 @@
 /** A small zip writer for tests (CRC is not checked by the reader). method 0 = stored, 8 = deflate. */
-export async function zip(entries: { name: string; data: Uint8Array | string; method?: 0 | 8; flags?: number }[]): Promise<Blob> {
+export async function zip(entries: { name: string; data: Uint8Array | string; method?: 0 | 8; flags?: number; usize?: number }[]): Promise<Blob> {
   const parts: Uint8Array[] = [];
   const central: Uint8Array[] = [];
   let at = 0;
@@ -19,7 +19,7 @@ export async function zip(entries: { name: string; data: Uint8Array | string; me
     cen.setUint16(8, e.flags ?? 0, true);
     cen.setUint16(10, method, true);
     cen.setUint32(20, packed.length, true);
-    cen.setUint32(24, raw.length, true);
+    cen.setUint32(24, e.usize ?? raw.length, true);
     cen.setUint16(28, name.length, true);
     cen.setUint32(42, at, true);
     parts.push(new Uint8Array(local.buffer), name, packed);

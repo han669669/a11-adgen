@@ -51,7 +51,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | 9 | Draft pick | HAN | Claude stops and shows the 3 drafts of each idea (chat or the board), with no rank. The owner picks 1 per idea, or none (D2, second change, 07-11-2026). Claude saves his pick with his words (`picks_save`) and starts the finals (`final_render`). |
 | 10 | Final | PAID fal | `edit`, `quality: high`, 1536x1920, with the chosen draft as a reference so the layout stays. Claude checks the final once. |
 | 11 | Pack | CODE, CLAUDE | Build the deliverable (§5). Publish the client link. |
-| 12 | Results | CLIENT, CLAUDE | The client uploads Ads Manager screenshots, CSV files or Excel files in the portal, up to 10 files at a time, each under 20 MB (a Google Sheet downloads as Excel or CSV; or sends it on WhatsApp; the owner drops it on the board). Claude reads CTR, CPC, spend per ad name. Baseline CTR comes from one screenshot at onboarding (D3). |
+| 12 | Results | CLIENT, CLAUDE | The client uploads Ads Manager screenshots, CSV files or `.xlsx` Excel files in the portal, up to 10 files at a time, each under 20 MB and 30 MB in all (the client downloads a Google Sheet as `.xlsx` or CSV first; or sends the files on WhatsApp and the owner drops them on the board). Claude reads CTR, CPC, spend per ad name. Baseline CTR comes from one screenshot at onboarding (D3). |
 | 13 | Learn | CLAUDE | `/mcp__a11__learn` reads new picks, notes and results. It changes the canon and the swipe file. It records each change with its evidence. The owner can undo any change on the board; no approval is needed (D2). |
 
 ## 4. Learning and self-curation

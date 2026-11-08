@@ -114,7 +114,10 @@ export default {
 
     // Client portal: a pack page and its pictures, behind an unguessable token (no login).
     const portal = /^\/c\/([0-9a-f]{48})(?:\/ad\/(\d{1,2})\.(jpg|png))?$/.exec(url.pathname);
-    if (portal && request.method === "GET") return handlePortal(env, portal[1]!, portal[2], portal[3], url.searchParams.get("sent") === "1", Math.min(FILES_PER_SEND, Math.max(0, Math.floor(Number(url.searchParams.get("uploaded"))) || 0)));
+    if (portal && request.method === "GET") {
+      const uploaded = Number(url.searchParams.get("uploaded"));
+      return handlePortal(env, portal[1]!, portal[2], portal[3], url.searchParams.get("sent") === "1", Number.isFinite(uploaded) ? Math.min(FILES_PER_SEND, Math.max(0, Math.floor(uploaded))) : 0);
+    }
     const commentPost = /^\/c\/([0-9a-f]{48})\/comment$/.exec(url.pathname);
     if (commentPost && request.method === "POST") return handleComment(env, request, commentPost[1]!);
     const uploadPost = /^\/c\/([0-9a-f]{48})\/upload$/.exec(url.pathname);
