@@ -215,7 +215,7 @@ describe("client portal", () => {
     expect(html).not.toMatch(/https?:\/\/fonts/);
     expect(html).toContain("HSA");
     expect(html).toContain("Caramel Pop Barley 70g S$8.90");
-    expect(html.match(/<script/g)).toHaveLength(1); // only the file form helper, allowed by its hash
+    expect(html.match(/<script/g)).toHaveLength(2); // the file form helper and the enlarged-view helper, each allowed by its own hash
     expect(html).not.toMatch(/<script[^>]*\ssrc=/);
     expect(r.headers.get("x-robots-tag")).toMatch(/noindex/);
     expect(r.headers.get("cache-control")).toBe("private, no-store");
@@ -224,6 +224,9 @@ describe("client portal", () => {
     expect(/script-src[^;]*/.exec(r.headers.get("content-security-policy")!)![0]).not.toContain("unsafe");
     const hash = `sha256-${Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(/<script>([\s\S]*?)<\/script>/.exec(html)![1]!))).toString("base64")}`;
     expect(r.headers.get("content-security-policy")).toContain(`script-src '${hash}'`);
+    const lightbox = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][1]![1]!;
+    const hash2 = `sha256-${Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(lightbox))).toString("base64")}`;
+    expect(r.headers.get("content-security-policy")).toContain(`script-src '${hash}' '${hash2}';`);
     expect(r.headers.get("content-security-policy")).toMatch(/font-src 'self'/);
   });
 
@@ -254,7 +257,7 @@ describe("client portal", () => {
     expect(html).toContain('<ul class="plan"><li>Run all ads for 72 hours.</li><li>Pause any ad under 1,000 impressions at S$8.90!</li><li>Send us the CSV.</li><li>Thank you.</li></ul>');
     expect(html).toContain('href="#view-1"');
     expect(html).toContain('id="view-1"');
-    expect(html.match(/<script/g)).toHaveLength(1); // only the file form helper, allowed by its hash
+    expect(html.match(/<script/g)).toHaveLength(2); // the file form helper and the enlarged-view helper, each allowed by its own hash
     expect(html).not.toMatch(/<script[^>]*\ssrc=/);
     expect(sentencesOf(pack.DEFAULT_LAUNCH_PLAN)).toHaveLength(5);
     expect(sentencesOf('He said "go now." Then (really) stop. Next one.')).toEqual(['He said "go now."', "Then (really) stop.", "Next one."]);
@@ -272,6 +275,7 @@ describe("client portal", () => {
     const two = box(2);
     expect(one).toContain('aria-modal="true"');
     expect(one).toContain('class="x" href="#ad-1"');
+    expect(html).not.toContain('class="bg"'); // touching or clicking the picture never closes the enlarged view
     expect(one).toContain('class="nav next" href="#view-2"');
     expect(one).not.toContain("nav prev");
     expect(one).toContain('class="dl"');
@@ -279,6 +283,16 @@ describe("client portal", () => {
     expect(two).not.toContain("nav next");
     expect(two).toContain('class="x" href="#ad-2"');
     expect(two).toContain('class="dl"');
+  });
+
+  it("the enlarged-view script closes by the x button, Esc and a swipe down, never by touching the picture, and only changes styles", async () => {
+    const { LIGHTBOX_JS } = await import("../worker/portal");
+    for (const bad of ["innerHTML", "outerHTML", "document.write", "eval(", "Function(", "fetch(", "XMLHttpRequest", "WebSocket", "sendBeacon", "import(", "localStorage", "cookie", "src="]) expect(LIGHTBOX_JS, bad).not.toContain(bad);
+    expect(LIGHTBOX_JS).not.toContain("</script");
+    expect(LIGHTBOX_JS).toContain('"Escape"');
+    expect(LIGHTBOX_JS).toContain("touchmove");
+    expect(LIGHTBOX_JS).toContain(".slide .x");
+    expect(LIGHTBOX_JS).not.toContain(".bg");
   });
 
   it("escapes every value, including copy that carries markup", async () => {
