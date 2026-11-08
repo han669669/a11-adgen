@@ -95,6 +95,43 @@ describe("client comments", () => {
     expect(sent.headers.get("content-security-policy")).toContain("form-action 'self'");
   });
 
+  it("lists the comments we received after a refresh: full text, ad, Singapore time, newest first, this pack only, nothing deleted", async () => {
+    const { env, raw } = await makeEnv();
+    const html = async () => await (await worker.fetch(new Request(`https://w/c/${TOKEN}`), env)).text();
+    expect(await html()).not.toContain("Comments we received");
+    await post(env, "ad=2&body=" + encodeURIComponent("First line\nSecond <b>line</b> & more"));
+    await post(env, "body=" + encodeURIComponent("Whole pack note"));
+    raw.prepare("UPDATE comments SET created_at = '2026-11-08T08:41:00.000Z' WHERE body LIKE 'First%'").run();
+    raw.prepare("UPDATE comments SET created_at = '2026-11-08T08:50:00.000Z' WHERE body LIKE 'Whole%'").run();
+    const page = await html();
+    expect(page).toContain("Comments we received");
+    expect(page).toContain("Ad 2: H2&lt;b&gt; · 8 Nov, 4:41 pm");
+    expect(page).toContain("The whole pack · 8 Nov, 4:50 pm");
+    expect(page).toContain("First line\nSecond &lt;b&gt;line&lt;/b&gt; &amp; more");
+    expect(page).not.toContain("<b>line</b>");
+    expect(page.indexOf("Whole pack note")).toBeLessThan(page.indexOf("First line"));
+    expect(page).not.toContain("delete");
+    // The list is on the page after a plain refresh too, with no ?sent flag.
+    expect(await html()).toContain("Whole pack note");
+  });
+
+  it("the comments list is cut at 14 days and 20 rows, and never shows another link's comments", async () => {
+    const { env, raw } = await makeEnv();
+    const ins = raw.prepare("INSERT INTO comments (id, pack_id, ad_name, body, created_at) VALUES (?, ?, NULL, ?, ?)");
+    for (let i = 0; i < 25; i++) ins.run(`c${i}`, "p1", `c${String(i).padStart(2, "0")}x`, new Date(Date.now() - (i + 1) * 60_000).toISOString());
+    ins.run("old", "p1", "OLD-ONE", "2020-01-01T00:00:00.000Z");
+    const batchId = (raw.prepare("SELECT batch_id FROM packs WHERE id = 'p1'").get() as { batch_id: string }).batch_id;
+    raw.prepare("INSERT INTO packs (id, batch_id, version, token_hash, title, content, created_at) VALUES ('p2', ?, 2, 'x', 't', ?, 'n')").run(batchId, JSON.stringify({ brand: "B", ads: [], launchPlan: "", factCheck: [], healthNote: null }));
+    ins.run("o1", "p2", "OTHER-LINK-SECRET", new Date().toISOString());
+    const page = await (await worker.fetch(new Request(`https://w/c/${TOKEN}`), env)).text();
+    expect(page).not.toContain("OLD-ONE");
+    expect(page).not.toContain("OTHER-LINK-SECRET");
+    expect(page).toContain("c00x");
+    expect(page).toContain("c19x");
+    expect(page).not.toContain("c20x");
+    expect((page.match(/<li><p class="muted">The whole pack/g) ?? []).length).toBe(20);
+  });
+
   it("the results prompt tells Claude to read the comments as data", () => {
     const text = PROMPTS.find((p) => p.name === "results")!.text({ brand: "won-gi", reportDate: "2026-11-06" });
     expect(text).toContain("comments_get");
