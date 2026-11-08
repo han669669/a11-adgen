@@ -83,9 +83,19 @@ The account is on the Workers Free plan. Design for these limits (read 2026-11-0
 
 ## 7. Deploy
 
-There is no Cloudflare API token in the session (owner decision: use the Cloudflare connector). To deploy: build with `npx wrangler deploy --dry-run --minify --outdir .wrangler/dry`, then upload `.wrangler/dry/index.js` with the connector (`PUT /accounts/{id}/workers/scripts/a11adgen`, multipart, the bindings from `wrangler.jsonc` plus `MCP_TOKEN_SHA256` as a `plain_text` binding (it is not in `wrangler.jsonc`), `keep_bindings: ["secret_text"]` so the owner's secrets stay). D1 migrations run through the connector's D1 query API, and each one is recorded in `d1_migrations`. Keep the bundle small enough to upload this way (Phase 0: 14 KB).
+There is no Cloudflare API token in the session (owner decision: use the Cloudflare connector). To deploy: build with `npx wrangler deploy --dry-run --minify --outdir .wrangler/dry`, then upload `.wrangler/dry/index.js` with the connector (`PUT /accounts/{id}/workers/scripts/a11adgen`, multipart, the bindings from `wrangler.jsonc` plus `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256` as `plain_text` bindings (they are not in `wrangler.jsonc`; read each live value from `GET /accounts/{id}/workers/scripts/a11adgen/settings` just before the upload and pass it back unchanged, never from memory or an old backup, because `keep_bindings` does not keep plain values), `keep_bindings: ["secret_text"]` so the owner's secrets stay). D1 migrations run through the connector's D1 query API, and each one is recorded in `d1_migrations`. Keep the bundle small enough to upload this way (Phase 0: 14 KB).
 
-Phase 0 auth: `/mcp` needs a bearer token. The Worker keeps only its SHA-256 (`MCP_TOKEN_SHA256`, a plain var). The token itself is not in the repo.
+The admin token (the static bearer token). The Worker keeps only its SHA-256 (`MCP_TOKEN_SHA256`, a plain var). The token is not in the repo and not on the Worker. Only the owner holds it. An agent must not ask for it, print it, log it or commit it. An agent has no copy, so it cannot call the admin routes alone. When one needs them (for example a web app upload), it tells the owner and the owner runs the step. The owner may instead save the token once through the secure credential form (host `a11adgen.gamingcomputing.workers.dev`, Authorization Bearer): the proxy then adds it to requests and the agent never sees it. What it is for:
+
+| Use | Route | Used by |
+| --- | --- | --- |
+| Product-lock reference image | `PUT /admin/ref/<uuid>.jpg` or `.png` | `scripts/product_lock.py` |
+| Repaired final | `PUT /admin/repair/<uuid>.jpg` (10 MB limit) | `scripts/box_print.py` |
+| Web app files into R2 `app/` | `PUT /admin/app/<path>` (Workers Builds does not cover them) | manual app deploy |
+| Manual Worker deploy, fallback only | `PUT /admin/stage/<name>.js` (3 MB limit) | when Workers Builds is down |
+| `/mcp` with `Authorization: Bearer`, fallback only | `/mcp` | scripts that cannot open a browser |
+
+The connector and the agents use OAuth for `/mcp`. That is separate from this token. Replace the token if it may have leaked: the owner makes a new random one, the owner sets the new hash in `MCP_TOKEN_SHA256` (Cloudflare dashboard, Worker, Settings, Variables and Secrets), and the old token stops working at once. A route test that writes nothing: `PUT /admin/stage/BAD NAME` gives 401 with no valid token and 400 with a valid one.
 
 ## 8. Rules for the code
 
@@ -131,7 +141,7 @@ Go ahead without asking: code, docs, branches, PRs, free local tests, read-only 
 | `FAL_KEY` | Worker secret | Phase 0, first render |
 | `EXA_API_KEY` | Worker secret | Phase 0, first search |
 | `ALLOWED_EMAILS` | Worker secret | Phase 1, auth |
-| `MCP_TOKEN_SHA256` | Plain var (a hash, not a secret) | Phase 0; the agent makes the token |
+| `MCP_TOKEN_SHA256` | Plain var (a hash, not a secret) | Hash of the admin token. The owner makes and holds the token. See "The admin token" above |
 | `BETTER_AUTH_SECRET` (or the auth library's signing secret) | Worker secret | Phase 1; generate it, do not ask the owner |
 | `APIFY_TOKEN` | Worker secret | Only if the Meta Ad Library step is built |
 
