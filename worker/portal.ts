@@ -1,6 +1,6 @@
 import type { Env } from "./env";
 import { COMMENT_MAX, commentAdd } from "./comments";
-import { uploadAdd } from "./uploads";
+import { FILES_PER_SEND, SEND_MAX_BYTES, UPLOAD_MAX_BYTES, uploadAdd } from "./uploads";
 import { FONT_PATH } from "./font";
 import { packByToken, type PackContent } from "./pack";
 
@@ -8,6 +8,40 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 
 const STAGE: Record<string, string> = { tof: "Top of funnel", mof: "Middle of funnel", bof: "Bottom of funnel" };
 const PAGE_CSP = "default-src 'none'; img-src 'self'; font-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+
+/** The one script on the pack page. It only helps the file form: the list of chosen files, a check before sending, remove, drop and a "sending" state. Without it the form still works. It is allowed by its hash, never by 'unsafe-inline'. */
+const MB = (n: number) => `${n / 1_000_000}`;
+export const UPLOAD_JS = `(function(){
+var f=document.getElementById("up-form"),i=document.getElementById("up-file"),l=document.getElementById("up-list"),b=document.getElementById("up-send"),z=document.getElementById("up-drop"),m=document.getElementById("up-msg");
+if(!f||!i||!l||!b||!z||!m||!window.DataTransfer)return;
+var FILE=${UPLOAD_MAX_BYTES},TOT=${SEND_MAX_BYTES},N=${FILES_PER_SEND},TYPE=/\\.(png|jpe?g|webp|csv|xlsx)$/i,MIME=/^(image\\/(png|jpeg|webp)|text\\/csv|application\\/vnd\\.openxmlformats-officedocument\\.spreadsheetml\\.sheet)$/,EXT=/\\.[^.]+$/,files=[];
+function mb(n){return n>=1e6?(n/1e6).toFixed(1)+" MB":Math.max(1,Math.round(n/1e3))+" KB"}
+function why(x,k){if(x.size===0)return "Empty file";if(x.size>FILE)return "Too big, over ${MB(UPLOAD_MAX_BYTES)} MB";if(!TYPE.test(x.name)&&!MIME.test(x.type)&&EXT.test(x.name))return "Not a supported type";if(k>=N)return "Only "+N+" files at a time";return ""}
+function sync(){var d=new DataTransfer();files.forEach(function(x){d.items.add(x)});i.files=d.files}
+function draw(){
+l.textContent="";var total=0,bad=0;
+files.forEach(function(x,k){total+=x.size;var w=why(x,k);if(w)bad++;var li=document.createElement("li");if(w)li.className="bad";
+var s=document.createElement("span");s.textContent=x.name+" ("+mb(x.size)+")"+(w?": "+w:"");li.appendChild(s);
+var r=document.createElement("button");r.type="button";r.textContent="Remove";r.setAttribute("aria-label","Remove "+x.name);r.onclick=function(){files.splice(k,1);sync();draw()};li.appendChild(r);l.appendChild(li)});
+var over=total>TOT;
+m.textContent=!files.length?"":bad?"Remove the files marked above, then send.":over?"That is "+mb(total)+". Please send up to ${MB(SEND_MAX_BYTES)} MB at a time.":files.length+" file"+(files.length>1?"s":"")+", "+mb(total)+" in all.";
+m.className=bad||over?"bad":"muted";
+b.disabled=!files.length||bad>0||over}
+function key(x){return x.name+"|"+x.size+"|"+x.lastModified}
+function add(list){var seen={};files.forEach(function(x){seen[key(x)]=1});for(var k=0;k<list.length;k++){var x=list[k];if(!seen[key(x)]){seen[key(x)]=1;files.push(x)}}sync();draw()}
+i.addEventListener("change",function(){add(i.files)});
+["dragenter","dragover"].forEach(function(t){z.addEventListener(t,function(e){e.preventDefault();z.classList.add("on")})});
+["dragleave","drop"].forEach(function(t){z.addEventListener(t,function(e){e.preventDefault();z.classList.remove("on")})});
+z.addEventListener("drop",function(e){if(e.dataTransfer&&e.dataTransfer.files)add(e.dataTransfer.files)});
+f.addEventListener("submit",function(){b.disabled=true;b.textContent="Sending. Please keep this page open."});
+window.addEventListener("pageshow",function(){files=[];i.value="";b.textContent="Send files";draw()});
+draw();
+})();`;
+const pageCsp = (scriptHash: string) => PAGE_CSP.replace("style-src", `script-src '${scriptHash}'; style-src`);
+let uploadJsHash: Promise<string> | undefined;
+/** The CSP hash source of UPLOAD_JS: 'sha256-<base64>'. */
+export const uploadScriptHash = () =>
+  (uploadJsHash ??= crypto.subtle.digest("SHA-256", new TextEncoder().encode(UPLOAD_JS)).then((d) => `sha256-${btoa(String.fromCharCode(...new Uint8Array(d)))}`));
 const PRIVATE = {
   "cache-control": "private, no-store",
   "referrer-policy": "no-referrer",
@@ -37,6 +71,7 @@ code{font:inherit;font-weight:600;background:#efe6da;padding:1px 6px;border-radi
 .facts .n{display:inline-block;margin-bottom:6px;padding:1px 10px;border-radius:6px;background:#efe6da;font-size:1.15rem;font-weight:700}
 .facts .what{margin:0 0 4px}.facts .what b{font-weight:700}.facts .q{margin:0 0 6px;font-size:.9rem}.facts .src{display:block;font-size:.85rem;overflow-wrap:anywhere}
 .cm{margin-top:12px;display:grid;gap:10px;max-width:60ch}.cm select,.cm textarea{font:inherit;padding:10px;border:1px solid #e6dccd;border-radius:8px;background:#fff;color:inherit;width:100%}.cm textarea{min-height:120px}.cm button{font:inherit;justify-self:start;padding:9px 16px;border:0;border-radius:8px;background:#2b1d14;color:#fff;font-weight:600;cursor:pointer}.cm input[type=file]{font:inherit;padding:8px;border:1px solid #e6dccd;border-radius:8px;background:#fff;width:100%}.ok{background:#e8f1e4;border-radius:8px;padding:10px 14px;max-width:60ch}
+.drop{border:2px dashed #e6dccd;border-radius:10px;padding:12px;background:#fffdf9}.drop.on{border-color:#2b1d14;background:#f6efe5}.drop p{margin:6px 0 0;font-size:.85rem}.ups{list-style:none;margin:0;padding:0;display:grid;gap:6px}.ups li{display:flex;gap:10px;align-items:center;justify-content:space-between;background:#fff;border:1px solid #e6dccd;border-radius:8px;padding:8px 12px;font-size:.92rem;overflow-wrap:anywhere}.ups li.bad,#up-msg.bad{color:#9b2c1d}.ups li.bad{border-color:#9b2c1d}.cm .ups button{background:transparent;color:inherit;border:1px solid currentColor;padding:4px 10px;font-size:.85rem;min-height:40px;flex:none}.cm button:disabled{opacity:.5;cursor:not-allowed}
 a{color:inherit}
 .foot{margin-top:48px;font-size:.85rem}
 .lb{display:none;position:fixed;inset:0;z-index:10;background:#140c07;animation:fade .2s}.lb:has(.slide:target){display:block}
@@ -76,7 +111,7 @@ const link = (url: string) => (/^https?:\/\//i.test(url) ? `<a href="${esc(url)}
 const ZOOM = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#2b1d14" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2H14v4.5M6.5 14H2V9.5M14 2L9 7M2 14l5-5"/></svg>`;
 
 /** The pack page for a client. Every value is escaped: the copy can carry text that came from the web. */
-export function renderPack(token: string, title: string, c: PackContent, sent = false, uploaded = false): string {
+export function renderPack(token: string, title: string, c: PackContent, sent = false, uploaded = 0): string {
   const version = /\bv(\d+)$/.exec(title)?.[1];
   const n = c.ads.length;
   const ads = c.ads
@@ -118,16 +153,16 @@ export function renderPack(token: string, title: string, c: PackContent, sent = 
 <ol class="steps"><li>Download the picture.</li><li>Paste the text into Meta Ads Manager.</li><li>Copy the ad name exactly.</li><li>Follow the launch plan below.</li></ol>
 <h2 style="margin-top:32px">Launch plan</h2><ul class="plan">${sentences(c.launchPlan).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>${c.healthNote ? `<p>${esc(c.healthNote)}</p>` : ""}${facts}
 <h2 id="comments">Tell us what you think</h2>${sent ? '<p class="ok">Thank you. We got your comment.</p>' : ""}<form class="cm" method="post" action="/c/${token}/comment"><label for="cm-ad">About</label><select id="cm-ad" name="ad"><option value="">The whole pack</option>${c.ads.map((a, i) => `<option value="${i + 1}">Ad ${i + 1}: ${esc(a.headline)}</option>`).join("")}</select><label for="cm-body">Your comment</label><textarea id="cm-body" name="body" required maxlength="${COMMENT_MAX}"></textarea><button type="submit">Send comment</button></form>
-<h2 id="results">Send us your results</h2><p class="muted">After your ads run, send a screenshot from Meta Ads Manager (PNG, JPG or WebP) or a CSV file. It shows each ad name with its impressions and clicks. The file must be under 20 MB.</p>${uploaded ? '<p class="ok">Thank you. We got your file.</p>' : ""}<form class="cm" method="post" enctype="multipart/form-data" action="/c/${token}/upload"><label for="up-file">Your file</label><input id="up-file" type="file" name="file" required accept="image/png,image/jpeg,image/webp,.csv,text/csv"><button type="submit">Send file</button></form>
+<h2 id="results">Send us your results</h2><p class="muted">After your ads run, send what Meta Ads Manager shows: screenshots (PNG, JPG or WebP), a CSV file or an Excel file (.xlsx). It shows each ad name with its impressions and clicks. You can choose many files at once.</p><p class="muted">Using Google Sheets? Open the sheet, then File, Download, Microsoft Excel (.xlsx).</p><p class="muted">Up to ${FILES_PER_SEND} files at a time. Each file under ${MB(UPLOAD_MAX_BYTES)} MB. ${MB(SEND_MAX_BYTES)} MB in all.</p>${uploaded ? `<p class="ok">Thank you. We got ${uploaded === 1 ? "your file" : `${uploaded} files`}.</p>` : ""}<form class="cm" id="up-form" method="post" enctype="multipart/form-data" action="/c/${token}/upload"><label for="up-file">Your files</label><div class="drop" id="up-drop"><input id="up-file" type="file" name="file" multiple required accept="image/png,image/jpeg,image/webp,.csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"><p class="muted">On a computer, you can also drop files here.</p></div><ul class="ups" id="up-list" aria-live="polite"></ul><p id="up-msg" class="muted" aria-live="polite"></p><button type="submit" id="up-send">Send files</button></form><script>${UPLOAD_JS}</script>
 <p class="foot muted">This page is private. Only people with this link can see it.</p><div class="lb" aria-label="Ads, full size"><div class="track">${slides}</div></div>
 </main></body></html>`;
 }
 
 /** GET /c/<token> (the page) and /c/<token>/ad/<n>.jpg|png (the pictures). Unknown or revoked links answer 404. */
-export async function handlePortal(env: Env, token: string, ad: string | undefined, ext: string | undefined, sent = false, uploaded = false): Promise<Response> {
+export async function handlePortal(env: Env, token: string, ad: string | undefined, ext: string | undefined, sent = false, uploaded = 0): Promise<Response> {
   const pack = await packByToken(env, token);
   if (!pack) return new Response("Not found", { status: 404, headers: PRIVATE });
-  if (!ad) return new Response(renderPack(token, pack.title, pack.content, sent, uploaded), { headers: { ...PRIVATE, "content-type": "text/html; charset=utf-8", "content-security-policy": PAGE_CSP } });
+  if (!ad) return new Response(renderPack(token, pack.title, pack.content, sent, uploaded), { headers: { ...PRIVATE, "content-type": "text/html; charset=utf-8", "content-security-policy": pageCsp(await uploadScriptHash()) } });
   const item = pack.content.ads[Number(ad) - 1];
   if (!item) return new Response("Not found", { status: 404, headers: PRIVATE });
   const obj = await env.MEDIA.get(item.imageKey);
@@ -147,10 +182,14 @@ export async function handleComment(env: Env, request: Request, token: string): 
   return new Response(page, { status: r.status, headers: { ...PRIVATE, "content-type": "text/html; charset=utf-8", "content-security-policy": PAGE_CSP } });
 }
 
-/** POST /c/<token>/upload: save the client's results file, then go back to the page. */
+/** POST /c/<token>/upload: save the client's files. All saved: back to the page. Otherwise a short page says which file was not saved and why. */
 export async function handleUpload(env: Env, request: Request, token: string): Promise<Response> {
   const r = await uploadAdd(env, request, token);
-  if (r.ok) return new Response(null, { status: 303, headers: { ...PRIVATE, location: `/c/${token}?uploaded=1#results` } });
-  const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>File not sent</title></head><body style="font:16px/1.6 system-ui,sans-serif;margin:24px"><p>${esc(r.message)}</p>${r.status === 404 ? "" : `<p><a href="/c/${token}#results">Go back</a></p>`}</body></html>`;
-  return new Response(page, { status: r.status, headers: { ...PRIVATE, "content-type": "text/html; charset=utf-8", "content-security-policy": PAGE_CSP } });
+  const files = r.files ?? [];
+  const saved = files.filter((f) => f.ok).length;
+  if (r.ok && saved === files.length) return new Response(null, { status: 303, headers: { ...PRIVATE, location: `/c/${token}?uploaded=${saved}#results` } });
+  const lead = r.ok ? `We saved ${saved} of ${files.length} files. You can send the others again.` : r.message;
+  const list = files.length > 1 ? `<ul>${files.map((f) => `<li>${f.ok ? "Saved" : "Not saved"}: ${esc(f.name)}${f.ok ? "" : `. ${esc(f.message)}`}</li>`).join("")}</ul>` : "";
+  const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${r.ok ? "Some files not sent" : "File not sent"}</title></head><body style="font:16px/1.6 system-ui,sans-serif;margin:24px"><p>${esc(lead)}</p>${list}${r.ok || r.status !== 404 ? `<p><a href="/c/${token}#results">Go back</a></p>` : ""}</body></html>`;
+  return new Response(page, { status: r.ok ? 200 : r.status, headers: { ...PRIVATE, "content-type": "text/html; charset=utf-8", "content-security-policy": PAGE_CSP } });
 }

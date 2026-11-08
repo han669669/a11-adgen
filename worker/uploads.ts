@@ -2,6 +2,7 @@ import { brandBySlug } from "./brand";
 import type { Env } from "./env";
 import { InputError } from "./schema";
 import { packByToken } from "./pack";
+import { type Work, XlsxError, isXlsx, newWork, xlsxToCsv } from "./xlsx";
 
 const now = () => new Date().toISOString();
 
@@ -9,11 +10,16 @@ const now = () => new Date().toISOString();
 export const UPLOAD_MAX_BYTES = 20_000_000;
 /** One pack link takes at most this many files in 24 hours. A leaked link cannot fill the bucket. */
 export const UPLOADS_PER_DAY = 10;
-/** Form fields and boundaries around the file. */
-const FORM_OVERHEAD = 16_384;
+/** The most files one send takes, and the most bytes of files in one send (the form is read into memory, so the total is capped too). */
+export const FILES_PER_SEND = 10;
+export const SEND_MAX_BYTES = 30_000_000;
+/** Form fields and boundaries around the files. */
+const FORM_OVERHEAD = 200_000;
 const CSV_READ_MAX = 100_000;
 
-export type UploadResult = { ok: true } | { ok: false; status: number; message: string };
+export type FileOutcome = { name: string; ok: true } | { name: string; ok: false; status: number; message: string; cause?: unknown };
+/** ok: at least one file was saved. files: one line per file, in the order sent (not set for a refusal of the whole post). */
+export type UploadResult = { ok: true; files: FileOutcome[] } | { ok: false; status: number; message: string; files?: FileOutcome[] };
 
 export const IMAGE_TYPES: { type: string; ext: string; is: (b: Uint8Array) => boolean }[] = [
   { type: "image/png", ext: "png", is: (b) => b.length > 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((v, i) => b[i] === v) },
@@ -24,11 +30,13 @@ export const IMAGE_TYPES: { type: string; ext: string; is: (b: Uint8Array) => bo
 const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const CHUNK = 1_048_576;
 
-/** What the file really is, from its bytes (the browser's type and the file name are not trusted). CSV: valid UTF-8 text with no control characters but tab and new lines, checked in 1 MB pieces so a big file is never held as text. */
-async function sniff(file: Blob): Promise<{ kind: "image" | "csv"; type: string; ext: string } | null> {
+/** What the file really is, from its bytes (the browser's type and the file name are not trusted). An Excel file (.xlsx) is a zip with xl/workbook.xml. CSV: valid UTF-8 text with no control characters but tab and new lines, checked in 1 MB pieces so a big file is never held as text. */
+async function sniff(file: Blob): Promise<{ kind: "image" | "csv"; type: string; ext: string; xlsx?: boolean } | "old-excel" | null> {
   const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
   const img = IMAGE_TYPES.find((t) => t.is(head));
   if (img) return { kind: "image", type: img.type, ext: img.ext };
+  if ([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1].every((v, i) => head[i] === v)) return "old-excel";
+  if (head[0] === 0x50 && head[1] === 0x4b) return (await isXlsx(file)) ? { kind: "csv", type: "text/csv", ext: "csv", xlsx: true } : null;
   const dec = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
   let delimiter = false;
   let newline = false;
@@ -48,43 +56,41 @@ async function sniff(file: Blob): Promise<{ kind: "image" | "csv"; type: string;
 /** A file name safe to show: letters, digits and . _ - only. It is data, never a path. */
 const cleanName = (name: string) => name.replace(/[^A-Za-z0-9._ -]/g, "").trim().slice(-80) || "file";
 
-/** POST /c/<token>/upload (multipart, one field "file"). The token is the secret. A cross-site POST is refused. */
-export async function uploadAdd(env: Env, request: Request, token: string): Promise<UploadResult> {
-  if (request.headers.get("sec-fetch-site") === "cross-site") return { ok: false, status: 403, message: "Not allowed." };
-  const pack = await packByToken(env, token);
-  if (!pack) return { ok: false, status: 404, message: "Not found." };
-  const tooMany = { ok: false as const, status: 429, message: "That is a lot of files for one day. Please try again tomorrow." };
-  const tooBig = { ok: false as const, status: 413, message: "That file is too big. Please send one under 20 MB." };
-  const ct = request.headers.get("content-type") ?? "";
-  if (!/^multipart\/form-data\s*;/i.test(ct)) return { ok: false, status: 400, message: "Choose a file first." };
-  // The length must be declared: the edge ends the body at that length, so the limit holds without reading it into memory first.
-  const length = Number(request.headers.get("content-length"));
-  if (!Number.isInteger(length) || length <= 0) return { ok: false, status: 411, message: "Please use a normal browser to send the file." };
-  if (length > UPLOAD_MAX_BYTES + FORM_OVERHEAD) return tooBig;
-  let form: FormData;
-  try {
-    form = await request.formData();
-  } catch {
-    return { ok: false, status: 400, message: "Choose a file first." };
-  }
-  const file = form.get("file");
-  if (!(file instanceof File) || file.size === 0) return { ok: false, status: 400, message: "Choose a file first." };
-  if (file.size > UPLOAD_MAX_BYTES) return tooBig;
+const TOO_MANY = "That is a lot of files for one day. Please try again tomorrow.";
+const TYPES_HELP = "Please send a screenshot (PNG, JPG or WebP), a CSV file or an Excel file (.xlsx).";
+
+/** Check and save one file. A failure of this file never stops the others. */
+async function storeOne(env: Env, pack: { id: string }, file: File, since: string, work: Work): Promise<FileOutcome> {
+  const name = cleanName(file.name);
+  const fail = (status: number, message: string, cause?: unknown): FileOutcome => ({ name, ok: false, status, message, cause });
+  if (file.size === 0) return fail(400, "This file is empty.");
+  if (file.size > UPLOAD_MAX_BYTES) return fail(413, "That file is too big. Please send one under 20 MB.");
   // Check the quota before any big work (sniff and R2 write). The atomic insert below still decides a race between two requests.
-  const since = new Date(Date.now() - 86_400_000).toISOString();
   const used = await env.DB.prepare("SELECT COUNT(*) AS n FROM uploads WHERE pack_id = ? AND created_at > ?").bind(pack.id, since).first<{ n: number }>();
-  if ((used?.n ?? 0) >= UPLOADS_PER_DAY) return tooMany;
+  if ((used?.n ?? 0) >= UPLOADS_PER_DAY) return fail(429, TOO_MANY);
   const kind = await sniff(file);
-  if (!kind) return { ok: false, status: 415, message: "Please send a screenshot (PNG, JPG or WebP) or a CSV file." };
+  if (kind === "old-excel") return fail(415, "Old Excel files (.xls) are not supported. In Excel choose Save As, then Excel Workbook (.xlsx) or CSV.");
+  if (!kind) return fail(415, TYPES_HELP);
+  let body: Blob = file;
+  if (kind.xlsx) {
+    // The owner's tools read text, so every visible sheet is kept as CSV. The Excel file itself is not stored.
+    try {
+      body = new Blob([(await xlsxToCsv(file, work)).csv], { type: "text/csv" });
+    } catch (e) {
+      if (!(e instanceof XlsxError)) throw e;
+      if (e.message === "big") return fail(415, "That Excel file has too much data for us to read. Please save it as CSV, or send fewer Excel files at a time.");
+      return fail(415, "We could not read that Excel file. Please save it as CSV, or send a screenshot.");
+    }
+  }
   const id = crypto.randomUUID();
   const key = `uploads/${pack.id}/${id}.${kind.ext}`;
-  await env.MEDIA.put(key, file, { httpMetadata: { contentType: kind.type } });
+  await env.MEDIA.put(key, body, { httpMetadata: { contentType: kind.type } });
   // One statement: the count and the insert cannot be split by a second request.
   let r;
   try {
     r = await env.DB.prepare(
       "INSERT INTO uploads (id, pack_id, r2_key, kind, bytes, file_name, created_at) SELECT ?, ?, ?, ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM uploads WHERE pack_id = ? AND created_at > ?) < ?",
-    ).bind(id, pack.id, key, kind.kind, file.size, cleanName(file.name), now(), pack.id, since, UPLOADS_PER_DAY).run();
+    ).bind(id, pack.id, key, kind.kind, body.size, name, now(), pack.id, since, UPLOADS_PER_DAY).run();
   } catch (e) {
     // The write may have committed before the error. Keep the object unless we can prove there is no row.
     try {
@@ -97,9 +103,48 @@ export async function uploadAdd(env: Env, request: Request, token: string): Prom
   }
   if (!r.meta.changes) {
     await env.MEDIA.delete(key); // nothing points to it
-    return tooMany;
+    return fail(429, TOO_MANY);
   }
-  return { ok: true };
+  return { name, ok: true };
+}
+
+/** POST /c/<token>/upload (multipart, one or more fields "file"). The token is the secret. A cross-site POST is refused. */
+export async function uploadAdd(env: Env, request: Request, token: string): Promise<UploadResult> {
+  if (request.headers.get("sec-fetch-site") === "cross-site") return { ok: false, status: 403, message: "Not allowed." };
+  const pack = await packByToken(env, token);
+  if (!pack) return { ok: false, status: 404, message: "Not found." };
+  const ct = request.headers.get("content-type") ?? "";
+  if (!/^multipart\/form-data\s*;/i.test(ct)) return { ok: false, status: 400, message: "Choose a file first." };
+  // The length must be declared: the edge ends the body at that length, so the limit holds without reading it into memory first.
+  const length = Number(request.headers.get("content-length"));
+  if (!Number.isInteger(length) || length <= 0) return { ok: false, status: 411, message: "Please use a normal browser to send the file." };
+  if (length > SEND_MAX_BYTES + FORM_OVERHEAD) return { ok: false, status: 413, message: "That is more than 30 MB in one go. Please send fewer files at a time." };
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    return { ok: false, status: 400, message: "Choose a file first." };
+  }
+  // A browser with no choice sends one empty part with no name: that is "no file".
+  const sent = form.getAll("file").filter((f): f is File => f instanceof File && !(f.size === 0 && f.name === ""));
+  if (!sent.length) return { ok: false, status: 400, message: "Choose a file first." };
+  // The request length already includes form overhead, so the files themselves are counted here.
+  if (sent.reduce((total, file) => total + file.size, 0) > SEND_MAX_BYTES) return { ok: false, status: 413, message: "That is more than 30 MB in one go. Please send fewer files at a time." };
+  const since = new Date(Date.now() - 86_400_000).toISOString();
+  const files: FileOutcome[] = [];
+  const work = newWork(); // one budget of Excel work for the whole send
+  for (const [n, file] of sent.entries()) {
+    if (n >= FILES_PER_SEND) files.push({ name: cleanName(file.name), ok: false, status: 400, message: `Only ${FILES_PER_SEND} files can be sent at a time.` });
+    else files.push(await storeOne(env, pack, file, since, work).catch((cause): FileOutcome => ({ name: cleanName(file.name), ok: false, status: 500, message: "We could not save this file. Please try again.", cause })));
+  }
+  const fault = files.find((f): f is Extract<FileOutcome, { ok: false }> => !f.ok && f.status === 500);
+  if (files.some((f) => f.ok)) {
+    if (fault) console.error("client upload failed", fault.cause); // the good files are kept, the fault is still logged
+    return { ok: true, files };
+  }
+  if (fault) throw fault.cause; // a real fault, even if an earlier file failed a plain check: let the Worker log it
+  const first = files[0] as Extract<FileOutcome, { ok: false }>;
+  return { ok: false, status: first.status, message: files.length === 1 ? first.message : "None of those files could be saved.", files };
 }
 
 interface Row {
@@ -113,7 +158,7 @@ interface Row {
   version: number;
 }
 
-/** The client's uploaded files for a brand, oldest first (the order to read them). A CSV comes as text (the first 100,000 bytes); an image as a key for image_get (a big one is shown reduced). */
+/** The client's uploaded files for a brand, oldest first (the order to read them). A CSV comes as text (the first 100,000 bytes), and so does an Excel file, converted to CSV (all visible sheets, each after a "# Sheet: name" line when there is more than one); an image as a key for image_get (a big one is shown reduced). */
 export async function uploadsGet(env: Env, input: { brand: string; includeDone?: boolean; limit?: number }) {
   const b = await brandBySlug(env, input.brand);
   const rows = await env.DB.prepare(
