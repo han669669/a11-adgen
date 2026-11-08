@@ -475,7 +475,8 @@ describe("client results upload: many files and Excel", () => {
     const html = await page();
     expect(html).toMatch(/<input id="up-file" type="file" name="file" multiple required accept="[^"]*\.xlsx/);
     expect(html).toContain("File, Download, Microsoft Excel (.xlsx)");
-    expect(html).toContain("Up to 10 files at a time. Each file under 20 MB. 30 MB in all.");
+    expect(html).toContain("Up to 10 files at a time. Each file under 20 MB.");
+    expect(html).not.toContain("30 MB in all"); // the total is said only when a send goes over it
     expect(html).not.toContain("Thank you. We got");
     expect(await page("?uploaded=1")).toContain("Thank you. We got your file.");
     expect(await page("?uploaded=3")).toContain("Thank you. We got 3 files.");
