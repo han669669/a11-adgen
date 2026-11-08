@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LIGHTBOX_JS } from "../worker/portal";
 
 // A small fake page. It has no browser, so it checks what the script does with the events it gets, not how a browser draws.
@@ -15,15 +15,16 @@ const target = () => {
   };
 };
 
-function page(initialHash = "") {
+function page(initialHash = "", reduceMotion = false) {
   const doc = target();
   const win = target();
   const lb = target();
   const style: Record<string, string> = {};
-  const track = { style };
+  const lbStyle: Record<string, string> = {};
+  const track = { style, scrollLeft: 400, clientWidth: 400, children: [{ id: "view-1" }, { id: "view-2" }, { id: "view-3" }] };
   const calls: string[] = [];
   const pic = { focus: (o: unknown) => calls.push(`focus ${JSON.stringify(o)}`) };
-  const w = Object.assign(win, { scrollY: 700, scrollTo: (o: { top: number }) => { calls.push(`scrollTo ${o.top}`); w.scrollY = o.top; } });
+  const w = Object.assign(win, { scrollY: 700, innerHeight: 800, ...(reduceMotion ? { matchMedia: () => ({ matches: true }) } : {}), scrollTo: (o: { top: number }) => { calls.push(`scrollTo ${o.top}`); w.scrollY = o.top; } });
   const location = {
     hash: initialHash,
     pathname: "/c/tok",
@@ -35,18 +36,19 @@ function page(initialHash = "") {
     },
   };
   const history = { back() { calls.push("back"); location.hash = ""; win.fire("hashchange"); } };
-  const document = Object.assign(doc, { querySelector: (s: string) => (s === ".lb" ? Object.assign(lb, { querySelector: () => track }) : null) });
+  const document = Object.assign(doc, { querySelector: (s: string) => (s === ".lb" ? Object.assign(lb, { style: lbStyle, querySelector: () => track }) : null) });
   new Function("document", "window", "location", "history", LIGHTBOX_JS)(document, w, location, history);
   const click = (map: Record<string, unknown>) => doc.fire("click", { target: { closest: (sel: string) => map[sel] ?? null } });
   const touch = (type: string, pts: [number, number][], changed = pts) => lb.fire(type, { touches: pts.map(([x, y]) => ({ clientX: x, clientY: y })), changedTouches: changed.map(([x, y]) => ({ clientX: x, clientY: y })) });
   /** What the browser does when a picture link is followed. */
   const openByPicture = () => { click({ "a.pic": pic }); location.hash = "#view-1"; win.fire("hashchange"); };
-  return { doc, win: w, style, calls, pic, location, click, touch, openByPicture };
+  return { doc, win: w, style, lbStyle, track, calls, pic, location, click, touch, openByPicture };
 }
 
 describe("enlarged view script, run against a fake page", () => {
   let p: ReturnType<typeof page>;
-  beforeEach(() => { p = page(); });
+  beforeEach(() => { vi.useFakeTimers(); p = page(); });
+  afterEach(() => { vi.useRealTimers(); });
 
   it("does nothing when the picture or the dark margin is clicked or touched", () => {
     p.openByPicture();
@@ -99,13 +101,103 @@ describe("enlarged view script, run against a fake page", () => {
     }
   });
 
-  it("a swipe down of more than 90 px closes it, and the picture follows the finger", () => {
+  it("a swipe down of more than 90 px slides and fades the view away, then closes it", () => {
     p.openByPicture();
     p.touch("touchstart", [[100, 100]]);
     p.touch("touchmove", [[102, 220]]);
-    expect(p.style.transform).toBe("translateY(120px)");
+    expect(p.style.transform).toContain("translateY(120px)"); // the picture follows the finger
+    expect(p.lbStyle.backgroundColor).toMatch(/^rgba\(20,12,7,0\.[0-9]+\)$/); // the dark backdrop thins out
     p.touch("touchend", [], [[102, 260]]);
+    expect(p.calls).toEqual([]); // not closed yet: the view is still sliding away
+    expect(p.style.opacity).toBe("0");
+    expect(p.lbStyle.backgroundColor).toBe("rgba(20,12,7,0)");
+    expect(p.style.transition).toContain(".22s");
+    vi.advanceTimersByTime(230);
     expect(p.calls[0]).toBe("back");
+    expect(p.style.transform).toBe(""); // put back for the next time it opens
+    expect(p.lbStyle.backgroundColor).toBe("");
+  });
+
+  it("a short but quick flick down also closes it; a slow short drag does not", () => {
+    p.openByPicture();
+    p.touch("touchstart", [[100, 100]]);
+    vi.advanceTimersByTime(20);
+    p.touch("touchmove", [[100, 120]]);
+    vi.advanceTimersByTime(20);
+    p.touch("touchmove", [[100, 150]]); // 50 px in 40 ms
+    p.touch("touchend", [], [[100, 150]]);
+    vi.advanceTimersByTime(230);
+    expect(p.calls[0]).toBe("back");
+    const q = page();
+    q.openByPicture();
+    q.touch("touchstart", [[100, 100]]);
+    vi.advanceTimersByTime(20);
+    q.touch("touchmove", [[100, 120]]);
+    vi.advanceTimersByTime(20);
+    q.touch("touchmove", [[100, 150]]);
+    vi.advanceTimersByTime(400); // the finger rests before it lifts
+    q.touch("touchend", [], [[100, 150]]);
+    vi.advanceTimersByTime(1000);
+    expect(q.calls).toEqual([]);
+  });
+
+  it("with reduced motion it closes at once, with no slide", () => {
+    const d = page("", true);
+    d.openByPicture();
+    d.touch("touchstart", [[100, 100]]);
+    d.touch("touchmove", [[100, 260]]);
+    d.touch("touchend", [], [[100, 260]]);
+    expect(d.calls[0]).toBe("back");
+  });
+
+  it("Esc during the slide away closes once; a touch during it is ignored; a stuck close puts the view back", () => {
+    p.openByPicture();
+    p.touch("touchstart", [[100, 100]]);
+    p.touch("touchmove", [[100, 260]]);
+    p.touch("touchend", [], [[100, 260]]);
+    p.touch("touchstart", [[100, 100]]);
+    p.touch("touchmove", [[100, 200]]);
+    expect(p.style.opacity).toBe("0"); // the new touch did not grab the sliding view
+    p.doc.fire("keydown", { key: "Escape" });
+    vi.advanceTimersByTime(1000);
+    expect(p.calls.filter((c) => c === "back")).toHaveLength(1);
+    // close() that cannot leave the view (the address stays): the view comes back after 0.9 s
+    const d = page();
+    d.openByPicture();
+    (d as unknown as { location: { hash: string } }).location.hash = "#view-1";
+    d.win.fire = () => ({}) as never; // the address never changes, so no hashchange follows
+    d.touch("touchstart", [[100, 100]]);
+    d.touch("touchmove", [[100, 260]]);
+    d.touch("touchend", [], [[100, 260]]);
+    expect(d.style.opacity).toBe("0");
+    vi.advanceTimersByTime(1000);
+    expect(d.style.opacity).toBe("");
+  });
+
+  it("left and right arrow keys move one ad with no slide, like the arrow buttons", () => {
+    p.openByPicture();
+    p.track.scrollLeft = 400; // showing ad 2
+    const right = p.doc.fire("keydown", { key: "ArrowRight" });
+    expect(right.prevented).toBe(true); // the browser's own sliding scroll never starts
+    expect(p.calls).toEqual(["replace #view-3"]);
+    p.track.scrollLeft = 800;
+    p.doc.fire("keydown", { key: "ArrowRight" }); // last ad: nothing further
+    expect(p.calls).toEqual(["replace #view-3"]);
+    const left = p.doc.fire("keydown", { key: "ArrowLeft" });
+    expect(left.prevented).toBe(true);
+    expect(p.calls).toEqual(["replace #view-3", "replace #view-2"]);
+    p.track.scrollLeft = 0;
+    p.doc.fire("keydown", { key: "ArrowLeft" }); // first ad: nothing before it
+    expect(p.calls).toHaveLength(2);
+  });
+
+  it("arrow keys do nothing when the view is closed, or with a modifier key held", () => {
+    const closed = p.doc.fire("keydown", { key: "ArrowRight" });
+    expect(closed.prevented).toBeUndefined(); // the page keeps its normal key behaviour
+    expect(p.calls).toEqual([]);
+    p.openByPicture();
+    for (const m of ["altKey", "ctrlKey", "metaKey", "shiftKey"]) p.doc.fire("keydown", { key: "ArrowRight", [m]: true });
+    expect(p.calls).toEqual([]);
   });
 
   it("a short drag down snaps back and stays open; a swipe across or up never starts the drag", () => {
@@ -128,7 +220,7 @@ describe("enlarged view script, run against a fake page", () => {
     p.openByPicture();
     p.touch("touchstart", [[100, 100]]);
     p.touch("touchmove", [[100, 200]]);
-    expect(p.style.transform).toBe("translateY(100px)");
+    expect(p.style.transform).toContain("translateY(100px)");
     p.touch("touchstart", [[100, 200], [200, 200]]); // the second finger lands
     expect(p.style.transform).toBe("");
     expect(p.style.opacity).toBe("");

@@ -37,17 +37,37 @@ f.addEventListener("submit",function(){b.disabled=true;b.textContent="Sending. P
 window.addEventListener("pageshow",function(){files=[];i.value="";b.textContent="Send files";draw()});
 draw();
 })();`;
-/** The second script on the pack page: how the enlarged view closes. Never by touching the picture. Close with the x button, the Esc key, or (touch) a swipe down from anywhere. Closing goes back to where the page was, never to an ad. It changes classes and styles only, loads nothing and talks to no server. */
+/** The second script on the pack page: how the enlarged view closes. Never by touching the picture. Close with the x button, the Esc key, or (touch) a swipe down from anywhere, which slides and fades the view away. The left and right arrow keys move to the next ad with no slide, like the arrow buttons. Closing goes back to where the page was, never to an ad. It changes classes and styles only, loads nothing and talks to no server. */
 export const LIGHTBOX_JS = `(function(){
 var lb=document.querySelector(".lb"),track=lb&&lb.querySelector(".track");
 if(!lb||!track)return;
-var VIEW=/^#view-\\d+$/,pushed=false,y=0,last=null,sx=0,sy=0,mode=0;
+var VIEW=/^#view-\\d+$/,pushed=false,y=0,last=null,sx=0,sy=0,mode=0,closing=false,lt=0,ly=0,vy=0;
+var EASE="cubic-bezier(.2,.8,.2,1)",BG="rgba(20,12,7,";
 function isOpen(){return VIEW.test(location.hash)}
-function reset(){track.style.transition="";track.style.transform="";track.style.opacity=""}
-function snap(){track.style.transition="transform .2s,opacity .2s";track.style.transform="";track.style.opacity=""}
+function paint(dy){
+var p=Math.min(dy/320,1);
+track.style.transition="none";lb.style.transition="none";
+track.style.transform="translateY("+dy+"px) scale("+(1-p*.08)+")";
+track.style.opacity=String(1-p*.5);
+lb.style.backgroundColor=BG+(1-p*.8)+")"
+}
+function reset(){closing=false;track.style.transition="";track.style.transform="";track.style.opacity="";lb.style.transition="";lb.style.backgroundColor=""}
+function snap(){
+track.style.transition="transform .3s "+EASE+",opacity .3s "+EASE;lb.style.transition="background-color .3s "+EASE;
+track.style.transform="";track.style.opacity="";lb.style.backgroundColor=""
+}
 function close(){
 if(!isOpen())return;
 if(pushed)history.back();else location.replace(location.pathname+location.search+"#")
+}
+function dismiss(dy){
+if(window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches){close();return}
+closing=true;
+var out=Math.max(dy,0)+Math.round((window.innerHeight||800)*.35),ease=".22s cubic-bezier(.4,0,1,1)";
+track.style.transition="transform "+ease+",opacity "+ease;lb.style.transition="background-color .22s linear";
+track.style.transform="translateY("+out+"px) scale(.9)";track.style.opacity="0";lb.style.backgroundColor=BG+"0)";
+setTimeout(close,230);
+setTimeout(function(){if(closing)reset()},900)
 }
 document.addEventListener("click",function(e){
 var t=e.target&&e.target.closest?e.target:null;if(!t)return;
@@ -57,7 +77,14 @@ if(t.closest(".slide .x")){e.preventDefault();close();return}
 var nav=t.closest(".slide .nav");
 if(nav){e.preventDefault();location.replace(nav.hash)}
 });
-document.addEventListener("keydown",function(e){if(e.key==="Escape")close()});
+document.addEventListener("keydown",function(e){
+if(e.key==="Escape"){close();return}
+var d=e.key==="ArrowLeft"?-1:e.key==="ArrowRight"?1:0;
+if(!d||closing||!isOpen()||e.altKey||e.ctrlKey||e.metaKey||e.shiftKey)return;
+e.preventDefault();
+var s=track.children[Math.round(track.scrollLeft/(track.clientWidth||1))+d];
+if(s&&s.id)location.replace("#"+s.id)
+});
 window.addEventListener("hashchange",function(){
 if(isOpen())return;
 pushed=false;reset();
@@ -65,20 +92,24 @@ if(Math.abs(window.scrollY-y)>1&&last)window.scrollTo({top:y,left:0,behavior:"in
 if(last){last.focus({preventScroll:true});last=null}
 });
 lb.addEventListener("touchstart",function(e){
-if(e.touches.length!==1){if(mode===1)snap();mode=2;return}
-sx=e.touches[0].clientX;sy=e.touches[0].clientY;mode=0
+if(closing||e.touches.length!==1){if(mode===1)snap();mode=2;return}
+sx=e.touches[0].clientX;sy=e.touches[0].clientY;mode=0;lt=Date.now();ly=sy;vy=0
 },{passive:true});
 lb.addEventListener("touchmove",function(e){
 if(mode===2||e.touches.length!==1){if(mode===1)snap();mode=2;return}
-var dx=e.touches[0].clientX-sx,dy=e.touches[0].clientY-sy;
+var cy=e.touches[0].clientY,dx=e.touches[0].clientX-sx,dy=cy-sy;
 if(mode===0){if(Math.abs(dx)<10&&Math.abs(dy)<10)return;mode=dy>0&&dy>Math.abs(dx)*1.2?1:2}
-if(mode===1){track.style.transition="none";track.style.transform="translateY("+dy+"px)";track.style.opacity=String(Math.max(.3,1-dy/400))}
+if(mode===1){
+var n=Date.now();if(n-lt>=8){vy=(cy-ly)/(n-lt);lt=n;ly=cy}
+paint(Math.max(dy,0))
+}
 },{passive:true});
 function end(e){
 if(e.touches&&e.touches.length)return;
 var was=mode;mode=0;if(was!==1)return;
 var dy=e.changedTouches&&e.changedTouches.length?e.changedTouches[0].clientY-sy:0;
-if(e.type==="touchend"&&dy>90){close()}else snap()
+if(Date.now()-lt>100)vy=0;
+if(e.type==="touchend"&&(dy>90||(dy>30&&vy>.5)))dismiss(dy);else snap()
 }
 lb.addEventListener("touchend",end,{passive:true});
 lb.addEventListener("touchcancel",end,{passive:true});
