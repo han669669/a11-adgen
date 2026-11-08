@@ -12,9 +12,10 @@ This document uses ASD-STE100 Simplified Technical English with British spelling
 3. `docs/decisions.md`: every owner decision, with the date.
 4. `docs/v1-lessons.md`: what the old tool (`han669669/ai-ad-generator`) taught us.
 5. `docs/taste-seed.md`: the owner's taste, from his marks on v1. This seeds the taste canon.
-6. `docs/creative-playbook.md`: the bar for every ad (the option B test), the funnel stages and the batch process. Read it before you write ideas.
+6. `docs/creative-playbook.md`: the bar for every ad (the option B test), the funnel stages and the batch process. Read it, and `docs/backlog.md`, before you write ideas.
 7. `docs/render-checklist.md`: the owner's picture notes from v1 (writing on props, scale, props, physics, hands, copy). Read it before you write a prompt, pick a draft or send a final.
 8. `docs/security-checklist.md`: the standing security gate. Run it on every change. The owner must not need to ask.
+9. `docs/backlog.md`: ideas the owner parked, and ideas the owner declined. Do not start a parked item without the owner's say. Do not suggest a declined item again.
 
 The plan started in a Claude Code session on 2026-11-06 SGT. The plan page is in the owner's Claude account (private; its link is not kept in this public repo). The files in `docs/` are the source of truth. When the page and the files disagree, the files win.
 
@@ -85,7 +86,7 @@ The account is on the Workers Free plan. Design for these limits (read 2026-11-0
 
 There is no Cloudflare API token in the session (owner decision: use the Cloudflare connector). To deploy: build with `npx wrangler deploy --dry-run --minify --outdir .wrangler/dry`, then upload `.wrangler/dry/index.js` with the connector (`PUT /accounts/{id}/workers/scripts/a11adgen`, multipart, the bindings from `wrangler.jsonc` plus `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256` as `plain_text` bindings (they are not in `wrangler.jsonc`; read each live value from `GET /accounts/{id}/workers/scripts/a11adgen/settings` just before the upload and pass it back unchanged, never from memory or an old backup, because `keep_bindings` does not keep plain values), `keep_bindings: ["secret_text"]` so the owner's secrets stay). D1 migrations run through the connector's D1 query API, and each one is recorded in `d1_migrations`. Keep the bundle small enough to upload this way (Phase 0: 14 KB).
 
-The admin token (the static bearer token). The Worker keeps only its SHA-256 (`MCP_TOKEN_SHA256`, a plain var). The token is not in the repo and not on the Worker. Only the owner holds it. An agent must not ask for it, print it, log it or commit it. An agent has no copy, so it cannot call the admin routes alone. When one needs them (for example a web app upload), it tells the owner and the owner runs the step. The owner may instead save the token once through the secure credential form (host `a11adgen.gamingcomputing.workers.dev`, Authorization Bearer): the proxy then adds it to requests and the agent never sees it. What it is for:
+The admin token (the static bearer token). The Worker keeps only its SHA-256 (`MCP_TOKEN_SHA256`, a plain var). The token is not in the repo and not on the Worker. Only the owner holds it. An agent must not ask for it, print it, log it or commit it. An agent has no copy, so it cannot call the admin routes alone. When one needs them (for example a web app upload), it tells the owner and the owner runs the step. The owner declined a secure credential form for agents on 2026-11-08, so the owner always runs these steps. What it is for:
 
 | Use | Route | Used by |
 | --- | --- | --- |
