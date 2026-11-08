@@ -137,3 +137,32 @@ export async function handleAuthorize(request: Request, env: Env): Promise<Respo
 
 /** Re-check the allow-list on every call: an email removed from ALLOWED_EMAILS loses MCP access at once. */
 export const stillAllowed = (env: Env, email: unknown) => typeof email === "string" && allowed(env, email.toLowerCase());
+
+/** Client self-registration (RFC 7591) is open by design, so its body is small and bounded: a real client sends well under 1 KB. */
+export const REGISTRATION_MAX_BYTES = 8192;
+
+/** Read the registration body up to the limit. Returns a rebuilt request, or a 413 if the body is larger. Nothing past the limit is kept. */
+export async function boundRegistration(request: Request): Promise<Request | Response> {
+  const tooBig = () => Response.json({ error: "invalid_client_metadata", error_description: "Registration body too large" }, { status: 413, headers: { "cache-control": "no-store" } });
+  if (Number(request.headers.get("content-length") ?? 0) > REGISTRATION_MAX_BYTES) return tooBig();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  const reader = request.body?.getReader();
+  while (reader) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > REGISTRATION_MAX_BYTES) {
+      await reader.cancel();
+      return tooBig();
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    body.set(c, at);
+    at += c.byteLength;
+  }
+  return new Request(request.url, { method: request.method, headers: request.headers, body });
+}

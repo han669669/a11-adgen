@@ -1,7 +1,7 @@
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import app, { tokenOk } from "./index";
 import { handleMcp } from "./mcp";
-import { MCP_SCOPE, handleAuthorize, stillAllowed } from "./oauth";
+import { MCP_SCOPE, boundRegistration, handleAuthorize, stillAllowed } from "./oauth";
 import type { Env } from "./env";
 import { fontResponse } from "./font";
 import { iconResponse } from "./icon";
@@ -67,5 +67,13 @@ function providerFor(env: Env): OAuthProvider<Env> {
 }
 
 export default {
-  fetch: (request: Request, env: Env, ctx: ExecutionContext) => providerFor(env).fetch(request, env, ctx),
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // Open client registration: keep the body small, so nobody can fill the KV with large records.
+    if (request.method === "POST" && new URL(request.url).pathname === "/oauth/register") {
+      const bounded = await boundRegistration(request);
+      if (bounded instanceof Response) return bounded;
+      request = bounded;
+    }
+    return providerFor(env).fetch(request, env, ctx);
+  },
 } satisfies ExportedHandler<Env>;

@@ -14,6 +14,7 @@ This document uses ASD-STE100 Simplified Technical English with British spelling
 5. `docs/taste-seed.md`: the owner's taste, from his marks on v1. This seeds the taste canon.
 6. `docs/creative-playbook.md`: the bar for every ad (the option B test), the funnel stages and the batch process. Read it before you write ideas.
 7. `docs/render-checklist.md`: the owner's picture notes from v1 (writing on props, scale, props, physics, hands, copy). Read it before you write a prompt, pick a draft or send a final.
+8. `docs/security-checklist.md`: the standing security gate. Run it on every change. The owner must not need to ask.
 
 The plan started in a Claude Code session on 2026-11-06 SGT. The plan page (private, owner only): https://claude.ai/artifact/9zyEqrUHpWa5xijAfU18K6. The files in `docs/` are the source of truth. When the page and the files disagree, the files win.
 
@@ -108,6 +109,7 @@ Phase 0 auth: `/mcp` needs a bearer token. The Worker keeps only its SHA-256 (`M
 3. Before you push, run `npm run check` (typecheck, tests, build). All must pass.
 4. Never merge or deploy to production without the owner's yes.
 5. Commits and PR bodies in STE.
+6. **Security gate (owner rule, 2026-11-08).** Run `docs/security-checklist.md` on every change, without being asked. Put a "Security check" line in each PR body. After each deploy, run its live probes and check that the client and the owner can still do their jobs (its section 3). The repository is public: report open weaknesses to the owner in chat, never in a file.
 
 ---
 
