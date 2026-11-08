@@ -2,7 +2,31 @@
 
 There is no Cloudflare API token in the session (owner decision). Deploys go through the Cloudflare connector, and the bundle reaches it through R2, so no large text is copied by hand.
 
-## Steps
+## Automatic deploy (Workers Builds)
+
+Planned for 2026-11-08, and in force only once Workers Builds is connected (the connection is recorded in `docs/decisions.md`). Until then, use the manual deploy below. After the connection, the live Worker `a11adgen` is built and deployed by Cloudflare when a commit lands on `main`. No Cloudflare token is in the session. The manual steps stay as the fallback.
+
+| Setting | Value | Why |
+|---|---|---|
+| Git repository | `han669669/a11-adgen` only | The Cloudflare GitHub app must not see other repositories. |
+| Production branch | `main` | |
+| Non-production branch builds | **Off** | A branch build would upload code that runs with the live bindings. |
+| Build command | `npm run typecheck && npm test` | A red check stops the build, so nothing deploys. |
+| Deploy command | `npx wrangler deploy` | `keep_vars` and `secrets.required` in `wrangler.jsonc` protect the live values. |
+| Build token | Own token, `Workers Scripts: Edit` on this account only. No zone, KV, R2 or D1 permission. | The default token can change routes on every zone, including a11studio.pro. |
+| Build variable | `CLOUDFLARE_ACCOUNT_ID` = `88581e9852ace13f81f9f45196911c85` | Lets the token stay small. |
+
+Rules:
+
+- `main` needs a pull request and the cubic check. No force push, no deleting `main`. A push to `main` is a production deploy.
+- This path deploys the Worker only. The web app files in R2 `app/` (step 5 below) and D1 migrations (step 3 below) are still manual.
+- After each automatic deploy, check `/api/me` (401), the test portal link (200) and `spend_get` through `/mcp`.
+- Before the first automatic deploy, back up the live `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256` values. Read them in the dashboard (Worker, Settings, Variables and Secrets) and keep a copy in a private note. Do not commit them. The effect of `keep_vars` on these values is verified only after that first deploy.
+- Roll back by deploying the last good version in the dashboard (Worker, Deployments), or `PUT` it again with the connector. Plain values set outside the file (`MCP_TOKEN_SHA256`, `SIGNUP_CODE_SHA256`) are not in git. If one is lost, restore it from the backup. It is a hash, not a secret.
+
+## Manual deploy (fallback)
+
+### Steps
 
 The steps below are for the live Worker `a11adgen` (D1 `a11adgen-db`, R2 `a11adgen-assets`), and only from `main` after a merge. For a branch, use the same steps with the preview targets in "Preview deploy" below. Never the live ones.
 

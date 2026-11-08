@@ -5,6 +5,11 @@
   "compatibility_date": "2026-10-20",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  // The live Worker holds two plain values set outside this file: MCP_TOKEN_SHA256 and SIGNUP_CODE_SHA256 (hashes only).
+  // Without keep_vars, every deploy from this file would delete them, and /mcp would reject every token.
+  "keep_vars": true,
+  // A deploy stops, and changes nothing, if one of these secrets is missing on the Worker.
+  "secrets": { "required": ["FAL_KEY", "EXA_API_KEY"] },
   "observability": { "enabled": true },
   "d1_databases": [
     {
