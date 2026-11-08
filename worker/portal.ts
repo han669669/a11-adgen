@@ -122,7 +122,7 @@ code{font:inherit;font-weight:600;background:#efe6da;padding:1px 6px;border-radi
 a{color:inherit}
 .foot{margin-top:48px;font-size:.85rem}
 .lb{display:none;position:fixed;inset:0;z-index:10;background:#140c07;animation:fade .2s}.lb:has(.slide:target){display:block}
-.track{display:flex;height:100%;overflow-x:auto;overflow-y:hidden;overscroll-behavior:contain;scroll-snap-type:x mandatory;scroll-behavior:smooth;touch-action:pan-x;scrollbar-width:none}.track::-webkit-scrollbar{display:none}
+.track{display:flex;height:100%;overflow-x:auto;overflow-y:hidden;overscroll-behavior:contain;scroll-snap-type:x mandatory;touch-action:pan-x;scrollbar-width:none}.track::-webkit-scrollbar{display:none}
 .slide{position:relative;flex:0 0 100%;height:100%;scroll-snap-align:center;scroll-snap-stop:always;outline:none}
 .slide img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none}
 .slide .x,.slide .nav,.slide .dl,.slide .count{position:absolute;z-index:1;color:#fff;text-decoration:none;background:rgba(20,12,7,.62);border-radius:99px;line-height:1}
@@ -134,7 +134,7 @@ a{color:inherit}
 @media(hover:hover) and (pointer:fine){.slide .nav{display:flex}.slide .x:hover,.slide .nav:hover,.slide .dl:hover{background:rgba(20,12,7,.85)}}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 @media(max-width:700px){.ad{grid-template-columns:1fr;gap:16px;padding:12px}}
-@media(prefers-reduced-motion:reduce){html,.track{scroll-behavior:auto}.lb{animation:none}}`;
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.lb{animation:none}}`;
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 

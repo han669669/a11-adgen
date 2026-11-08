@@ -276,6 +276,8 @@ describe("client portal", () => {
     expect(one).toContain('aria-modal="true"');
     expect(one).toContain('class="x" href="#ad-1"');
     expect(html).not.toContain('class="bg"'); // touching or clicking the picture never closes the enlarged view
+    expect(html).toMatch(/\.track\{[^}]*\}/);
+    expect(html.match(/\.track\{[^}]*\}/)![0]).not.toMatch(/(^|[{;])scroll-behavior/); // opening an ad must not slide past the other ads
     expect(one).toContain('class="nav next" href="#view-2"');
     expect(one).not.toContain("nav prev");
     expect(one).toContain('class="dl"');
