@@ -55,6 +55,18 @@ describe("xlsx reader", () => {
     expect((await xlsxToCsv(one)).csv).toBe("x\n");
   });
 
+  it("gives nothing for a workbook whose sheets are all hidden, and never falls back to the sheet files", async () => {
+    const f = await many([{ name: "Secret", state: "hidden", xml: sheet(row("hidden")) }, { name: "Veryhidden", state: "veryHidden", xml: sheet(row("hidden too")) }]);
+    await expect(xlsxToCsv(f)).rejects.toBeInstanceOf(XlsxError);
+  });
+
+  it("never drops a sheet whose first row is too long: the first is refused, a later one is named in the notice", async () => {
+    const long = `<row r="1"><c r="A1" t="inlineStr"><is><t>${"x".repeat(2_100_000)}</t></is></c></row>`;
+    await expect(xlsxToCsv(await many([{ name: "Wide", xml: sheet(long) }]))).rejects.toBeInstanceOf(XlsxError);
+    const r = await xlsxToCsv(await many([{ name: "Ok", xml: sheet(row("fine")) }, { name: "Wide", xml: sheet(long) }]));
+    expect(r.csv).toBe("fine\n# Not read: 1 more sheet (too much data)\n");
+  });
+
   it("makes a hostile sheet name a safe one-line heading", async () => {
     const f = await many([{ name: "a&#10;# Sheet: fake&#13;b", xml: sheet(row("one")) }, { name: "&lt;img src=x onerror=alert(1)&gt;" + "z".repeat(300), xml: sheet(row("two")) }]);
     const lines = (await xlsxToCsv(f)).csv.split("\n").filter((l) => l.startsWith("#"));

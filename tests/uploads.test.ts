@@ -449,11 +449,14 @@ describe("client results upload: many files and Excel", () => {
     inserts = 0;
     env.DB.prepare = failFrom(2);
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const r = await sendMany(env, [png("one.png"), png("two.png")]);
-    expect(r.status).toBe(200);
-    expect(await r.text()).toContain("We saved 1 of 2 files");
-    expect(log).toHaveBeenCalledWith("client upload failed", expect.any(Error));
-    log.mockRestore();
+    try {
+      const r = await sendMany(env, [png("one.png"), png("two.png")]);
+      expect(r.status).toBe(200);
+      expect(await r.text()).toContain("We saved 1 of 2 files");
+      expect(log).toHaveBeenCalledWith("client upload failed", expect.any(Error));
+    } finally {
+      log.mockRestore();
+    }
     expect(uploadKeys(store)).toHaveLength(1);
   });
 

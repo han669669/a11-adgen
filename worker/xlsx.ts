@@ -256,14 +256,18 @@ async function listSheets(zip: Map<string, ZipEntry>, workbook: string, rels: ()
     if (id) targets.set(id, target.startsWith("/") ? target.slice(1) : `xl/${target}`);
   }
   const out: { name: string; path: string }[] = [];
+  let hidden = 0;
   for (const s of elements(workbook, "sheet", false)) {
-    if (/hidden/i.test(attr(s.attrs, "state") ?? "")) continue;
+    if (/hidden/i.test(attr(s.attrs, "state") ?? "")) {
+      hidden++;
+      continue;
+    }
     const rid = attr(s.attrs, "r:id") ?? attr(s.attrs, "id");
     const path = rid && targets.get(rid);
     if (path && zip.has(path)) out.push({ name: attr(s.attrs, "name") ?? "Sheet", path });
   }
-  // No usable link: fall back to the sheet files, in number order.
-  if (!out.length) {
+  // No usable link and no hidden sheet declared: fall back to the sheet files, in number order. A workbook with only hidden sheets gives nothing.
+  if (!out.length && !hidden) {
     const files = [...zip.keys()].filter((k) => /^xl\/worksheets\/sheet\d+\.xml$/.test(k)).sort((x, y) => Number(/\d+/.exec(x)![0]) - Number(/\d+/.exec(y)![0]));
     for (const path of files) out.push({ name: `Sheet${/\d+/.exec(path)![0]}`, path });
   }
@@ -363,7 +367,14 @@ export async function xlsxToCsv(file: Blob, work: Work = { left: PART_MAX }): Pr
       throw err;
     }
     const { lines, cut } = sheetLines(xml, shared, dates, epoch, room);
-    if (!lines.length) continue;
+    if (!lines.length) {
+      if (cut) {
+        // The first row alone does not fit: the sheet has data we cannot keep. Say so, never drop it quietly.
+        if (!found.length) throw new XlsxError("big");
+        skipped++;
+      }
+      continue;
+    }
     room -= lines.reduce((n, l) => n + bytesOf(l) + 1, 0);
     found.push({ name: headingName(s.name), lines, cut });
   }

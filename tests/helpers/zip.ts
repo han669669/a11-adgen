@@ -12,7 +12,7 @@ export async function zip(entries: { name: string; data: Uint8Array | string; me
     local.setUint32(0, 0x04034b50, true);
     local.setUint16(8, method, true);
     local.setUint32(18, packed.length, true);
-    local.setUint32(22, raw.length, true);
+    local.setUint32(22, e.usize ?? raw.length, true);
     local.setUint16(26, name.length, true);
     const cen = new DataView(new ArrayBuffer(46));
     cen.setUint32(0, 0x02014b50, true);
