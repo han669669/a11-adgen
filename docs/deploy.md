@@ -4,16 +4,16 @@ There is no Cloudflare API token in the session (owner decision). Deploys go thr
 
 ## Automatic deploy (Workers Builds)
 
-Planned for 2026-11-08, and in force only once Workers Builds is connected (the connection is recorded in `docs/decisions.md`). Until then, use the manual deploy below. After the connection, the live Worker `a11adgen` is built and deployed by Cloudflare when a commit lands on `main`. No Cloudflare token is in the session. The manual steps stay as the fallback.
+Connected on 2026-11-08 (recorded in `docs/decisions.md`). The live Worker `a11adgen` is built and deployed by Cloudflare when a commit lands on `main`. No Cloudflare token is in the session. The manual steps below stay as the fallback. The first automatic deploy is not yet verified: until a row in `docs/decisions.md` says it passed, check every deploy by hand.
 
 | Setting | Value | Why |
 |---|---|---|
 | Git repository | `han669669/a11-adgen` only | The Cloudflare GitHub app must not see other repositories. |
 | Production branch | `main` | |
-| Non-production branch builds | **Off** | A branch build would upload code that runs with the live bindings. |
+| Non-production branch builds | **Off** (`previews_enabled: false`, set and read back on 2026-11-08) | A branch build would run branch code with the live bindings. Cloudflare turns them on by default. |
 | Build command | `npm run typecheck && npm test` | A red check stops the build, so nothing deploys. |
 | Deploy command | `npx wrangler deploy` | `keep_vars` and `secrets.required` in `wrangler.jsonc` protect the live values. |
-| Build token | Own token, `Workers Scripts: Edit` on this account only. No zone, KV, R2 or D1 permission. | The default token can change routes on every zone, including a11studio.pro. |
+| Build token | `a11adgen-builds`: `Workers Scripts: Edit` and `Account Settings: Read`, this account only. No zone, KV, R2 or D1 permission. No expiry (owner choice). | The default token can change routes on every zone, including a11studio.pro. |
 | Build variable | `CLOUDFLARE_ACCOUNT_ID` = `88581e9852ace13f81f9f45196911c85` | Lets the token stay small. |
 
 Rules:
