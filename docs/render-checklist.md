@@ -1,6 +1,6 @@
 # Render checklist
 
-Read this file before you write a draft or final prompt, when you pick drafts, and before you send a final. It holds the owner's picture notes from v1 (`han669669/ai-ad-generator`, 2026-10-12 to 2026-10-31): his Pass notes, his Use marks and the rules they produced (v1 `convex/lib/stage.ts` `SCENE_RULES` and `physicsBlock`, `convex/lib/taste/reasons.ts`, `convex/lib/hand.ts`, `convex/lib/objectRead.ts`, `docs/agent-handoff/rubric.md` sections K, L, M, N and P). Batch ids such as B44 are v1 batches.
+Read this file before you write a draft or final prompt, when you pick drafts, and before you send a final. It holds the owner's picture notes from v1 (`han669669/ai-ad-generator`, 2026-10-12 to 2026-10-31): his Pass notes, his Use marks and the rules they produced (v1 `convex/lib/stage.ts` `SCENE_RULES` and `physicsBlock`, `convex/lib/taste/reasons.ts`, `convex/lib/hand.ts`, `convex/lib/objectRead.ts`, `docs/agent-handoff/rubric.md` sections K, L, M, N and P). Batch ids such as B44 are v1 batches. Later rows (from D9) also hold v2 notes; their batch labels, such as W47, are v2 batches.
 
 These are words for you to apply with judgement, not code rules (`docs/v1-lessons.md` §2.2). The idea comes first (`docs/creative-playbook.md` §2). This list stops a good idea from being rejected for its picture.
 

@@ -6,7 +6,7 @@ Run the a11 `batch` prompt. Its text lives on the a11 server, so this command al
 
 1. Read the arguments from what the owner typed after the command: $ARGUMENTS
 - brand (required): Brand slug (at most 40 characters)
-- batchId: Resume this batch (leave empty to start a new one) (at most 36 characters)
+- batchId: Resume this batch (leave empty to start a new one) (36 characters)
 - productUrl: A new batch: the product page URL (at most 500 characters)
 - productTitle: A new batch: the product's name (at most 160 characters)
 - label: A new batch: its label, such as W47 (at most 80 characters)

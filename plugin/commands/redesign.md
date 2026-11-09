@@ -6,7 +6,7 @@ Run the a11 `redesign` prompt. Its text lives on the a11 server, so this command
 
 1. Read the arguments from what the owner typed after the command: $ARGUMENTS
 - brand (required): Brand slug (at most 40 characters)
-- adImageUrls (required): Direct https links to the live ad's pictures, separated by spaces (up to 6) (at most 12010 characters)
+- adImageUrls (required): Direct https links to the live ad's pictures, separated by spaces (up to 6, each at most 2000 characters)
 - title (required): A short name for the ad (at most 160 characters)
 - label (required): The batch label, such as W48 (at most 80 characters)
 - adUrl: The page where the ad runs, if there is one (at most 2000 characters)

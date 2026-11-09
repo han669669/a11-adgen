@@ -216,11 +216,19 @@ def stem_tilt(a):
 
 
 def set_tilt(a, now, want):
-    """Shear an alpha map about its own centre row so the stems tilt by `want` degrees instead of `now`. The baseline stays where it is."""
-    ys, _ = np.nonzero(a > 0.5)
-    yc = float(ys.mean())
-    k = np.tan(np.radians(now)) - np.tan(np.radians(want))  # x moves by k per pixel above the centre row
-    M = np.float32([[1, -k, k * yc], [0, 1, 0]])
+    """Shear an alpha map along its own baseline so the stems tilt by `want` degrees from the image vertical instead of `now`.
+    The shear runs in baseline coordinates about the line's centre, so the baseline keeps its angle and place."""
+    base = np.radians(baseline_angle(a))
+    ys, xs = np.nonzero(a > 0.5)
+    c = np.array([xs.mean(), ys.mean()])
+    lean_now, lean_want = np.radians(np.degrees(base) - now), np.radians(np.degrees(base) - want)  # stem lean against the baseline normal
+    k = np.tan(lean_now) - np.tan(lean_want)
+    e1 = np.array([np.cos(base), -np.sin(base)])  # along the baseline (image y points down)
+    e2 = np.array([np.sin(base), np.cos(base)])  # down, at right angles to it
+    B = np.stack([e1, e2], axis=1)
+    S = np.array([[1.0, k], [0.0, 1.0]])  # move along e1 by k for each pixel along e2
+    A = B @ S @ B.T
+    M = np.hstack([A, (c - A @ c)[:, None]]).astype(np.float32)
     return cv2.warpAffine(a, M, (a.shape[1], a.shape[0]), flags=cv2.INTER_LINEAR)
 
 
@@ -277,10 +285,16 @@ def run(cfg, src, dst, debug=None):
             # The type is set on a flat baseline and then warped, which can tilt its stems with the baseline (a "pasted" look).
             # On the real box the stems stand as they do in the packshot (owner, 09-11-2026). Match the packshot's own stem tilt;
             # the render keeps the packshot's camera angle (the product lock), so its tilt applies as it is.
+            # The target is measured in the packshot's own frame and applied in the render's image frame on purpose. Carrying it through H
+            # (tested 09-11-2026) gave 12.9, 4.1 and 14.5 degrees on the W47 finals: the local H of a small block on a slanted box face
+            # holds shear as well as turn, and those targets bring back the turned "sticker" stems that the owner rejected.
             want = stem_tilt(bx.ink_alpha(i, raw=True)[0])
             now = stem_tilt(a2)
             a2 = set_tilt(a2, now, want)
-            print("typeset stems: tilt", round(now, 1), "->", round(want, 1), "degrees (packshot", round(want, 1), ")")
+            got = stem_tilt(a2)
+            print("typeset stems: tilt", round(now, 1), "->", round(got, 1), "degrees (target", round(want, 1), "from the packshot's print)")
+            if abs(got - want) > 1.0:
+                sys.exit(f"The typeset stems tilt {got:.1f} degrees, not the packshot's {want:.1f}. Check the band and the block box. Nothing was written.")
         amap = np.maximum(amap, a2)
     dF, _ = darkness(gF)
     near = cv2.dilate((amap > 0.02).astype(np.uint8) * 255, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25)))

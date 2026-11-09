@@ -69,6 +69,7 @@ export const PROMPTS: Prompt[] = [
     check: (a) => {
       const urls = (a.adImageUrls ?? "").trim().split(/\s+/);
       if (urls.length > 6) return "Give at most 6 picture links.";
+      if (urls.some((u) => u.length > 2000)) return "Each picture link must be at most 2000 characters.";
       return urls.every((u) => /^https:\/\/\S+$/.test(u)) ? null : "Every picture link must start with https://.";
     },
     text: (a) =>
