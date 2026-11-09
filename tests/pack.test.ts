@@ -259,11 +259,17 @@ describe("pack_update", () => {
   });
 
   it("undo puts back the content from before the last change, one change at a time", async () => {
-    const { env, b, v1, content } = await twoVersions();
+    const { env, b, v1, newer, content } = await twoVersions();
     const before = content(v1.packId);
     await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2 });
-    const r = await pack.packUpdate(env, { batchId: b.id, version: 1, undo: true });
-    expect(r).toMatchObject({ undone: true, version: 1 });
+    const middle = content(v1.packId);
+    const v3 = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: newer[0]!, ...copy({ description: "Third version" }) }, { renderId: newer[1]!, ...copy() }] });
+    await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: v3.version });
+    expect(content(v1.packId).ads[0]!.description).toBe("Third version");
+    // First undo: back to the content after the first change. Second undo: back to the original.
+    expect(await pack.packUpdate(env, { batchId: b.id, version: 1, undo: true })).toMatchObject({ undone: true, version: 1 });
+    expect(content(v1.packId)).toEqual(middle);
+    await pack.packUpdate(env, { batchId: b.id, version: 1, undo: true });
     expect(content(v1.packId)).toEqual(before);
     await expect(pack.packUpdate(env, { batchId: b.id, version: 1, undo: true })).rejects.toThrow(/no change to undo/);
   });
