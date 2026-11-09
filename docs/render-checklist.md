@@ -16,6 +16,7 @@ These are words for you to apply with judgement, not code rules (`docs/v1-lesson
 | D6 | **Unneeded serving.** Show a serving (a slice, a poured glass) only when it shows what the pack hides (cake layers, a tart in its tin) or the true size of a food sold by weight, and it fits the headline. | B46: the Oatside glass of milk "entirely destroys the ad"; the Kele tart "works fine". |
 | D7 | **Wrong or garbled logo**, or a logo inside a pill or badge. In v2 the real logo is drawn in code: keep the top band plain. | HFB5b "THEI"; reason code `logoPill`. |
 | D8 | **Race, ethnicity or religion.** In copy: never name them (the owner's hard no). In the picture: no stereotype, and never make a person's race, ethnicity or religion the point of the ad. | HFX-mix2: "sounds racist". |
+| D9 | **Box print that does not sit on the box.** On a boxed product, every printed line must match the real packshot: crisp, the same weight, the line rising with the box face, and the letter stems standing as they do in the photo. Stems that turn with the line read as a rotated sticker. Run `scripts/box_print.py` and read its `typeset stems` line: the tilt must end at the packshot's value. Compare each line at full size with the product page's own photo. | W47: "the packaging's \"artisan...\" and \"asian-inspired...\" it is smeared"; 09-11-2026: the caps line stems were 10 degrees off on tof and bof; after the fix: "yes looks so so much better". |
 
 ## 2. Faults: two of these reject the ad
 
