@@ -159,8 +159,13 @@ describe("mcp handler", () => {
       for (const a of p.arguments) {
         const line = text.split("\n").find((l) => l.startsWith(`- ${a.name}${a.required ? " (required)" : ""}: `));
         expect(line, `${p.name}: line for ${a.name}`).toBeDefined();
-        if (a.maxLength && a.name !== "batchId" && a.name !== "adImageUrls") expect(line).toContain(`at most ${a.maxLength} characters`);
+        if (a.name === "batchId") expect(line).toContain("(36 characters)");
+        else if (a.name === "adImageUrls") expect(line).toContain("up to 6, each at most 2000 characters");
+        else if (a.maxLength) expect(line).toContain(`at most ${a.maxLength} characters`);
       }
+      // No extra argument in the command file: prompt_get refuses a name the prompt does not take.
+      const documented = [...text.matchAll(/^- ([A-Za-z]+)(?: \(required\))?: /gm)].map((m) => m[1]);
+      expect(documented.sort(), `${p.name}: documented arguments`).toEqual(p.arguments.map((a) => a.name).sort());
       const args: Record<string, string> = {};
       for (const a of p.arguments) if (a.required || (p.name === "batch" && a.name !== "batchId")) args[a.name] = sample[a.name]!;
       const viaTool: any = ((await (await post({ jsonrpc: "2.0", id: 30, method: "tools/call", params: { name: "prompt_get", arguments: { name: p.name, arguments: args } } })).json()) as any).result;
