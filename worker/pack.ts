@@ -152,7 +152,7 @@ export async function packPublish(
       packId: id,
       version,
       link: `${env.PUBLIC_BASE_URL}/c/${token}`,
-      note: "The link is shown once. Send it to the client. packRevoke stops it.",
+      note: "The link is shown once. Give it to the owner only: he decides whether and how the client gets it. packRevoke stops it.",
       adNames: named.ads.map((x) => x.name),
       numbersChecked: factCheck.length,
     };
@@ -206,7 +206,7 @@ export async function packUpdate(env: Env, a: { batchId: string; version: number
   };
 
   if (a.undo) {
-    if (a.fromVersion !== undefined || a.text !== undefined) throw new InputError("Give fromVersion (and text) or undo, not both.");
+    if (a.fromVersion !== undefined || a.text === true) throw new InputError("Give fromVersion (and text) or undo, not both.");
     const last = await env.DB.prepare("SELECT id, from_pack_id, old_content FROM pack_updates WHERE pack_id = ? AND undone_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1")
       .bind(target.id).first<{ id: string; from_pack_id: string; old_content: string }>();
     if (!last) throw new InputError(`Pack version ${a.version} has no change to undo.`);

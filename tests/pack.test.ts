@@ -274,7 +274,7 @@ describe("pack_update", () => {
   it("undo puts back the content from before the last change, one change at a time", async () => {
     const { env, b, v1, newer, content } = await twoVersions();
     const before = content(v1.packId);
-    await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2, text: true });
+    await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2 });
     const middle = content(v1.packId);
     const v3 = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: newer[0]!, ...copy({ description: "Third version" }) }, { renderId: newer[1]!, ...copy() }] });
     await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: v3.version, text: true });
@@ -296,6 +296,7 @@ describe("pack_update", () => {
     await expect(up({})).rejects.toThrow(/Give fromVersion/);
     await expect(up({ fromVersion: 2, undo: true })).rejects.toThrow(/not both/);
     await expect(up({ text: true, undo: true })).rejects.toThrow(/not both/);
+    await expect(up({ text: false, undo: true })).rejects.toThrow(/no change to undo/); // text false is the default, not a conflict
     const v3 = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy() }] });
     await expect(up({ fromVersion: v3.version })).rejects.toThrow(/not hold the same ideas.*bof_c02_v1/);
     await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2 });
