@@ -32,7 +32,7 @@ Run these on the live address for a production deploy. For a preview deploy, run
 | `PUT /admin/stage/x.js`, `/admin/app/x`, `/admin/ref/<uuid>.png`, `/admin/repair/<uuid>.jpg` with no token | 401 each |
 | `GET /api/me`, `/api/spend`, `/api/batches` with no session | 401 each |
 | `GET /c/` with a wrong 48-character key | 404 |
-| `PUT /up/` with a wrong 48-character key | 404 |
+| `PUT /up/000000000000000000000000000000000000000000000000` (a wrong 48-character key) | 404 |
 | `GET /m/deploy/x.js` | 404 |
 | `GET /` and a pack page | CSP present, no `unsafe-inline` in `script-src` |
 | `POST /oauth/register` with a body over 8 KB | 413 |

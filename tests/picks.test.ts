@@ -51,14 +51,8 @@ function setup() {
     },
     put: async (k: string, v: Uint8Array | ArrayBuffer, o?: { customMetadata?: Record<string, string> }) => void files.set(k, { bytes: new Uint8Array(v as ArrayBuffer), meta: o?.customMetadata }),
   };
-  const kv = new Map<string, { value: string; ttl?: number }>();
-  const OAUTH_KV = {
-    get: async (k: string) => kv.get(k)?.value ?? null,
-    put: async (k: string, value: string, o?: { expirationTtl?: number }) => void kv.set(k, { value, ttl: o?.expirationTtl }),
-    delete: async (k: string) => void kv.delete(k),
-  };
-  const env = { DB, MEDIA, OAUTH_KV, PUBLIC_BASE_URL: "https://w.example/" } as unknown as Env;
-  return { env, raw, files, kv };
+  const env = { DB, MEDIA, PUBLIC_BASE_URL: "https://w.example/" } as unknown as Env;
+  return { env, raw, files };
 }
 
 const put = (url: string, body: Uint8Array, headers: Record<string, string> = {}) =>
@@ -74,7 +68,7 @@ describe("picks_get", () => {
     const p = out.picks[0]!;
     expect(p).toMatchObject({ idea: 7, stage: "tof", headline: "Wait, there's ten?", draftKey: DRAFT, criticRank: 3, byOwner: true, ownerNote: "ill choose ad 1", firstFinalId: OLD });
     expect(p.finals.map((f) => f.renderId)).toEqual([NEW, OLD]);
-    expect(p.finals[0]).toMatchObject({ inPacks: [1], composedUrl: `https://w.example/m/renders/${NEW}/1-c2.jpg` });
+    expect(p.finals[0]).toMatchObject({ inPacks: [1], imageKey: `renders/${NEW}/1.jpg`, composedUrl: `https://w.example/m/renders/${NEW}/1-c2.jpg`, repaired: false });
     expect(p.finals[1]!.inPacks).toEqual([]);
     expect(p.latest).toMatchObject({ renderId: NEW, repaired: false });
     expect(p.next).toContain("pack_publish");
@@ -84,6 +78,8 @@ describe("picks_get", () => {
     const { env, raw } = setup();
     raw.prepare("UPDATE renders SET composed_key = NULL").run();
     expect((await picksGet(env, B)).picks[0]!.next).toBe("compose_final");
+    raw.prepare("UPDATE renders SET status = 'failed'").run();
+    expect((await picksGet(env, B)).picks[0]!.next).toMatch(/^render_submit kind 'final'/);
     raw.prepare("DELETE FROM renders").run();
     expect((await picksGet(env, B)).picks[0]!.next).toBe("final_render");
   });
@@ -99,15 +95,17 @@ describe("picks_get", () => {
 
 describe("upload_link", () => {
   it("a repair link saves the fixed picture, attaches it, marks it repaired and works once", async () => {
-    const { env, raw, kv } = setup();
+    const { env, raw } = setup();
     const link = await createUploadLink(env, { kind: "repair", key: `renders/${NEW}/1.jpg` });
     expect(link.uploadUrl).toMatch(/^https:\/\/w\.example\/up\/[0-9a-f]{48}$/);
     expect(link.expiresInSeconds).toBe(900);
     // Only the hash of the token is stored, with a 15 minute life.
-    const [k, v] = [...kv.entries()][0]!;
-    expect(k).toMatch(/^upload:[0-9a-f]{64}$/);
-    expect(k).not.toContain(tokenOf(link.uploadUrl));
-    expect(v!.ttl).toBe(900);
+    const rows = raw.prepare("SELECT hash, kind, key, expires_at FROM upload_links").all() as { hash: string; kind: string; key: string; expires_at: number }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(rows[0]!.hash).not.toBe(tokenOf(link.uploadUrl));
+    expect(rows[0]!).toMatchObject({ kind: "repair", key: `renders/${NEW}/1.jpg` });
+    expect(rows[0]!.expires_at - Date.now()).toBeGreaterThan(890_000);
 
     const r = await handleUploadLink(put(link.uploadUrl, jpeg(1536, 1920)), env, tokenOf(link.uploadUrl));
     expect(r.status).toBe(200);
@@ -116,9 +114,36 @@ describe("upload_link", () => {
     expect(raw.prepare("SELECT composed_key FROM renders WHERE id = ?").get(NEW)).toEqual({ composed_key: body.key });
     const p = (await picksGet(env, B)).picks[0]!;
     expect(p.latest).toMatchObject({ renderId: NEW, composedKey: body.key, repaired: true });
+    expect(p.finals.find((f) => f.renderId === NEW)!.repaired).toBe(true);
+    expect(p.finals.find((f) => f.renderId === OLD)!.repaired).toBe(false);
 
     const again = await handleUploadLink(put(link.uploadUrl, jpeg(1536, 1920)), env, tokenOf(link.uploadUrl));
     expect(again.status).toBe(404);
+  });
+  it("claims a link once when two PUTs arrive together, and refuses an expired link", async () => {
+    const { env, raw } = setup();
+    const link = await createUploadLink(env, { kind: "repair", key: `renders/${NEW}/1.jpg` });
+    const t = tokenOf(link.uploadUrl);
+    const both = await Promise.all([handleUploadLink(put(link.uploadUrl, jpeg(1536, 1920)), env, t), handleUploadLink(put(link.uploadUrl, jpeg(1536, 1920)), env, t)]);
+    expect(both.map((r) => r.status).sort()).toEqual([200, 404]);
+    const old = await createUploadLink(env, { kind: "ref" });
+    raw.prepare("UPDATE upload_links SET expires_at = ?").run(Date.now() - 1);
+    expect((await handleUploadLink(put(old.uploadUrl, jpeg(1, 1)), env, tokenOf(old.uploadUrl))).status).toBe(404);
+    // A new link clears the expired ones.
+    await createUploadLink(env, { kind: "ref" });
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM upload_links").get()).toEqual({ n: 1 });
+  });
+  it("PUT /up/<token> reaches the handler through worker.fetch", async () => {
+    const { default: worker } = await import("../worker/index");
+    const { env } = setup();
+    const link = await createUploadLink(env, { kind: "ref" });
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    const fetch = (r: Request) => worker.fetch(r, env);
+    expect((await fetch(put(`https://w.example/up/${"0".repeat(48)}`, png))).status).toBe(404);
+    expect((await fetch(new Request(link.uploadUrl))).status).toBe(405);
+    const r = await fetch(put(link.uploadUrl, png));
+    expect(r.status).toBe(200);
+    expect(((await r.json()) as { key: string }).key).toMatch(/^refs\//);
   });
   it("a ref link saves a PNG under refs/ and answers with its url", async () => {
     const { env, files } = setup();
