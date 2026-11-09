@@ -7,7 +7,8 @@ import { InputError } from "./schema";
  * One-time upload links, made by the MCP tool upload_link. The agent saves a file made outside the Worker
  * (a repaired final from scripts/box_print.py, or a product-lock skeleton from scripts/product_lock.py) with one PUT,
  * so the pipeline runs through the a11 MCP alone and never needs the admin token.
- * The link is 24 random bytes; only its SHA-256 is kept (in KV, 15 minutes). It works once: the first PUT removes it.
+ * The link is 24 random bytes; only its SHA-256 is kept (D1 table upload_links, 15 minutes). It works once: the first PUT claims it
+ * with one DELETE ... RETURNING, which D1 runs atomically, so two PUTs at the same time cannot both pass.
  */
 export const UPLOAD_TTL_SECONDS = 900;
 export const UPLOAD_PATH = /^\/up\/([0-9a-f]{48})$/;
@@ -26,7 +27,7 @@ interface Pending {
 }
 
 const hex = (b: ArrayBuffer | Uint8Array) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
-const kvKey = async (token: string) => `upload:${hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)))}`;
+const tokenHash = async (token: string) => hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)));
 
 export async function createUploadLink(env: Env, a: { kind: "repair" | "ref"; key?: string; ext?: "jpg" | "png" }) {
   let pending: Pending;
@@ -43,7 +44,17 @@ export async function createUploadLink(env: Env, a: { kind: "repair" | "ref"; ke
     pending = { kind: "ref", name: `${crypto.randomUUID()}.${a.ext ?? "png"}` };
   }
   const token = hex(crypto.getRandomValues(new Uint8Array(24)));
-  await env.OAUTH_KV.put(await kvKey(token), JSON.stringify(pending), { expirationTtl: UPLOAD_TTL_SECONDS });
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM upload_links WHERE expires_at <= ?").bind(now),
+    env.DB.prepare("INSERT INTO upload_links (hash, kind, key, name, expires_at) VALUES (?, ?, ?, ?, ?)").bind(
+      await tokenHash(token),
+      pending.kind,
+      pending.key ?? null,
+      pending.name,
+      now + UPLOAD_TTL_SECONDS * 1000,
+    ),
+  ]);
   const url = `${new URL(env.PUBLIC_BASE_URL).origin}/up/${token}`;
   const type = pending.name.endsWith(".png") ? "image/png" : "image/jpeg";
   return {
@@ -60,17 +71,19 @@ export async function createUploadLink(env: Env, a: { kind: "repair" | "ref"; ke
 }
 
 const isJpeg = (b: Uint8Array) => b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
-const isPng = (b: Uint8Array) => b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const isPng = (b: Uint8Array) => b.length > 8 && PNG_SIGNATURE.every((x, i) => b[i] === x);
 
 /** PUT /up/<token>: save the one file the link was made for. */
 export async function handleUploadLink(request: Request, env: Env, token: string): Promise<Response> {
   if (request.method !== "PUT") return new Response("Method not allowed", { status: 405, headers: { allow: "PUT" } });
-  const k = await kvKey(token);
-  const raw = await env.OAUTH_KV.get(k);
-  if (!raw) return Response.json({ error: "This upload link is not valid, was used already, or has expired. Ask upload_link for a new one." }, { status: 404 });
-  // One use: the link is gone before the body is read, so a second PUT (or a replay) cannot write again.
-  await env.OAUTH_KV.delete(k);
-  const pending = JSON.parse(raw) as Pending;
+  // One use: the link is claimed (deleted) before the body is read, in one atomic statement, so a second PUT (or a replay) cannot write again.
+  const row = await env.DB.prepare("DELETE FROM upload_links WHERE hash = ? RETURNING kind, key, name, expires_at")
+    .bind(await tokenHash(token))
+    .first<{ kind: Pending["kind"]; key: string | null; name: string; expires_at: number }>();
+  if (!row || row.expires_at <= Date.now())
+    return Response.json({ error: "This upload link is not valid, was used already, or has expired. Ask upload_link for a new one." }, { status: 404 });
+  const pending: Pending = { kind: row.kind, key: row.key ?? undefined, name: row.name };
   const max = pending.kind === "repair" ? REPAIR_MAX_BYTES : REF_MAX_BYTES;
   // Check the declared size before reading the body, so an oversized upload is never buffered.
   const declared = request.headers.get("content-length");

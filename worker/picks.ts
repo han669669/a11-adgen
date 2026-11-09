@@ -45,31 +45,36 @@ export async function picksGet(env: Env, batchId: string) {
   const out = [];
   for (const p of picks) {
     const mine = finals.filter((f) => f.idea === p.idea_id);
-    const list = mine.map((f) => {
+    const list = [];
+    for (const f of mine) {
       const composed = f.composed_key?.startsWith("renders/") ? f.composed_key : null;
-      return {
+      // final_attach marks the picture it saves; a compose_final picture has no mark.
+      const repaired = composed ? Boolean((await env.MEDIA.head(composed))?.customMetadata?.repairedFrom) : false;
+      list.push({
         renderId: f.id,
         status: f.status,
         createdAt: f.created_at,
+        // The final's own image (the key upload_link takes for a repair): the composed key without its "-c..." part.
+        imageKey: composed ? composed.replace(/-c\d*\.jpg$/, ".jpg") : null,
         composedKey: composed,
         composedUrl: composed ? mediaUrl(env, composed) : null,
+        repaired,
         inPacks: composed ? (usedIn.get(composed) ?? []) : [],
-      };
-    });
-    const newest = list.find((f) => f.status === "done" && f.composedKey);
-    let latest: { renderId: string; composedKey: string; composedUrl: string; repaired: boolean } | null = null;
-    if (newest?.composedKey) {
-      // final_attach marks the picture it saves; a compose_final picture has no mark.
-      const head = await env.MEDIA.head(newest.composedKey);
-      latest = { renderId: newest.renderId, composedKey: newest.composedKey, composedUrl: newest.composedUrl!, repaired: Boolean(head?.customMetadata?.repairedFrom) };
+      });
     }
+    const newest = list.find((f) => f.status === "done" && f.composedKey);
+    const latest = newest?.composedKey
+      ? { renderId: newest.renderId, imageKey: newest.imageKey!, composedKey: newest.composedKey, composedUrl: newest.composedUrl!, repaired: newest.repaired }
+      : null;
     const next = !list.length
       ? "final_render"
-      : !list.some((f) => f.status === "done")
-        ? "render_status (the final is not done)"
-        : !latest
-          ? "compose_final"
-          : "check the final; for a boxed product run scripts/box_print.py, upload_link and curl until repaired is true; then pack_publish";
+      : list.every((f) => f.status === "failed")
+        ? "render_submit kind 'final' (every final of this idea failed; final_render refuses an idea that already has a final)"
+        : !list.some((f) => f.status === "done")
+          ? "render_status (the final is not done)"
+          : !latest
+            ? "compose_final"
+            : "check the final; for a boxed product whose chosen final has repaired false, run scripts/box_print.py, upload_link (key = its imageKey) and curl; then pack_publish";
     out.push({
       ideaId: p.idea_id,
       idea: p.n,
@@ -90,6 +95,6 @@ export async function picksGet(env: Env, batchId: string) {
     batch: { id: batch.id, label: batch.label, status: batch.status },
     picks: out,
     packs: packs.map((p) => ({ version: p.version, revoked: p.revoked_at !== null })),
-    note: "latest is the newest done and composed final of each picked idea. The owner may have approved an older one: follow his words. repaired true means final_attach took in a picture fixed outside the Worker.",
+    note: "latest is the newest done and composed final of each picked idea. The owner may have approved an older one: follow his words. repaired true (on each final) means final_attach took in a picture fixed outside the Worker. imageKey is the key upload_link takes for a repair.",
   };
 }
