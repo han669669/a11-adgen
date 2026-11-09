@@ -18,7 +18,7 @@ Connected on 2026-11-08 (recorded in `docs/decisions.md`). The live Worker `a11a
 
 Rules:
 
-- `main` needs a pull request and the cubic check. No force push, no deleting `main`. A push to `main` is a production deploy.
+- `main` needs a pull request. No force push, no deleting `main`. A push to `main` is a production deploy. The cubic check runs on every pull request, but the `protect-main` ruleset does not require it (owner, 2026-11-09). Before a merge, check that cubic is green.
 - This path deploys the Worker only. The web app files in R2 `app/` (step 5 below) and D1 migrations (step 3 below) are still manual.
 - After each automatic deploy, check `/api/me` (401), the test portal link (200) and `spend_get` through `/mcp`. Also read `GET /accounts/{id}/workers/scripts/a11adgen/subdomain`: `previews_enabled` must be `false`.
 - The dashboard may say "Update your Wrangler configuration with these changes" after a variable edit. Ignore it. Do not put `MCP_TOKEN_SHA256` or `SIGNUP_CODE_SHA256` in `wrangler.jsonc`: the repo is public, and `keep_vars` keeps the dashboard values.
