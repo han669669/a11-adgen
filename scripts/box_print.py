@@ -187,9 +187,16 @@ class Box:
         return np.clip(out * 0.86, 0, 1), (ox, oy)
 
 
+def ink_points(a):
+    ys, xs = np.nonzero(a > 0.5)
+    if len(xs) < 50:
+        sys.exit("A typeset block shows too little ink to measure its angle. Check the block box and the band. Nothing was written.")
+    return ys, xs
+
+
 def baseline_angle(a):
     """Angle of a line of text in an alpha map (degrees, rising to the right is positive): the rotation that makes its rows sharpest."""
-    ys, xs = np.nonzero(a > 0.5)
+    ys, xs = ink_points(a)
     best = (-1.0, 0.0)
     for d in np.arange(-30, 30.01, 0.1):
         t = np.radians(d)
@@ -197,13 +204,15 @@ def baseline_angle(a):
         v = float((np.bincount((r - r.min()).astype(int)).astype(float) ** 2).sum())
         if v > best[0]:
             best = (v, d)
+    if abs(best[1]) >= 29.95:
+        sys.exit("A typeset line rises more than 30 degrees, outside what the script measures. Nothing was written.")
     return best[1]
 
 
 def stem_tilt(a):
     """Tilt of the letter stems from the image vertical (degrees, top to the left is positive), for a line of text in an alpha map."""
     base = baseline_angle(a)
-    ys, xs = np.nonzero(a > 0.5)
+    ys, xs = ink_points(a)
     t = np.radians(base)
     X, Y = xs * np.cos(t) - ys * np.sin(t), xs * np.sin(t) + ys * np.cos(t)
     best = (-1.0, 0.0)
@@ -212,6 +221,8 @@ def stem_tilt(a):
         v = float((np.bincount((u - u.min()).astype(int)).astype(float) ** 2).sum())
         if v > best[0]:
             best = (v, lean)
+    if best[1] <= -9.95 or best[1] >= 29.95:
+        sys.exit("A typeset line's stems lean outside -10 to 30 degrees, outside what the script measures. Nothing was written.")
     return base - best[1]
 
 
@@ -288,7 +299,7 @@ def run(cfg, src, dst, debug=None):
             # The target is measured in the packshot's own frame and applied in the render's image frame on purpose. Carrying it through H
             # (tested 09-11-2026) gave 12.9, 4.1 and 14.5 degrees on the W47 finals: the local H of a small block on a slanted box face
             # holds shear as well as turn, and those targets bring back the turned "sticker" stems that the owner rejected.
-            want = stem_tilt(bx.ink_alpha(i, raw=True)[0])
+            want = stem_tilt(bx.ink_alpha(i, 0.25, 0.5, raw=True)[0])  # the relaxed band typeset() measures with: a soft line still shows ink
             now = stem_tilt(a2)
             a2 = set_tilt(a2, now, want)
             got = stem_tilt(a2)
