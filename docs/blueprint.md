@@ -77,6 +77,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | Launch plan | One ad set, all 4 ads, 72 hours, the kill rule |
 | Fact check | Every claim and its source; HSA-safe note for health products |
 | Week report (from week 2) | CTR vs baseline per ad, winners kept, what next week tries |
+| Change a link in place | `pack_update` (built 09-11-2026): put the ads and the Meta text of a newer approved version into a link the client already has. The link, its ad names, the comments and the uploads stay. Ads match by stage and idea. Every change keeps the old content in `pack_updates`; `undo` puts it back. Owner, 09-11-2026: never revoke a link to replace its ads. |
 
 ## 6. MCP surface
 

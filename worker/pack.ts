@@ -172,3 +172,81 @@ export async function packByToken(env: Env, token: string): Promise<{ id: string
     .bind(await sha256Hex(token)).first<{ id: string; title: string; content: string }>();
   return row ? { id: row.id, title: row.title, content: JSON.parse(row.content) as PackContent } : null;
 }
+
+/** The part of an ad name that stays across versions of one batch's pack: brand, batch number, stage and idea (not the week, not the version). */
+const adKey = (name: string) => name.replace(/^a11_W\d+_/, "").replace(/_v\d+$/, "");
+
+/**
+ * Put the ads and the Meta text of a newer pack (fromVersion) into an older pack (version) of the same batch, in place.
+ * The older pack keeps its link, its title and its ad names, so the client's comments, uploads and results still map to it.
+ * Each ad is matched by stage and idea. Both packs must hold the same ideas. The text in the newer pack passed the fact check
+ * when it was published; the fact check, launch plan and health note come across with it.
+ * Every change keeps the old content in pack_updates. undo puts back the content before the latest change that is not yet undone.
+ */
+export async function packUpdate(env: Env, a: { batchId: string; version: number; fromVersion?: number; undo?: boolean }) {
+  const row = (v: number) =>
+    env.DB.prepare("SELECT id, version, content, revoked_at FROM packs WHERE batch_id = ? AND version = ?")
+      .bind(a.batchId, v).first<{ id: string; version: number; content: string; revoked_at: string | null }>();
+  const target = await row(a.version);
+  if (!target) throw new InputError(`This batch has no pack version ${a.version}.`);
+  if (target.revoked_at) throw new InputError(`Pack version ${a.version} is revoked: its link does not open. Nothing changed.`);
+  const at = now();
+  // One transaction: the audit row is written only when the pack still holds the content we read, and so is the change.
+  const swap = async (next: string, audit: D1PreparedStatement) => {
+    const [, u] = await env.DB.batch([
+      audit,
+      env.DB.prepare("UPDATE packs SET content = ? WHERE id = ? AND content = ?").bind(next, target.id, target.content),
+    ]);
+    if (!u?.meta.changes) throw new InputError("The pack changed while this ran. Nothing changed. Run it again.");
+  };
+
+  if (a.undo) {
+    if (a.fromVersion !== undefined) throw new InputError("Give fromVersion or undo, not both.");
+    const last = await env.DB.prepare("SELECT id, from_pack_id, old_content FROM pack_updates WHERE pack_id = ? AND undone_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1")
+      .bind(target.id).first<{ id: string; from_pack_id: string; old_content: string }>();
+    if (!last) throw new InputError(`Pack version ${a.version} has no change to undo.`);
+    await swap(last.old_content, env.DB.prepare("UPDATE pack_updates SET undone_at = ? WHERE id = ? AND undone_at IS NULL AND EXISTS (SELECT 1 FROM packs WHERE id = ? AND content = ?)")
+      .bind(at, last.id, target.id, target.content));
+    const ads = (JSON.parse(last.old_content) as PackContent).ads;
+    return { packId: target.id, version: target.version, undone: true, ads: ads.map((x) => ({ name: x.name, imageKey: x.imageKey })), note: "The pack shows its content from before the last change again. Same link." };
+  }
+
+  if (a.fromVersion === undefined) throw new InputError("Give fromVersion (the pack whose ads and text to copy in), or undo true.");
+  if (a.fromVersion === a.version) throw new InputError("version and fromVersion are the same pack.");
+  const source = await row(a.fromVersion);
+  if (!source) throw new InputError(`This batch has no pack version ${a.fromVersion}.`);
+  const old = JSON.parse(target.content) as PackContent;
+  const src = JSON.parse(source.content) as PackContent;
+  const byKey = new Map(src.ads.map((x) => [adKey(x.name), x]));
+  const missing = old.ads.filter((x) => !byKey.has(adKey(x.name))).map((x) => x.name);
+  const extra = src.ads.filter((x) => !old.ads.some((o) => adKey(o.name) === adKey(x.name))).map((x) => x.name);
+  if (missing.length || extra.length)
+    throw new InputError(
+      `The two packs do not hold the same ideas. Nothing changed.${missing.length ? ` Not in v${a.fromVersion}: ${missing.join(", ")}.` : ""}${extra.length ? ` Not in v${a.version}: ${extra.join(", ")}.` : ""}`,
+    );
+  const next: PackContent = {
+    ...src,
+    brand: old.brand,
+    ads: old.ads.map((o) => {
+      const n = byKey.get(adKey(o.name))!;
+      // Keep the name (the client's Ads Manager and results use it) and the stage; take everything the client sees from the newer pack.
+      return { ...n, name: o.name, stage: o.stage };
+    }),
+  };
+  const content = JSON.stringify(next);
+  if (content === target.content) throw new InputError(`Pack version ${a.version} already shows the ads and text of v${a.fromVersion}. Nothing changed.`);
+  await swap(content, env.DB.prepare("INSERT INTO pack_updates (id, pack_id, from_pack_id, old_content, created_at) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM packs WHERE id = ? AND content = ?)")
+    .bind(crypto.randomUUID(), target.id, source.id, target.content, at, target.id, target.content));
+  return {
+    packId: target.id,
+    version: target.version,
+    from: a.fromVersion,
+    ads: next.ads.map((x, i) => ({
+      name: x.name,
+      picture: old.ads[i]!.imageKey === x.imageKey ? "same" : { was: old.ads[i]!.imageKey, now: x.imageKey },
+      textChanged: JSON.stringify([old.ads[i]!.primaryTexts, old.ads[i]!.headlines, old.ads[i]!.description, old.ads[i]!.cta, old.ads[i]!.why, old.ads[i]!.headline]) !==
+        JSON.stringify([x.primaryTexts, x.headlines, x.description, x.cta, x.why, x.headline]),
+    })),
+    note: `Same link, same ad names. The client's comments and uploads on v${a.version} stay. The old content is kept: pack_update undo puts it back.`,
+  };
+}

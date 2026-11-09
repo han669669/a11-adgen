@@ -189,6 +189,101 @@ describe("pack_publish", () => {
   });
 });
 
+describe("pack_update", () => {
+  // Three packs of one batch, like W47: v1 has the client's comment and upload, v2 has the newer approved pictures and text.
+  async function twoVersions() {
+    const m = makeEnv();
+    const s = await seed(m.env, m.raw, m.files);
+    const at = new Date("2026-11-07T04:00:00Z");
+    const v1 = await pack.packPublish(m.env, { batchId: s.b.id, ads: [{ renderId: s.finals[0]!, ...copy() }, { renderId: s.finals[1]!, ...copy() }], at });
+    // Newer finals for both ideas (a repaired picture), and new text.
+    const newer = s.ideas.map((idea, i) => {
+      const id = `eeeeeeee-eeee-eeee-eeee-00000000000${i}`;
+      m.raw
+        .prepare(
+          `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, image_keys, composed_key, usd_est, created_at, updated_at)
+           VALUES (?, ?, ?, 'final', 'done', 'p', '[]', 1536, 1920, 'high', 1, ?, ?, 0.06, 'now', 'now')`,
+        )
+        .run(id, s.b.id, idea.id, JSON.stringify([`renders/${id}/1.jpg`]), `renders/${id}/1-c2.jpg`);
+      m.files.set(`renders/${id}/1-c2.jpg`, `new-jpeg-${i}`);
+      return id;
+    });
+    const v2 = await pack.packPublish(m.env, {
+      batchId: s.b.id,
+      ads: [{ renderId: newer[1]!, ...copy({ headlines: ["Four jars, one shot", "Free delivery from S$35"] }) }, { renderId: newer[0]!, ...copy({ why: "New why line for the top ad (Reddit, 08-11-2026)." }) }],
+      at: new Date("2026-11-09T04:00:00Z"),
+    });
+    m.raw.prepare("INSERT INTO comments (id, pack_id, ad_name, body, created_at) VALUES ('c1', ?, ?, 'looks great', 'now')").run(v1.packId, v1.adNames[0]!);
+    m.raw.prepare("INSERT INTO uploads (id, pack_id, r2_key, kind, bytes, file_name, created_at) VALUES ('u1', ?, 'uploads/x/u1.png', 'image', 10, 'shot.png', 'now')").run(v1.packId);
+    const content = (id: string) => JSON.parse((m.raw.prepare("SELECT content FROM packs WHERE id = ?").get(id) as { content: string }).content) as pack.PackContent;
+    return { ...m, ...s, v1, v2, newer, content };
+  }
+
+  it("puts the newer pictures and text into the old link, and keeps its link, ad names, comments and uploads", async () => {
+    const { env, raw, b, v1, v2, newer, content } = await twoVersions();
+    expect(v2.adNames).toEqual(["a11_W46_wongi_b01_bof_c02_v2", "a11_W46_wongi_b01_tof_c01_v2"]); // other week, other order
+    const r = await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2 });
+    expect(r.packId).toBe(v1.packId);
+    expect(r.ads.map((x) => x.name)).toEqual(v1.adNames);
+    expect(r.ads.every((x) => "picture" in x && x.picture !== "same" && x.textChanged)).toBe(true);
+    const c = content(v1.packId);
+    expect(c.ads.map((x) => x.name)).toEqual(["a11_W45_wongi_b01_tof_c01_v1", "a11_W45_wongi_b01_bof_c02_v1"]);
+    expect(c.ads.map((x) => x.imageKey)).toEqual([`renders/${newer[0]}/1-c2.jpg`, `renders/${newer[1]}/1-c2.jpg`]);
+    expect(c.ads[0]!.why).toMatch(/New why line/);
+    expect(c.ads[1]!.headlines[0]).toBe("Four jars, one shot");
+    // The old link opens the new picture; comments and uploads stay on the old pack.
+    const token = v1.link.split("/c/")[1]!;
+    const page = await (await worker.fetch(new Request(`https://w/c/${token}`), env)).text();
+    expect(page).toContain("Four jars, one shot");
+    expect(await (await worker.fetch(new Request(`https://w/c/${token}/ad/1.jpg`), env)).text()).toBe("new-jpeg-0");
+    expect(raw.prepare("SELECT pack_id FROM comments").get()).toEqual({ pack_id: v1.packId });
+    expect(raw.prepare("SELECT pack_id FROM uploads").get()).toEqual({ pack_id: v1.packId });
+    // v2 itself does not change, and the audit row keeps the old content.
+    expect(content(v2.packId).ads.map((x) => x.name)).toEqual(v2.adNames);
+    const audit = raw.prepare("SELECT pack_id, from_pack_id, old_content, undone_at FROM pack_updates").all() as { pack_id: string; from_pack_id: string; old_content: string; undone_at: string | null }[];
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ pack_id: v1.packId, from_pack_id: v2.packId, undone_at: null });
+    expect(JSON.parse(audit[0]!.old_content).ads[0].imageKey).toBe("renders/aaaaaaaa-aaaa-aaaa-aaaa-000000000000/1-c1.jpg");
+  });
+
+  it("undo puts back the content from before the last change, one change at a time", async () => {
+    const { env, b, v1, content } = await twoVersions();
+    const before = content(v1.packId);
+    await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2 });
+    const r = await pack.packUpdate(env, { batchId: b.id, version: 1, undo: true });
+    expect(r).toMatchObject({ undone: true, version: 1 });
+    expect(content(v1.packId)).toEqual(before);
+    await expect(pack.packUpdate(env, { batchId: b.id, version: 1, undo: true })).rejects.toThrow(/no change to undo/);
+  });
+
+  it("refuses a revoked pack, a missing version, the same version, no source, and a pack with other ideas", async () => {
+    const { env, raw, b, v1, v2, finals } = await twoVersions();
+    const up = (x: Partial<Parameters<typeof pack.packUpdate>[1]>) => pack.packUpdate(env, { batchId: b.id, version: 1, ...x });
+    await expect(up({ fromVersion: 9 })).rejects.toThrow(/no pack version 9/);
+    await expect(up({ fromVersion: 1 })).rejects.toThrow(/same pack/);
+    await expect(up({})).rejects.toThrow(/Give fromVersion/);
+    await expect(up({ fromVersion: 2, undo: true })).rejects.toThrow(/not both/);
+    const v3 = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy() }] });
+    await expect(up({ fromVersion: v3.version })).rejects.toThrow(/not hold the same ideas.*bof_c02_v1/);
+    await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2 });
+    await expect(up({ fromVersion: 2 })).rejects.toThrow(/already shows/);
+    await pack.packRevoke(env, v2.packId);
+    await pack.packRevoke(env, v1.packId);
+    await expect(up({ fromVersion: 2 })).rejects.toThrow(/revoked/);
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM pack_updates").get()).toEqual({ n: 1 });
+  });
+
+  it("checks the tool input", () => {
+    const t = TOOLS.find((x) => x.name === "pack_update")!;
+    const batchId = "11111111-1111-1111-1111-111111111111";
+    expect(() => validate(t.inputSchema, { batchId, version: 1, fromVersion: 5 })).not.toThrow();
+    expect(() => validate(t.inputSchema, { batchId, version: 1, undo: true })).not.toThrow();
+    expect(() => validate(t.inputSchema, { batchId, version: 0, fromVersion: 5 })).toThrow();
+    expect(() => validate(t.inputSchema, { batchId, fromVersion: 5 })).toThrow();
+    expect(() => validate(t.inputSchema, { batchId, version: 1, packId: "x" })).toThrow();
+  });
+});
+
 import { sentences as sentencesOf } from "../worker/portal";
 
 describe("client portal", () => {
