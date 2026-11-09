@@ -99,7 +99,7 @@ describe("tools without a test elsewhere", () => {
     vi.stubGlobal("fetch", async () => new Response("down", { status: 503 }));
     await expect(run(env, "exa_search", { query: "barley tea" })).rejects.toThrow(/HTTP 503/);
     const rows = raw.prepare("SELECT status FROM spend WHERE service = 'exa'").all() as { status: string }[];
-    expect(rows.every((r) => r.status !== "spent")).toBe(true);
+    expect(rows.map((r) => r.status)).toEqual(["released"]);
   });
 });
 
