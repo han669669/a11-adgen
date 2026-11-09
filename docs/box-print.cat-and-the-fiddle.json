@@ -2,7 +2,7 @@
   "packshot": "packshot.jpg",
   "face": [95, 445, 585, 650],
   "font": "oswald-var.ttf",
-  "wght": 400,
+  "wght": 600,
   "blocks": [
     { "box": [100, 452, 290, 555], "xmin": 104, "thr": [0.40, 0.60, 0.6] },
     {

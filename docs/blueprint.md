@@ -52,7 +52,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | 10 | Final | PAID fal | `edit`, `quality: high`, 1536x1920, with the chosen draft as a reference so the layout stays. Claude checks the final once. |
 | 11 | Pack | CODE, CLAUDE | Build the deliverable (§5). Publish the client link. |
 | 12 | Results | CLIENT, CLAUDE | The client uploads Ads Manager screenshots, CSV files or `.xlsx` Excel files in the portal, up to 10 files at a time, each under 20 MB and 30 MB in all (the client downloads a Google Sheet as `.xlsx` or CSV first; or sends the files on WhatsApp and the owner drops them on the board). Claude reads CTR, CPC, spend per ad name. Baseline CTR comes from one screenshot at onboarding (D3). |
-| 13 | Learn | CLAUDE | `/mcp__a11__learn` reads new picks, notes and results. It changes the canon and the swipe file. It records each change with its evidence. The owner can undo any change on the board; no approval is needed (D2). |
+| 13 | Learn | CLAUDE | `/a11:learn` (with the plugin; without it, `/mcp__a11__learn`) reads new picks, notes and results. It changes the canon and the swipe file. It records each change with its evidence. The owner can undo any change on the board; no approval is needed (D2). |
 
 ## 4. Learning and self-curation
 
@@ -77,6 +77,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | Launch plan | One ad set, all 4 ads, 72 hours, the kill rule |
 | Fact check | Every claim and its source; HSA-safe note for health products |
 | Week report (from week 2) | CTR vs baseline per ad, winners kept, what next week tries |
+| Change a link in place | `pack_update` (built 09-11-2026): put the ads and the Meta text of a newer approved version into a link the client already has. The link, its ad names, the comments and the uploads stay. Ads match by stage and idea. Every change keeps the old content in `pack_updates`; `undo` puts it back. Owner, 09-11-2026: never revoke a link to replace its ads. |
 
 ## 6. MCP surface
 
@@ -88,12 +89,12 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | Ideas | `ideas_save`, `ideas_pick_save` |
 | Images | `render_drafts`, `render_edit`, `render_final`, `image_get` (returns the image) |
 | Human step | `picks_save` (saves the owner's draft picks with his own words; the board saves the same picks) |
-| Memory | `taste_log` (his picks and passes with the critic's rank), `canon_get`, `canon_update`, `swipe_add`, `swipe_search`, `gold_import`, `gold_get`, `gold_score`, `gold_runs` (all built in Phase 2a), `picks_get` (not built yet), `baseline_save`, `results_save`, `results_get` (built in Phase 3b: the results ledger), `comments_get` (built in Phase 3b: the client's comments), `uploads_get`, `uploads_done` (built in Phase 3b: the client's results files) |
-| Ops | `batch_status`, `spend_get`, `pack_publish` |
+| Memory | `taste_log` (his picks and passes with the critic's rank), `canon_get`, `canon_update`, `swipe_add`, `swipe_search`, `gold_import`, `gold_get`, `gold_score`, `gold_runs` (all built in Phase 2a), `picks_get` (built 09-11-2026: picks with their finals, pack versions and next step), `baseline_save`, `results_save`, `results_get` (built in Phase 3b: the results ledger), `comments_get` (built in Phase 3b: the client's comments), `uploads_get`, `uploads_done` (built in Phase 3b: the client's results files) |
+| Ops | `batch_status`, `spend_get`, `pack_publish`, `upload_link` (one-time upload of a repaired final or a skeleton, so agents need no admin token; built 09-11-2026), `final_attach`, `prompt_get` (the text of one prompt with its arguments filled in; each plugin short command calls it; built 09-11-2026), `pack_update` (newer approved ads into an existing client link, in place; built 09-11-2026, see §5) |
 
-Prompts (slash commands) live on the server (`worker/prompts.ts`). Claude Code shows each MCP prompt as `/mcp__a11__<name>`: `brand`, `batch`, `final`, `learn`, `gold-test` (built in Phase 2b); `redesign` (built, with the redesign subject) and `results` (built in Phase 3b). Each is resumable; state lives in D1.
+Prompts (slash commands) live on the server (`worker/prompts.ts`). With the plugin installed, type them as its short commands, `/a11:<name>` (added 09-11-2026: each file in `plugin/commands/` calls the `prompt_get` tool, so it runs the same server text). Claude Code also shows each MCP prompt as `/mcp__a11__<name>`; it sets that name and the server cannot change it. Without the plugin, use those names. The prompts: `brand`, `batch`, `final`, `learn`, `gold-test` (built in Phase 2b); `redesign` (built, with the redesign subject), `results` (built in Phase 3b) and `pack` (built 09-11-2026: the approved final per pick, box print for a boxed product, then `pack_publish`). Each is resumable; state lives in D1.
 
-Plugin (in this repo, `plugin/`, installed once): subagents `writer`, `critic`, `art-director`, plus the MCP config. Install: `/plugin marketplace add han669669/a11-adgen`, then `/plugin install a11@a11-adgen`. The plugin's MCP config has no token. The first time, Claude Code should open a browser: sign in with the web app account, then press Allow (not yet verified in Claude Code; the OAuth flow was tested end to end on the preview Worker). After that it renews the token by itself (1 hour access token, 30 day refresh token).
+Plugin (in this repo, `plugin/`, installed once): subagents `writer`, `critic`, `art-director`, the short commands, plus the MCP config. Install: `/plugin marketplace add han669669/a11-adgen`, then `/plugin install a11@a11-adgen`. The plugin's MCP config has no token. The first time, Claude Code should open a browser: sign in with the web app account, then press Allow (not yet verified in Claude Code; the OAuth flow was tested end to end on the preview Worker). After that it renews the token by itself (1 hour access token, 30 day refresh token).
 
 Connect without the plugin (an alternative; do not add it when the plugin is installed, because both name the server `a11`):
 
@@ -144,8 +145,8 @@ Phase 0 measures the real fal cost at 1536x1920 high and the Claude usage per ba
 |---|---|---|
 | 0. Spike | Worker `a11adgen` with `/mcp` (OAuth stub or allow-list token), tools `exa_search`, `render_drafts`, `image_get`, `render_final`. One product, one idea, 3 drafts, 1 final. | Claude Code makes one 4:5 final end to end. Cost, Claude usage and time recorded. |
 | 1. Core loop | Email + password auth with allow-list, full OAuth for MCP, D1 schema, brand kit, product / brand-only / redesign subjects, ideas, drafts, the final-pick board, finals. | One full batch of 4. Owner's pick recorded. |
-| 2. Learning | Canon, swipe file, `/mcp__a11__learn`, critic subagent, v1 export → gold set. | Gold-set agreement measured before and after one canon change. |
-| 3. Client side | Pack, client portal, ad names, results upload and read, baseline, week report. | One real client week: pack sent, results read back. |
+| 2. Learning | Canon, swipe file, `/a11:learn`, critic subagent, v1 export → gold set. | Gold-set agreement measured before and after one canon change. |
+| 3. Client side | Pack, client portal, ad names, results upload and read, baseline, week report. | One real client week: pack sent, results read back. Code built; the real week waits for the first paying client (owner, 09-11-2026, `docs/backlog.md`). |
 | 4. Growth (later) | Meta Ad Library research (Apify), Exa Websets prospect lists, 9:16 extension. | Owner asks for it. |
 
 ## 11. Open points
@@ -153,7 +154,7 @@ Phase 0 measures the real fal cost at 1536x1920 high and the Claude usage per ba
 | Point | Status |
 |---|---|
 | `main` branch | Created 2026-11-06 (owner yes). The GitHub default branch is `main` (owner confirmed 07-11-2026). |
-| First real client | Cat & the Fiddle (https://www.catandthefiddle.com/), product Fickle Feline 2.0 Cheesecake (owner, 07-11-2026). v1 made ads for this product too, and the owner's marks on them are in the gold set. |
+| First real client | Pending: no paying client yet (owner, 09-11-2026). Cat & the Fiddle (https://www.catandthefiddle.com/), product Fickle Feline 2.0 Cheesecake (owner, 07-11-2026), is a test brand used to refine the tool; nothing is sent to it. v1 made ads for this product too, and the owner's marks on them are in the gold set. |
 | MCP auth | OAuth 2.1 (owner, 07-11-2026: "safety first", take the agent's recommendation). Built 07-11-2026 with one free KV namespace (`a11adgen-oauth`). The old bearer token still works for scripts. |
 | Studio site (a11studio.pro) | Not touched by this repo's agents. Another agent handles it and the owner decides its copy (owner, 07-11-2026). |
 | Cloudflare plan | Workers Free (owner, 2026-11-06). Limits in `AGENTS.md` §6. |

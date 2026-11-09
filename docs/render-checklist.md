@@ -1,6 +1,6 @@
 # Render checklist
 
-Read this file before you write a draft or final prompt, when you pick drafts, and before you send a final. It holds the owner's picture notes from v1 (`han669669/ai-ad-generator`, 2026-10-12 to 2026-10-31): his Pass notes, his Use marks and the rules they produced (v1 `convex/lib/stage.ts` `SCENE_RULES` and `physicsBlock`, `convex/lib/taste/reasons.ts`, `convex/lib/hand.ts`, `convex/lib/objectRead.ts`, `docs/agent-handoff/rubric.md` sections K, L, M, N and P). Batch ids such as B44 are v1 batches.
+Read this file before you write a draft or final prompt, when you pick drafts, and before you send a final. It holds the owner's picture notes from v1 (`han669669/ai-ad-generator`, 2026-10-12 to 2026-10-31): his Pass notes, his Use marks and the rules they produced (v1 `convex/lib/stage.ts` `SCENE_RULES` and `physicsBlock`, `convex/lib/taste/reasons.ts`, `convex/lib/hand.ts`, `convex/lib/objectRead.ts`, `docs/agent-handoff/rubric.md` sections K, L, M, N and P). Batch ids such as B44 are v1 batches. Later rows (from D9) also hold v2 notes; their batch labels, such as W47, are v2 batches.
 
 These are words for you to apply with judgement, not code rules (`docs/v1-lessons.md` §2.2). The idea comes first (`docs/creative-playbook.md` §2). This list stops a good idea from being rejected for its picture.
 
@@ -16,6 +16,7 @@ These are words for you to apply with judgement, not code rules (`docs/v1-lesson
 | D6 | **Unneeded serving.** Show a serving (a slice, a poured glass) only when it shows what the pack hides (cake layers, a tart in its tin) or the true size of a food sold by weight, and it fits the headline. | B46: the Oatside glass of milk "entirely destroys the ad"; the Kele tart "works fine". |
 | D7 | **Wrong or garbled logo**, or a logo inside a pill or badge. In v2 the real logo is drawn in code: keep the top band plain. | HFB5b "THEI"; reason code `logoPill`. |
 | D8 | **Race, ethnicity or religion.** In copy: never name them (the owner's hard no). In the picture: no stereotype, and never make a person's race, ethnicity or religion the point of the ad. | HFX-mix2: "sounds racist". |
+| D9 | **Box print that does not sit on the box.** On a boxed product, every printed line must match the real packshot: crisp, the same weight, the line rising with the box face, and the letter stems standing as they do in the photo. Stems that turn with the line read as a rotated sticker. Run `scripts/box_print.py` and read its `typeset stems` line: the tilt must end at the packshot's value. Compare each line at full size with the product page's own photo. | W47: "the packaging's \"artisan...\" and \"asian-inspired...\" it is smeared"; 09-11-2026: the caps line stems were 10 degrees off on tof and bof; after the fix: "yes looks so so much better". |
 
 ## 2. Faults: two of these reject the ad
 

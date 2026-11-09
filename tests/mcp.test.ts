@@ -43,7 +43,7 @@ describe("mcp handler", () => {
   });
   it("lists the prompts and returns one with its arguments filled in", async () => {
     const list: any = await (await post({ jsonrpc: "2.0", id: 4, method: "prompts/list" })).json();
-    expect(list.result.prompts.map((p: any) => p.name)).toEqual(["brand", "batch", "redesign", "final", "learn", "results", "gold-test"]);
+    expect(list.result.prompts.map((p: any) => p.name)).toEqual(["brand", "batch", "redesign", "final", "pack", "learn", "results", "gold-test"]);
     const got: any = await (await post({ jsonrpc: "2.0", id: 5, method: "prompts/get", params: { name: "final", arguments: { batchId: "abc-123" } } })).json();
     expect(got.result.messages[0].content.text).toContain("Batch abc-123");
     expect(got.result.messages[0].role).toBe("user");
@@ -90,7 +90,9 @@ describe("mcp handler", () => {
     const used = new Set<string>();
     for (const p of PROMPTS) for (const m of p.text({ url: "u", slug: "s", brand: "b", batchId: "", productUrl: "https://b.example/p", productTitle: "P", label: "W1", note: "n", adImageUrls: "https://a.example/1.png", title: "T" }).matchAll(/\b([a-z]+_[a-z_]+)\b/g)) used.add(m[1]!);
     expect(used.size).toBeGreaterThan(10);
-    expect([...used].filter((n) => !known.has(n))).toEqual([]);
+    // Script names in the repo (scripts/<name>.py) are not tools.
+    const scripts = new Set(["box_print"]);
+    expect([...used].filter((n) => !known.has(n) && !scripts.has(n))).toEqual([]);
   });
   it("names only tools that exist in the plugin's subagents", async () => {
     const { readdirSync, readFileSync } = await import("node:fs");
@@ -109,6 +111,67 @@ describe("mcp handler", () => {
     for (const [f, tool] of [["critic.md", "drafts_rank"], ["critic.md", "taste_log"], ["critic.md", "gold_score"], ["writer.md", "batch_get"], ["art-director.md", "brand_get"]]) {
       expect(text(f!)).toContain(tool!);
       expect(toolsLine(f!)).toContain(`mcp__a11__${tool}`);
+    }
+  });
+  it("prompt_get returns the same text as prompts/get, and refuses a missing argument", async () => {
+    const call = async (args: unknown) =>
+      ((await (await post({ jsonrpc: "2.0", id: 20, method: "tools/call", params: { name: "prompt_get", arguments: args } })).json()) as any).result;
+    const viaPrompt: any = await (await post({ jsonrpc: "2.0", id: 21, method: "prompts/get", params: { name: "pack", arguments: { batchId: "b1" } } })).json();
+    const viaTool = await call({ name: "pack", arguments: { batchId: "b1" } });
+    expect(viaTool.isError).toBeUndefined();
+    expect(viaTool.content[0].text).toBe(viaPrompt.result.messages[0].content.text);
+    expect((await call({ name: "learn" })).content[0].text).toContain("canon_update");
+    const missing = await call({ name: "final", arguments: {} });
+    expect(missing.isError).toBe(true);
+    expect(missing.content[0].text).toMatch(/Missing argument: batchId/);
+    expect((await call({ name: "nope" })).isError).toBe(true);
+    const foreign = await call({ name: "learn", arguments: { note: "x" } });
+    expect(foreign.isError).toBe(true);
+    expect(foreign.content[0].text).toMatch(/takes no argument note/);
+  });
+  it("has one plugin short command per prompt, and each runs its prompt through prompt_get", async () => {
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const { PROMPTS } = await import("../worker/prompts");
+    const dir = new URL("../plugin/commands/", import.meta.url);
+    const files = readdirSync(dir).filter((f) => f.endsWith(".md"));
+    expect(files.map((f) => f.replace(/\.md$/, "")).sort()).toEqual(PROMPTS.map((p) => p.name).sort());
+    for (const p of PROMPTS) {
+      const text = readFileSync(new URL(`${p.name}.md`, dir), "utf8");
+      expect(text).toMatch(/^---\ndescription: ".+"\n/);
+      expect(text).toContain(`\`prompt_get\` with name \`${p.name}\``);
+      for (const a of p.arguments) expect(text).toContain(`- ${a.name}`);
+    }
+    // The prompts point the owner to the short commands, never to the /mcp__ names.
+    for (const p of PROMPTS) expect(p.text({ url: "u", slug: "s", brand: "b", batchId: "", productUrl: "https://b.example/p", productTitle: "P", label: "W1", note: "n", adImageUrls: "https://a.example/1.png", title: "T" })).not.toContain("/mcp__");
+  });
+  it("runs every plugin short command end to end: its argument lines match the server, and prompt_get answers like prompts/get", async () => {
+    // The automated stand-in for typing each /a11:<name> in Claude Code (owner, 09-11-2026: automate what can be automated).
+    const { readFileSync } = await import("node:fs");
+    const { PROMPTS } = await import("../worker/prompts");
+    const dir = new URL("../plugin/commands/", import.meta.url);
+    const sample: Record<string, string> = {
+      url: "https://b.example", slug: "wongi", brand: "wongi", batchId: "11111111-1111-1111-1111-111111111111", productUrl: "https://b.example/p",
+      productTitle: "Pop Barley", label: "W48", note: "before canon change X", adImageUrls: "https://a.example/1.png https://a.example/2.png",
+      title: "Live ad", adUrl: "https://a.example/ad", reportDate: "2026-11-09",
+    };
+    for (const p of PROMPTS) {
+      const text = readFileSync(new URL(`${p.name}.md`, dir), "utf8");
+      for (const a of p.arguments) {
+        const line = text.split("\n").find((l) => l.startsWith(`- ${a.name}${a.required ? " (required)" : ""}: `));
+        expect(line, `${p.name}: line for ${a.name}`).toBeDefined();
+        if (a.name === "batchId") expect(line).toContain("(36 characters)");
+        else if (a.name === "adImageUrls") expect(line).toContain("up to 6, each at most 2000 characters");
+        else if (a.maxLength) expect(line).toContain(`at most ${a.maxLength} characters`);
+      }
+      // No extra argument in the command file: prompt_get refuses a name the prompt does not take.
+      const documented = [...text.matchAll(/^- ([A-Za-z]+)(?: \(required\))?: /gm)].map((m) => m[1]);
+      expect(documented.sort(), `${p.name}: documented arguments`).toEqual(p.arguments.map((a) => a.name).sort());
+      const args: Record<string, string> = {};
+      for (const a of p.arguments) if (a.required || (p.name === "batch" && a.name !== "batchId")) args[a.name] = sample[a.name]!;
+      const viaTool: any = ((await (await post({ jsonrpc: "2.0", id: 30, method: "tools/call", params: { name: "prompt_get", arguments: { name: p.name, arguments: args } } })).json()) as any).result;
+      expect(viaTool.isError, `${p.name}: ${viaTool.content[0].text}`).toBeUndefined();
+      const viaPrompt: any = await (await post({ jsonrpc: "2.0", id: 31, method: "prompts/get", params: { name: p.name, arguments: args } })).json();
+      expect(viaTool.content[0].text).toBe(viaPrompt.result.messages[0].content.text);
     }
   });
   it("refuses GET", async () => {
