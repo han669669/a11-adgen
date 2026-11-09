@@ -144,6 +144,36 @@ describe("mcp handler", () => {
     // The prompts point the owner to the short commands, never to the /mcp__ names.
     for (const p of PROMPTS) expect(p.text({ url: "u", slug: "s", brand: "b", batchId: "", productUrl: "https://b.example/p", productTitle: "P", label: "W1", note: "n", adImageUrls: "https://a.example/1.png", title: "T" })).not.toContain("/mcp__");
   });
+  it("runs every plugin short command end to end: its argument lines match the server, and prompt_get answers like prompts/get", async () => {
+    // The automated stand-in for typing each /a11:<name> in Claude Code (owner, 09-11-2026: automate what can be automated).
+    const { readFileSync } = await import("node:fs");
+    const { PROMPTS } = await import("../worker/prompts");
+    const dir = new URL("../plugin/commands/", import.meta.url);
+    const sample: Record<string, string> = {
+      url: "https://b.example", slug: "wongi", brand: "wongi", batchId: "11111111-1111-1111-1111-111111111111", productUrl: "https://b.example/p",
+      productTitle: "Pop Barley", label: "W48", note: "before canon change X", adImageUrls: "https://a.example/1.png https://a.example/2.png",
+      title: "Live ad", adUrl: "https://a.example/ad", reportDate: "2026-11-09",
+    };
+    for (const p of PROMPTS) {
+      const text = readFileSync(new URL(`${p.name}.md`, dir), "utf8");
+      for (const a of p.arguments) {
+        const line = text.split("\n").find((l) => l.startsWith(`- ${a.name}${a.required ? " (required)" : ""}: `));
+        expect(line, `${p.name}: line for ${a.name}`).toBeDefined();
+        if (a.name === "batchId") expect(line).toContain("(36 characters)");
+        else if (a.name === "adImageUrls") expect(line).toContain("up to 6, each at most 2000 characters");
+        else if (a.maxLength) expect(line).toContain(`at most ${a.maxLength} characters`);
+      }
+      // No extra argument in the command file: prompt_get refuses a name the prompt does not take.
+      const documented = [...text.matchAll(/^- ([A-Za-z]+)(?: \(required\))?: /gm)].map((m) => m[1]);
+      expect(documented.sort(), `${p.name}: documented arguments`).toEqual(p.arguments.map((a) => a.name).sort());
+      const args: Record<string, string> = {};
+      for (const a of p.arguments) if (a.required || (p.name === "batch" && a.name !== "batchId")) args[a.name] = sample[a.name]!;
+      const viaTool: any = ((await (await post({ jsonrpc: "2.0", id: 30, method: "tools/call", params: { name: "prompt_get", arguments: { name: p.name, arguments: args } } })).json()) as any).result;
+      expect(viaTool.isError, `${p.name}: ${viaTool.content[0].text}`).toBeUndefined();
+      const viaPrompt: any = await (await post({ jsonrpc: "2.0", id: 31, method: "prompts/get", params: { name: p.name, arguments: args } })).json();
+      expect(viaTool.content[0].text).toBe(viaPrompt.result.messages[0].content.text);
+    }
+  });
   it("refuses GET", async () => {
     const r = await handleMcp(new Request("https://x/mcp"), env);
     expect(r.status).toBe(405);
