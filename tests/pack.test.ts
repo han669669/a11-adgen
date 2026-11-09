@@ -246,6 +246,16 @@ describe("pack_update", () => {
     expect(JSON.parse(audit[0]!.old_content).ads[0].imageKey).toBe("renders/aaaaaaaa-aaaa-aaaa-aaaa-000000000000/1-c1.jpg");
   });
 
+  it("matches an old pack whose ad names have no batch number (packs from before 07-11-2026)", async () => {
+    const { env, raw, b, v1, content } = await twoVersions();
+    const c = content(v1.packId);
+    const oldNames = ["a11_W45_wongi_tof_c01_v1", "a11_W45_wongi_bof_c02_v1"];
+    raw.prepare("UPDATE packs SET content = ? WHERE id = ?").run(JSON.stringify({ ...c, ads: c.ads.map((x, i) => ({ ...x, name: oldNames[i] })) }), v1.packId);
+    const r = await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2 });
+    expect(r.ads.map((x) => x.name)).toEqual(oldNames);
+    expect(content(v1.packId).ads[1]!.headlines[0]).toBe("Four jars, one shot");
+  });
+
   it("undo puts back the content from before the last change, one change at a time", async () => {
     const { env, b, v1, content } = await twoVersions();
     const before = content(v1.packId);

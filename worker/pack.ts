@@ -173,13 +173,17 @@ export async function packByToken(env: Env, token: string): Promise<{ id: string
   return row ? { id: row.id, title: row.title, content: JSON.parse(row.content) as PackContent } : null;
 }
 
-/** The part of an ad name that stays across versions of one batch's pack: brand, batch number, stage and idea (not the week, not the version). */
-const adKey = (name: string) => name.replace(/^a11_W\d+_/, "").replace(/_v\d+$/, "");
+/**
+ * The part of an ad name that stays across versions of one batch's pack: the stage and the idea number (…_tof_c07_v3 gives tof_c07).
+ * Both packs are of one batch, so brand and batch are the same. Packs published before 07-11-2026 have no batch number in the name
+ * (a11_W45_catandthefiddle_tof_c07_v3), so the match must not use it.
+ */
+const adKey = (name: string) => /_([a-z]+_c\d+)_v\d+$/.exec(name)?.[1] ?? name;
 
 /**
  * Put the ads and the Meta text of a newer pack (fromVersion) into an older pack (version) of the same batch, in place.
  * The older pack keeps its link, its title and its ad names, so the client's comments, uploads and results still map to it.
- * Each ad is matched by stage and idea. Both packs must hold the same ideas. The text in the newer pack passed the fact check
+ * Each ad is matched by stage and idea number. Both packs must hold the same ideas. The text in the newer pack passed the fact check
  * when it was published; the fact check, launch plan and health note come across with it.
  * Every change keeps the old content in pack_updates. undo puts back the content before the latest change that is not yet undone.
  */
