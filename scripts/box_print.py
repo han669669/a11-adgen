@@ -28,6 +28,8 @@ The config is one JSON file per product (keep it next to the brand's kit notes):
     typeset  (optional) {"text": "...", "lean": degrees}: re-set the block in type, on the baseline measured from the photo's ink.
              Use it when the packshot is too small to show the real letters. "lean" is the stem lean of the print in the photo
              (top to the right, in degrees; measured on a real line of the same box).
+             After the warp, the script shears the typeset line so its stems tilt as the packshot's own print does (stems stay upright
+             on the box face; they must not turn with the baseline like a rotated sticker).
 """
 import argparse
 import json
@@ -185,6 +187,43 @@ class Box:
         return np.clip(out * 0.86, 0, 1), (ox, oy)
 
 
+def baseline_angle(a):
+    """Angle of a line of text in an alpha map (degrees, rising to the right is positive): the rotation that makes its rows sharpest."""
+    ys, xs = np.nonzero(a > 0.5)
+    best = (-1.0, 0.0)
+    for d in np.arange(-30, 30.01, 0.1):
+        t = np.radians(d)
+        r = ys * np.cos(t) + xs * np.sin(t)
+        v = float((np.bincount((r - r.min()).astype(int)).astype(float) ** 2).sum())
+        if v > best[0]:
+            best = (v, d)
+    return best[1]
+
+
+def stem_tilt(a):
+    """Tilt of the letter stems from the image vertical (degrees, top to the left is positive), for a line of text in an alpha map."""
+    base = baseline_angle(a)
+    ys, xs = np.nonzero(a > 0.5)
+    t = np.radians(base)
+    X, Y = xs * np.cos(t) - ys * np.sin(t), xs * np.sin(t) + ys * np.cos(t)
+    best = (-1.0, 0.0)
+    for lean in np.arange(-10, 30.01, 0.1):
+        u = X + (Y - Y.mean()) * np.tan(np.radians(lean))
+        v = float((np.bincount((u - u.min()).astype(int)).astype(float) ** 2).sum())
+        if v > best[0]:
+            best = (v, lean)
+    return base - best[1]
+
+
+def set_tilt(a, now, want):
+    """Shear an alpha map about its own centre row so the stems tilt by `want` degrees instead of `now`. The baseline stays where it is."""
+    ys, _ = np.nonzero(a > 0.5)
+    yc = float(ys.mean())
+    k = np.tan(np.radians(now)) - np.tan(np.radians(want))  # x moves by k per pixel above the centre row
+    M = np.float32([[1, -k, k * yc], [0, 1, 0]])
+    return cv2.warpAffine(a, M, (a.shape[1], a.shape[0]), flags=cv2.INTER_LINEAR)
+
+
 def darkness(g, close=41, thr_blur=12):
     bg = cv2.GaussianBlur(cv2.morphologyEx(g, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (close, close))), (0, 0), thr_blur)
     return np.clip(bg - g, 0, 255), bg
@@ -233,8 +272,16 @@ def run(cfg, src, dst, debug=None):
         H = refine(H0, b["box"], gF, pg)
         a, (ox, oy) = bx.ink_alpha(i)
         T = np.array([[1, 0, ox], [0, 1, oy], [0, 0, 1.0]])
-        a2 = cv2.warpPerspective(a, S2 @ H @ T @ Sk, (w * 2, h * 2), flags=cv2.INTER_LINEAR)
-        amap = np.maximum(amap, cv2.resize(a2, (w, h), interpolation=cv2.INTER_AREA))
+        a2 = cv2.resize(cv2.warpPerspective(a, S2 @ H @ T @ Sk, (w * 2, h * 2), flags=cv2.INTER_LINEAR), (w, h), interpolation=cv2.INTER_AREA)
+        if "typeset" in b:
+            # The type is set on a flat baseline and then warped, which can tilt its stems with the baseline (a "pasted" look).
+            # On the real box the stems stand as they do in the packshot (owner, 09-11-2026). Match the packshot's own stem tilt;
+            # the render keeps the packshot's camera angle (the product lock), so its tilt applies as it is.
+            want = stem_tilt(bx.ink_alpha(i, raw=True)[0])
+            now = stem_tilt(a2)
+            a2 = set_tilt(a2, now, want)
+            print("typeset stems: tilt", round(now, 1), "->", round(want, 1), "degrees (packshot", round(want, 1), ")")
+        amap = np.maximum(amap, a2)
     dF, _ = darkness(gF)
     near = cv2.dilate((amap > 0.02).astype(np.uint8) * 255, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25)))
     dark = cv2.bitwise_and(((dF > 14).astype(np.uint8) * 255), near)
