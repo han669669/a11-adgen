@@ -3,6 +3,7 @@ import { handleApi } from "./api";
 import { handleMcp } from "./mcp";
 import { handleComment, handlePortal, handleUpload } from "./portal";
 import { FILES_PER_SEND } from "./uploads";
+import { handleUploadLink, UPLOAD_PATH } from "./uploadlink";
 
 /** A Worker bundle on the Free plan is at most 3 MB. */
 const STAGE_MAX_BYTES = 3_000_000;
@@ -109,6 +110,10 @@ export default {
     if (url.pathname.startsWith("/admin/repair/") && request.method === "PUT") {
       return stage(request, env, url.pathname.slice("/admin/repair/".length), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$/, "repairs/", REPAIR_MAX_BYTES);
     }
+
+    // A one-time upload link from the MCP tool upload_link (a repaired final or a skeleton), so agents need no admin token.
+    const upload = UPLOAD_PATH.exec(url.pathname);
+    if (upload) return handleUploadLink(request, env, upload[1]!);
 
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);
 
