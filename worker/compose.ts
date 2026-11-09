@@ -79,7 +79,7 @@ export async function composeFinal(env: Env, input: ComposeInput) {
   }
 }
 
-/** A picture made outside the Worker (scripts/box_print.py), saved by PUT /admin/repair/<uuid>.jpg. */
+/** A picture made outside the Worker (scripts/box_print.py), saved by an upload_link PUT or by PUT /admin/repair/<uuid>.jpg. */
 export const REPAIR_KEY = /^repairs\/[0-9a-f-]{36}\.jpg$/;
 
 /** Width and height from the first frame header of a JPEG, or null when the bytes are not a JPEG. */
@@ -117,7 +117,7 @@ export function hasJpegEnd(b: Uint8Array): boolean {
 export async function finalAttach(env: Env, input: { key: string; upload: string }) {
   const m = RENDER_KEY.exec(input.key);
   if (!m) throw new Error("key must be a render image key (renders/<id>/<n>.jpg).");
-  if (!REPAIR_KEY.test(input.upload)) throw new Error("upload must be a repair key (repairs/<uuid>.jpg), saved with PUT /admin/repair/<uuid>.jpg.");
+  if (!REPAIR_KEY.test(input.upload)) throw new Error("upload must be a repair key (repairs/<uuid>.jpg), saved with an upload_link PUT or PUT /admin/repair/<uuid>.jpg.");
   const [, id, n] = m;
   const row = await env.DB.prepare("SELECT width, height, kind, status, composed_key FROM renders WHERE id = ?")
     .bind(id)
@@ -137,6 +137,7 @@ export async function finalAttach(env: Env, input: { key: string; upload: string
     throw new Error(`${input.upload} is ${size.width}x${size.height}, but the final is ${row.width}x${row.height}. Repair the picture at its own size.`);
   }
   const outKey = `renders/${id}/${n}-c${Date.now()}${crypto.getRandomValues(new Uint32Array(1))[0]}.jpg`;
-  await env.MEDIA.put(outKey, bytes, { httpMetadata: { contentType: "image/jpeg" } });
+  // The mark tells picks_get that this composed picture is a repair, not a plain compose.
+  await env.MEDIA.put(outKey, bytes, { httpMetadata: { contentType: "image/jpeg" }, customMetadata: { repairedFrom: input.upload } });
   return { key: outKey, url: mediaUrl(env, outKey), width: size.width, height: size.height };
 }
