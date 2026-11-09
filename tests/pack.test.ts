@@ -222,8 +222,10 @@ describe("pack_update", () => {
   it("puts the newer pictures and text into the old link, and keeps its link, ad names, comments and uploads", async () => {
     const { env, raw, b, v1, v2, newer, content } = await twoVersions();
     expect(v2.adNames).toEqual(["a11_W46_wongi_b01_bof_c02_v2", "a11_W46_wongi_b01_tof_c01_v2"]); // other week, other order
+    const title = (raw.prepare("SELECT title FROM packs WHERE id = ?").get(v1.packId) as { title: string }).title;
     const r = await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2 });
     expect(r.packId).toBe(v1.packId);
+    expect(raw.prepare("SELECT title FROM packs WHERE id = ?").get(v1.packId)).toEqual({ title });
     expect(r.ads.map((x) => x.name)).toEqual(v1.adNames);
     expect(r.ads.every((x) => "picture" in x && x.picture !== "same" && x.textChanged)).toBe(true);
     const c = content(v1.packId);
@@ -270,7 +272,8 @@ describe("pack_update", () => {
     const { env, raw, b, v1, v2, finals } = await twoVersions();
     const up = (x: Partial<Parameters<typeof pack.packUpdate>[1]>) => pack.packUpdate(env, { batchId: b.id, version: 1, ...x });
     await expect(up({ fromVersion: 9 })).rejects.toThrow(/no pack version 9/);
-    await expect(up({ fromVersion: 1 })).rejects.toThrow(/same pack/);
+    await expect(up({ fromVersion: 1 })).rejects.toThrow(/must be newer/);
+    await expect(pack.packUpdate(env, { batchId: b.id, version: 2, fromVersion: 1 })).rejects.toThrow(/must be newer/);
     await expect(up({})).rejects.toThrow(/Give fromVersion/);
     await expect(up({ fromVersion: 2, undo: true })).rejects.toThrow(/not both/);
     const v3 = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy() }] });
@@ -278,9 +281,22 @@ describe("pack_update", () => {
     await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2 });
     await expect(up({ fromVersion: 2 })).rejects.toThrow(/already shows/);
     await pack.packRevoke(env, v2.packId);
+    await expect(up({ undo: true })).resolves.toMatchObject({ undone: true }); // a revoked source does not block undo
+    await expect(up({ fromVersion: 2 })).rejects.toThrow(/version 2 is revoked/);
     await pack.packRevoke(env, v1.packId);
-    await expect(up({ fromVersion: 2 })).rejects.toThrow(/revoked/);
+    await expect(up({ fromVersion: 2 })).rejects.toThrow(/version 1 is revoked/);
     expect(raw.prepare("SELECT COUNT(*) AS n FROM pack_updates").get()).toEqual({ n: 1 });
+  });
+
+  it("refuses to change a pack that is revoked after it was read", async () => {
+    const { env, raw, b, v1, content } = await twoVersions();
+    const before = content(v1.packId);
+    // A revoke lands between the read and the write: the guarded write then changes nothing.
+    const real = env.DB.batch.bind(env.DB);
+    (env.DB as { batch: unknown }).batch = async (s: D1PreparedStatement[]) => (raw.prepare("UPDATE packs SET revoked_at = 'now' WHERE id = ?").run(v1.packId), real(s));
+    await expect(pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2 })).rejects.toThrow(/revoked while this ran/);
+    expect(content(v1.packId)).toEqual(before);
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM pack_updates").get()).toEqual({ n: 0 });
   });
 
   it("checks the tool input", () => {

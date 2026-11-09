@@ -199,9 +199,9 @@ export async function packUpdate(env: Env, a: { batchId: string; version: number
   const swap = async (next: string, audit: D1PreparedStatement) => {
     const [, u] = await env.DB.batch([
       audit,
-      env.DB.prepare("UPDATE packs SET content = ? WHERE id = ? AND content = ?").bind(next, target.id, target.content),
+      env.DB.prepare("UPDATE packs SET content = ? WHERE id = ? AND content = ? AND revoked_at IS NULL").bind(next, target.id, target.content),
     ]);
-    if (!u?.meta.changes) throw new InputError("The pack changed while this ran. Nothing changed. Run it again.");
+    if (!u?.meta.changes) throw new InputError("The pack changed or was revoked while this ran. Nothing changed.");
   };
 
   if (a.undo) {
@@ -209,16 +209,18 @@ export async function packUpdate(env: Env, a: { batchId: string; version: number
     const last = await env.DB.prepare("SELECT id, from_pack_id, old_content FROM pack_updates WHERE pack_id = ? AND undone_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1")
       .bind(target.id).first<{ id: string; from_pack_id: string; old_content: string }>();
     if (!last) throw new InputError(`Pack version ${a.version} has no change to undo.`);
-    await swap(last.old_content, env.DB.prepare("UPDATE pack_updates SET undone_at = ? WHERE id = ? AND undone_at IS NULL AND EXISTS (SELECT 1 FROM packs WHERE id = ? AND content = ?)")
+    await swap(last.old_content, env.DB.prepare("UPDATE pack_updates SET undone_at = ? WHERE id = ? AND undone_at IS NULL AND EXISTS (SELECT 1 FROM packs WHERE id = ? AND content = ? AND revoked_at IS NULL)")
       .bind(at, last.id, target.id, target.content));
     const ads = (JSON.parse(last.old_content) as PackContent).ads;
     return { packId: target.id, version: target.version, undone: true, ads: ads.map((x) => ({ name: x.name, imageKey: x.imageKey })), note: "The pack shows its content from before the last change again. Same link." };
   }
 
   if (a.fromVersion === undefined) throw new InputError("Give fromVersion (the pack whose ads and text to copy in), or undo true.");
-  if (a.fromVersion === a.version) throw new InputError("version and fromVersion are the same pack.");
+  // Only forward: an older pack never overwrites a newer link. undo is the way back.
+  if (a.fromVersion <= a.version) throw new InputError("fromVersion must be newer than version. To go back, use undo.");
   const source = await row(a.fromVersion);
   if (!source) throw new InputError(`This batch has no pack version ${a.fromVersion}.`);
+  if (source.revoked_at) throw new InputError(`Pack version ${a.fromVersion} is revoked. Nothing changed.`);
   const old = JSON.parse(target.content) as PackContent;
   const src = JSON.parse(source.content) as PackContent;
   const byKey = new Map(src.ads.map((x) => [adKey(x.name), x]));
@@ -239,7 +241,7 @@ export async function packUpdate(env: Env, a: { batchId: string; version: number
   };
   const content = JSON.stringify(next);
   if (content === target.content) throw new InputError(`Pack version ${a.version} already shows the ads and text of v${a.fromVersion}. Nothing changed.`);
-  await swap(content, env.DB.prepare("INSERT INTO pack_updates (id, pack_id, from_pack_id, old_content, created_at) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM packs WHERE id = ? AND content = ?)")
+  await swap(content, env.DB.prepare("INSERT INTO pack_updates (id, pack_id, from_pack_id, old_content, created_at) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM packs WHERE id = ? AND content = ? AND revoked_at IS NULL)")
     .bind(crypto.randomUUID(), target.id, source.id, target.content, at, target.id, target.content));
   return {
     packId: target.id,
