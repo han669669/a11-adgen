@@ -145,7 +145,7 @@ Phase 0 measures the real fal cost at 1536x1920 high and the Claude usage per ba
 | 0. Spike | Worker `a11adgen` with `/mcp` (OAuth stub or allow-list token), tools `exa_search`, `render_drafts`, `image_get`, `render_final`. One product, one idea, 3 drafts, 1 final. | Claude Code makes one 4:5 final end to end. Cost, Claude usage and time recorded. |
 | 1. Core loop | Email + password auth with allow-list, full OAuth for MCP, D1 schema, brand kit, product / brand-only / redesign subjects, ideas, drafts, the final-pick board, finals. | One full batch of 4. Owner's pick recorded. |
 | 2. Learning | Canon, swipe file, `/mcp__a11__learn`, critic subagent, v1 export → gold set. | Gold-set agreement measured before and after one canon change. |
-| 3. Client side | Pack, client portal, ad names, results upload and read, baseline, week report. | One real client week: pack sent, results read back. |
+| 3. Client side | Pack, client portal, ad names, results upload and read, baseline, week report. | One real client week: pack sent, results read back. Code built; the real week waits for the first paying client (owner, 09-11-2026, `docs/backlog.md`). |
 | 4. Growth (later) | Meta Ad Library research (Apify), Exa Websets prospect lists, 9:16 extension. | Owner asks for it. |
 
 ## 11. Open points
