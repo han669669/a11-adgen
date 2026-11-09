@@ -35,13 +35,14 @@ export async function picksGet(env: Env, batchId: string) {
   const usedIn = new Map<string, number[]>();
   const copyOf = new Map<number, { launchPlan?: string; ads: Omit<PackAdCopy, "imageKey">[] }>();
   for (const p of packs) {
-    let c: { ads?: PackAdCopy[]; launchPlan?: string };
+    let c: { ads?: PackAdCopy[]; launchPlan?: string } | null;
     try {
       c = JSON.parse(p.content) as typeof c;
     } catch {
       continue;
     }
-    const ads = c.ads ?? [];
+    if (!c || typeof c !== "object") continue;
+    const ads = Array.isArray(c.ads) ? c.ads : [];
     for (const a of ads) if (a.imageKey) usedIn.set(a.imageKey, [...(usedIn.get(a.imageKey) ?? []), p.version]);
     copyOf.set(p.version, { launchPlan: c.launchPlan, ads: ads.map(({ imageKey: _, ...x }) => x) });
   }
