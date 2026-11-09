@@ -40,7 +40,7 @@ function setup() {
   final(NEW, "2026-11-07T17:51:00Z", `renders/${NEW}/1-c2.jpg`);
   raw
     .prepare("INSERT INTO packs (id, batch_id, version, token_hash, title, content, created_at) VALUES ('p1', ?, 1, 'h', 't', ?, 'n')")
-    .run(B, JSON.stringify({ ads: [{ imageKey: `renders/${NEW}/1-c2.jpg` }] }));
+    .run(B, JSON.stringify({ ads: [{ name: "a11_W45_x_tof_c07_v1", imageKey: `renders/${NEW}/1-c2.jpg`, headlines: ["Wait, there's ten?", "Ten flavours in one cake"] }], launchPlan: "One ad set." }));
 
   const files = new Map<string, { bytes: Uint8Array; meta?: Record<string, string> }>();
   const MEDIA = {
@@ -72,7 +72,9 @@ describe("picks_get", () => {
     expect(p.finals[1]!.inPacks).toEqual([]);
     expect(p.latest).toMatchObject({ renderId: NEW, repaired: false });
     expect(p.next).toContain("pack_publish");
-    expect(out.packs).toEqual([{ version: 1, revoked: false }]);
+    expect(out.packs).toEqual([
+      { version: 1, revoked: false, copy: { launchPlan: "One ad set.", ads: [{ name: "a11_W45_x_tof_c07_v1", headlines: ["Wait, there's ten?", "Ten flavours in one cake"] }] } },
+    ]);
   });
   it("says what comes next when the final is missing or not composed", async () => {
     const { env, raw } = setup();

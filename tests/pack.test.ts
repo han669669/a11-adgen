@@ -219,11 +219,24 @@ describe("pack_update", () => {
     return { ...m, ...s, v1, v2, newer, content };
   }
 
-  it("puts the newer pictures and text into the old link, and keeps its link, ad names, comments and uploads", async () => {
+  it("by default puts only the newer pictures into the old link: its approved Meta text, fact check and launch plan stay", async () => {
+    const { env, b, v1, newer, content } = await twoVersions();
+    const before = content(v1.packId);
+    const r = await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2 });
+    expect(r.text).toMatch(/^kept/);
+    expect(r.ads.every((x) => "picture" in x && x.picture !== "same" && !x.textChanged)).toBe(true);
+    const c = content(v1.packId);
+    expect(c.ads.map((x) => x.imageKey)).toEqual([`renders/${newer[0]}/1-c2.jpg`, `renders/${newer[1]}/1-c2.jpg`]);
+    expect({ ...c, ads: c.ads.map(({ imageKey: _, ...x }) => x) }).toEqual({ ...before, ads: before.ads.map(({ imageKey: _, ...x }) => x) });
+    await expect(pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2 })).rejects.toThrow(/already shows the pictures of v2/);
+  });
+
+  it("with text true puts the newer pictures and text into the old link, and keeps its link, ad names, comments and uploads", async () => {
     const { env, raw, b, v1, v2, newer, content } = await twoVersions();
     expect(v2.adNames).toEqual(["a11_W46_wongi_b01_bof_c02_v2", "a11_W46_wongi_b01_tof_c01_v2"]); // other week, other order
     const title = (raw.prepare("SELECT title FROM packs WHERE id = ?").get(v1.packId) as { title: string }).title;
-    const r = await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2 });
+    const r = await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2, text: true });
+    expect(r.text).toMatch(/^copied from v2/);
     expect(r.packId).toBe(v1.packId);
     expect(raw.prepare("SELECT title FROM packs WHERE id = ?").get(v1.packId)).toEqual({ title });
     expect(r.ads.map((x) => x.name)).toEqual(v1.adNames);
@@ -253,7 +266,7 @@ describe("pack_update", () => {
     const c = content(v1.packId);
     const oldNames = ["a11_W45_wongi_tof_c01_v1", "a11_W45_wongi_bof_c02_v1"];
     raw.prepare("UPDATE packs SET content = ? WHERE id = ?").run(JSON.stringify({ ...c, ads: c.ads.map((x, i) => ({ ...x, name: oldNames[i] })) }), v1.packId);
-    const r = await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2 });
+    const r = await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2, text: true });
     expect(r.ads.map((x) => x.name)).toEqual(oldNames);
     expect(content(v1.packId).ads[1]!.headlines[0]).toBe("Four jars, one shot");
   });
@@ -264,7 +277,7 @@ describe("pack_update", () => {
     await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2 });
     const middle = content(v1.packId);
     const v3 = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: newer[0]!, ...copy({ description: "Third version" }) }, { renderId: newer[1]!, ...copy() }] });
-    await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: v3.version });
+    await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: v3.version, text: true });
     expect(content(v1.packId).ads[0]!.description).toBe("Third version");
     // First undo: back to the content after the first change. Second undo: back to the original.
     expect(await pack.packUpdate(env, { batchId: b.id, version: 1, undo: true })).toMatchObject({ undone: true, version: 1 });
@@ -282,6 +295,8 @@ describe("pack_update", () => {
     await expect(pack.packUpdate(env, { batchId: b.id, version: 2, fromVersion: 1 })).rejects.toThrow(/must be newer/);
     await expect(up({})).rejects.toThrow(/Give fromVersion/);
     await expect(up({ fromVersion: 2, undo: true })).rejects.toThrow(/not both/);
+    await expect(up({ text: true, undo: true })).rejects.toThrow(/not both/);
+    await expect(up({ text: false, undo: true })).rejects.toThrow(/no change to undo/); // text false is the default, not a conflict
     const v3 = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy() }] });
     await expect(up({ fromVersion: v3.version })).rejects.toThrow(/not hold the same ideas.*bof_c02_v1/);
     await pack.packUpdate(env, { batchId: b.id, version: 1, fromVersion: 2 });
@@ -310,6 +325,8 @@ describe("pack_update", () => {
     const batchId = "11111111-1111-1111-1111-111111111111";
     expect(() => validate(t.inputSchema, { batchId, version: 1, fromVersion: 5 })).not.toThrow();
     expect(() => validate(t.inputSchema, { batchId, version: 1, undo: true })).not.toThrow();
+    expect(() => validate(t.inputSchema, { batchId, version: 1, fromVersion: 5, text: true })).not.toThrow();
+    expect(() => validate(t.inputSchema, { batchId, version: 1, fromVersion: 5, text: "yes" })).toThrow();
     expect(() => validate(t.inputSchema, { batchId, version: 0, fromVersion: 5 })).toThrow();
     expect(() => validate(t.inputSchema, { batchId, fromVersion: 5 })).toThrow();
     expect(() => validate(t.inputSchema, { batchId, version: 1, packId: "x" })).toThrow();

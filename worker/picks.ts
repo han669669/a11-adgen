@@ -30,16 +30,21 @@ export async function picksGet(env: Env, batchId: string) {
     ).results ?? [];
   const packs =
     (await env.DB.prepare("SELECT version, revoked_at, content FROM packs WHERE batch_id = ? ORDER BY version").bind(batchId).all<{ version: number; revoked_at: string | null; content: string }>()).results ?? [];
-  // Which pack versions show each composed picture.
+  // Which pack versions show each composed picture, and the Meta text of each version (the pack prompt reuses the approved copy word for word).
+  type PackAdCopy = { name?: string; stage?: string; imageKey?: string; primaryTexts?: string[]; headlines?: string[]; description?: string; cta?: string; why?: string };
   const usedIn = new Map<string, number[]>();
+  const copyOf = new Map<number, { launchPlan?: string; ads: Omit<PackAdCopy, "imageKey">[] }>();
   for (const p of packs) {
-    let ads: { imageKey?: string }[] = [];
+    let c: { ads?: PackAdCopy[]; launchPlan?: string } | null;
     try {
-      ads = (JSON.parse(p.content) as { ads?: { imageKey?: string }[] }).ads ?? [];
+      c = JSON.parse(p.content) as typeof c;
     } catch {
       continue;
     }
+    if (!c || typeof c !== "object") continue;
+    const ads = Array.isArray(c.ads) ? c.ads : [];
     for (const a of ads) if (a.imageKey) usedIn.set(a.imageKey, [...(usedIn.get(a.imageKey) ?? []), p.version]);
+    copyOf.set(p.version, { launchPlan: c.launchPlan, ads: ads.map(({ imageKey: _, ...x }) => x) });
   }
 
   const out = [];
@@ -94,7 +99,7 @@ export async function picksGet(env: Env, batchId: string) {
   return {
     batch: { id: batch.id, label: batch.label, status: batch.status },
     picks: out,
-    packs: packs.map((p) => ({ version: p.version, revoked: p.revoked_at !== null })),
-    note: "latest is the newest done and composed final of each picked idea. The owner may have approved an older one: follow his words. repaired true (on each final) means final_attach took in a picture fixed outside the Worker. imageKey is the key upload_link takes for a repair.",
+    packs: packs.map((p) => ({ version: p.version, revoked: p.revoked_at !== null, copy: copyOf.get(p.version) ?? null })),
+    note: "packs[].copy is each version's Meta text and launch plan: reuse the copy the owner approved word for word. latest is the newest done and composed final of each picked idea. The owner may have approved an older one: follow his words. repaired true (on each final) means final_attach took in a picture fixed outside the Worker. imageKey is the key upload_link takes for a repair.",
   };
 }

@@ -152,7 +152,7 @@ export async function packPublish(
       packId: id,
       version,
       link: `${env.PUBLIC_BASE_URL}/c/${token}`,
-      note: "The link is shown once. Send it to the client. packRevoke stops it.",
+      note: "The link is shown once. Give it to the owner only: he decides whether and how the client gets it. packRevoke stops it.",
       adNames: named.ads.map((x) => x.name),
       numbersChecked: factCheck.length,
     };
@@ -181,13 +181,14 @@ export async function packByToken(env: Env, token: string): Promise<{ id: string
 const adKey = (name: string) => /_([a-z]+_c\d+)_v\d+$/.exec(name)?.[1] ?? name;
 
 /**
- * Put the ads and the Meta text of a newer pack (fromVersion) into an older pack (version) of the same batch, in place.
+ * Put the pictures of a newer pack (fromVersion) into an older pack (version) of the same batch, in place.
  * The older pack keeps its link, its title and its ad names, so the client's comments, uploads and results still map to it.
- * Each ad is matched by stage and idea number. Both packs must hold the same ideas. The text in the newer pack passed the fact check
- * when it was published; the fact check, launch plan and health note come across with it.
+ * Each ad is matched by stage and idea number. Both packs must hold the same ideas.
+ * The older pack keeps its own Meta text unless text is true (owner, 09-11-2026: v5 copied rewritten copy over the approved v3 copy).
+ * With text true the Meta text, fact check, launch plan and health note come across too; the newer text passed the fact check at publish.
  * Every change keeps the old content in pack_updates. undo puts back the content before the latest change that is not yet undone.
  */
-export async function packUpdate(env: Env, a: { batchId: string; version: number; fromVersion?: number; undo?: boolean }) {
+export async function packUpdate(env: Env, a: { batchId: string; version: number; fromVersion?: number; undo?: boolean; text?: boolean }) {
   const row = (v: number) =>
     env.DB.prepare("SELECT id, version, content, revoked_at FROM packs WHERE batch_id = ? AND version = ?")
       .bind(a.batchId, v).first<{ id: string; version: number; content: string; revoked_at: string | null }>();
@@ -205,7 +206,7 @@ export async function packUpdate(env: Env, a: { batchId: string; version: number
   };
 
   if (a.undo) {
-    if (a.fromVersion !== undefined) throw new InputError("Give fromVersion or undo, not both.");
+    if (a.fromVersion !== undefined || a.text === true) throw new InputError("Give fromVersion (and text) or undo, not both.");
     const last = await env.DB.prepare("SELECT id, from_pack_id, old_content FROM pack_updates WHERE pack_id = ? AND undone_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1")
       .bind(target.id).first<{ id: string; from_pack_id: string; old_content: string }>();
     if (!last) throw new InputError(`Pack version ${a.version} has no change to undo.`);
@@ -230,17 +231,21 @@ export async function packUpdate(env: Env, a: { batchId: string; version: number
     throw new InputError(
       `The two packs do not hold the same ideas. Nothing changed.${missing.length ? ` Not in v${a.fromVersion}: ${missing.join(", ")}.` : ""}${extra.length ? ` Not in v${a.version}: ${extra.join(", ")}.` : ""}`,
     );
-  const next: PackContent = {
-    ...src,
-    brand: old.brand,
-    ads: old.ads.map((o) => {
-      const n = byKey.get(adKey(o.name))!;
-      // Keep the name (the client's Ads Manager and results use it) and the stage; take everything the client sees from the newer pack.
-      return { ...n, name: o.name, stage: o.stage };
-    }),
-  };
+  const next: PackContent = a.text
+    ? {
+        ...src,
+        brand: old.brand,
+        ads: old.ads.map((o) => {
+          const n = byKey.get(adKey(o.name))!;
+          // Keep the name (the client's Ads Manager and results use it) and the stage; take everything the client sees from the newer pack.
+          return { ...n, name: o.name, stage: o.stage };
+        }),
+      }
+    : // Pictures only: the approved Meta text, fact check, launch plan and health note of the older pack stay.
+      { ...old, ads: old.ads.map((o) => ({ ...o, imageKey: byKey.get(adKey(o.name))!.imageKey })) };
   const content = JSON.stringify(next);
-  if (content === target.content) throw new InputError(`Pack version ${a.version} already shows the ads and text of v${a.fromVersion}. Nothing changed.`);
+  if (content === target.content)
+    throw new InputError(`Pack version ${a.version} already shows the ${a.text ? "pictures and text" : "pictures"} of v${a.fromVersion}. Nothing changed.`);
   await swap(content, env.DB.prepare("INSERT INTO pack_updates (id, pack_id, from_pack_id, old_content, created_at) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM packs WHERE id = ? AND content = ? AND revoked_at IS NULL)")
     .bind(crypto.randomUUID(), target.id, source.id, target.content, at, target.id, target.content));
   return {
@@ -253,6 +258,7 @@ export async function packUpdate(env: Env, a: { batchId: string; version: number
       textChanged: JSON.stringify([old.ads[i]!.primaryTexts, old.ads[i]!.headlines, old.ads[i]!.description, old.ads[i]!.cta, old.ads[i]!.why, old.ads[i]!.headline]) !==
         JSON.stringify([x.primaryTexts, x.headlines, x.description, x.cta, x.why, x.headline]),
     })),
+    text: a.text ? `copied from v${a.fromVersion}: show the owner the text before and after` : `kept: v${a.version}'s own Meta text stays`,
     note: `Same link, same ad names. The client's comments and uploads on v${a.version} stay. The old content is kept: pack_update undo puts it back.`,
   };
 }
