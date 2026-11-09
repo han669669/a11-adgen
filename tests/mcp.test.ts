@@ -125,6 +125,9 @@ describe("mcp handler", () => {
     expect(missing.isError).toBe(true);
     expect(missing.content[0].text).toMatch(/Missing argument: batchId/);
     expect((await call({ name: "nope" })).isError).toBe(true);
+    const foreign = await call({ name: "learn", arguments: { note: "x" } });
+    expect(foreign.isError).toBe(true);
+    expect(foreign.content[0].text).toMatch(/takes no argument note/);
   });
   it("has one plugin short command per prompt, and each runs its prompt through prompt_get", async () => {
     const { readdirSync, readFileSync } = await import("node:fs");

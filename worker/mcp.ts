@@ -926,7 +926,12 @@ export const TOOLS: Tool[] = [
       additionalProperties: false,
     },
     run: async (_env, a) => {
-      const got = promptGet(a.name, a.arguments ?? {});
+      const given = (a.arguments ?? {}) as Record<string, string>;
+      // The schema lists every prompt's argument names; refuse one that this prompt does not take, so no input is dropped silently.
+      const takes = new Set(PROMPTS.find((p) => p.name === a.name)?.arguments.map((x) => x.name));
+      const foreign = Object.keys(given).find((k) => !takes.has(k));
+      if (foreign) throw new InputError(`The ${a.name} prompt takes no argument ${foreign}.`);
+      const got = promptGet(a.name, given);
       if (typeof got === "string") throw new InputError(got);
       return text(got.messages[0]!.content.text);
     },
