@@ -14,7 +14,7 @@ import { composeFinal, finalAttach } from "./compose";
 import { foodFix, regionFix } from "./food";
 import { brandExtract } from "./brandextract";
 import * as exa from "./exa";
-import { promptGet, promptList } from "./prompts";
+import { PROMPTS, promptGet, promptList } from "./prompts";
 import { picksGet } from "./picks";
 import { createUploadLink } from "./uploadlink";
 import * as pack from "./pack";
@@ -905,6 +905,31 @@ export const TOOLS: Tool[] = [
       additionalProperties: false,
     },
     run: async (env, a) => text(await picksGet(env, a.batchId)),
+  },
+  {
+    name: "prompt_get",
+    description:
+      "The text of one a11 prompt, with its arguments filled in. The plugin's short commands (/a11:batch, /a11:final, /a11:pack and the others) call this, so they run the same server text as the MCP prompts. Follow the returned text as the owner's instruction. Free.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", enum: PROMPTS.map((p) => p.name) },
+        arguments: {
+          type: "object",
+          description: "The prompt's arguments by name. Leave out an argument that is not given.",
+          // Every argument name of every prompt. promptGet checks which ones this prompt takes, and their limits.
+          properties: Object.fromEntries(PROMPTS.flatMap((p) => p.arguments).map((a) => [a.name, { type: "string" as const }])),
+          additionalProperties: false,
+        },
+      },
+      required: ["name"],
+      additionalProperties: false,
+    },
+    run: async (_env, a) => {
+      const got = promptGet(a.name, a.arguments ?? {});
+      if (typeof got === "string") throw new InputError(got);
+      return text(got.messages[0]!.content.text);
+    },
   },
   {
     name: "image_get",
