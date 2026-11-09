@@ -18,6 +18,7 @@ The owner decides what moves out of this list. An agent does not start a backlog
 | Account-owned build token, when Workers Builds supports it | A build token that does not depend on one user. | Later |
 | Delete merged local branches | Keeps the checkout tidy. Needs the owner's approval first. | Ask first |
 | Learn from real client results (results upload, baseline CTR, week report, canon changes from winners and losers) | The loop can only learn from real Meta numbers. Cat & the Fiddle and WonGi are real brands used only to refine the tool, not paying clients, so they have no results to send. The code is built (Phase 3b); it waits for the first paying client. | Backlog, 2026-11-09 |
+| Revoke the old W47 Cat & the Fiddle pack versions (v1 to v4) | Only the newest pack (v5, box-printed finals) stays live. One of the old versions holds the owner's comments and uploaded files, so a revoke must not lose them. The feature to update the ads and the Meta text of an existing pack in place is a separate task. | Keep all versions live. The owner decides later, 2026-11-09 |
 
 ## Declined by the owner (do not suggest again)
 
