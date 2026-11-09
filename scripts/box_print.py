@@ -28,6 +28,8 @@ The config is one JSON file per product (keep it next to the brand's kit notes):
     typeset  (optional) {"text": "...", "lean": degrees}: re-set the block in type, on the baseline measured from the photo's ink.
              Use it when the packshot is too small to show the real letters. "lean" is the stem lean of the print in the photo
              (top to the right, in degrees; measured on a real line of the same box).
+             After the warp, the script shears the typeset line so its stems tilt as the packshot's own print does (stems stay upright
+             on the box face; they must not turn with the baseline like a rotated sticker).
 """
 import argparse
 import json
@@ -185,6 +187,62 @@ class Box:
         return np.clip(out * 0.86, 0, 1), (ox, oy)
 
 
+def ink_points(a):
+    ys, xs = np.nonzero(a > 0.5)
+    if len(xs) < 50:
+        sys.exit("A typeset block shows too little ink to measure its angle. Check the block box and the band. Nothing was written.")
+    return ys, xs
+
+
+def baseline_angle(a):
+    """Angle of a line of text in an alpha map (degrees, rising to the right is positive): the rotation that makes its rows sharpest."""
+    ys, xs = ink_points(a)
+    best = (-1.0, 0.0)
+    for d in np.arange(-30, 30.01, 0.1):
+        t = np.radians(d)
+        r = ys * np.cos(t) + xs * np.sin(t)
+        v = float((np.bincount((r - r.min()).astype(int)).astype(float) ** 2).sum())
+        if v > best[0]:
+            best = (v, d)
+    if abs(best[1]) >= 29.95:
+        sys.exit("A typeset line rises more than 30 degrees, outside what the script measures. Nothing was written.")
+    return best[1]
+
+
+def stem_tilt(a):
+    """Tilt of the letter stems from the image vertical (degrees, top to the left is positive), for a line of text in an alpha map."""
+    base = baseline_angle(a)
+    ys, xs = ink_points(a)
+    t = np.radians(base)
+    X, Y = xs * np.cos(t) - ys * np.sin(t), xs * np.sin(t) + ys * np.cos(t)
+    best = (-1.0, 0.0)
+    for lean in np.arange(-10, 30.01, 0.1):
+        u = X + (Y - Y.mean()) * np.tan(np.radians(lean))
+        v = float((np.bincount((u - u.min()).astype(int)).astype(float) ** 2).sum())
+        if v > best[0]:
+            best = (v, lean)
+    if best[1] <= -9.95 or best[1] >= 29.95:
+        sys.exit("A typeset line's stems lean outside -10 to 30 degrees, outside what the script measures. Nothing was written.")
+    return base - best[1]
+
+
+def set_tilt(a, now, want):
+    """Shear an alpha map along its own baseline so the stems tilt by `want` degrees from the image vertical instead of `now`.
+    The shear runs in baseline coordinates about the line's centre, so the baseline keeps its angle and place."""
+    base = np.radians(baseline_angle(a))
+    ys, xs = np.nonzero(a > 0.5)
+    c = np.array([xs.mean(), ys.mean()])
+    lean_now, lean_want = np.radians(np.degrees(base) - now), np.radians(np.degrees(base) - want)  # stem lean against the baseline normal
+    k = np.tan(lean_now) - np.tan(lean_want)
+    e1 = np.array([np.cos(base), -np.sin(base)])  # along the baseline (image y points down)
+    e2 = np.array([np.sin(base), np.cos(base)])  # down, at right angles to it
+    B = np.stack([e1, e2], axis=1)
+    S = np.array([[1.0, k], [0.0, 1.0]])  # move along e1 by k for each pixel along e2
+    A = B @ S @ B.T
+    M = np.hstack([A, (c - A @ c)[:, None]]).astype(np.float32)
+    return cv2.warpAffine(a, M, (a.shape[1], a.shape[0]), flags=cv2.INTER_LINEAR)
+
+
 def darkness(g, close=41, thr_blur=12):
     bg = cv2.GaussianBlur(cv2.morphologyEx(g, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (close, close))), (0, 0), thr_blur)
     return np.clip(bg - g, 0, 255), bg
@@ -233,8 +291,22 @@ def run(cfg, src, dst, debug=None):
         H = refine(H0, b["box"], gF, pg)
         a, (ox, oy) = bx.ink_alpha(i)
         T = np.array([[1, 0, ox], [0, 1, oy], [0, 0, 1.0]])
-        a2 = cv2.warpPerspective(a, S2 @ H @ T @ Sk, (w * 2, h * 2), flags=cv2.INTER_LINEAR)
-        amap = np.maximum(amap, cv2.resize(a2, (w, h), interpolation=cv2.INTER_AREA))
+        a2 = cv2.resize(cv2.warpPerspective(a, S2 @ H @ T @ Sk, (w * 2, h * 2), flags=cv2.INTER_LINEAR), (w, h), interpolation=cv2.INTER_AREA)
+        if "typeset" in b:
+            # The type is set on a flat baseline and then warped, which can tilt its stems with the baseline (a "pasted" look).
+            # On the real box the stems stand as they do in the packshot (owner, 09-11-2026). Match the packshot's own stem tilt;
+            # the render keeps the packshot's camera angle (the product lock), so its tilt applies as it is.
+            # The target is measured in the packshot's own frame and applied in the render's image frame on purpose. Carrying it through H
+            # (tested 09-11-2026) gave 12.9, 4.1 and 14.5 degrees on the W47 finals: the local H of a small block on a slanted box face
+            # holds shear as well as turn, and those targets bring back the turned "sticker" stems that the owner rejected.
+            want = stem_tilt(bx.ink_alpha(i, 0.25, 0.5, raw=True)[0])  # the relaxed band typeset() measures with: a soft line still shows ink
+            now = stem_tilt(a2)
+            a2 = set_tilt(a2, now, want)
+            got = stem_tilt(a2)
+            print("typeset stems: tilt", round(now, 1), "->", round(got, 1), "degrees (target", round(want, 1), "from the packshot's print)")
+            if abs(got - want) > 1.0:
+                sys.exit(f"The typeset stems tilt {got:.1f} degrees, not the packshot's {want:.1f}. Check the band and the block box. Nothing was written.")
+        amap = np.maximum(amap, a2)
     dF, _ = darkness(gF)
     near = cv2.dilate((amap > 0.02).astype(np.uint8) * 255, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25)))
     dark = cv2.bitwise_and(((dF > 14).astype(np.uint8) * 255), near)

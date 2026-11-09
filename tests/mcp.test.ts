@@ -113,6 +113,37 @@ describe("mcp handler", () => {
       expect(toolsLine(f!)).toContain(`mcp__a11__${tool}`);
     }
   });
+  it("prompt_get returns the same text as prompts/get, and refuses a missing argument", async () => {
+    const call = async (args: unknown) =>
+      ((await (await post({ jsonrpc: "2.0", id: 20, method: "tools/call", params: { name: "prompt_get", arguments: args } })).json()) as any).result;
+    const viaPrompt: any = await (await post({ jsonrpc: "2.0", id: 21, method: "prompts/get", params: { name: "pack", arguments: { batchId: "b1" } } })).json();
+    const viaTool = await call({ name: "pack", arguments: { batchId: "b1" } });
+    expect(viaTool.isError).toBeUndefined();
+    expect(viaTool.content[0].text).toBe(viaPrompt.result.messages[0].content.text);
+    expect((await call({ name: "learn" })).content[0].text).toContain("canon_update");
+    const missing = await call({ name: "final", arguments: {} });
+    expect(missing.isError).toBe(true);
+    expect(missing.content[0].text).toMatch(/Missing argument: batchId/);
+    expect((await call({ name: "nope" })).isError).toBe(true);
+    const foreign = await call({ name: "learn", arguments: { note: "x" } });
+    expect(foreign.isError).toBe(true);
+    expect(foreign.content[0].text).toMatch(/takes no argument note/);
+  });
+  it("has one plugin short command per prompt, and each runs its prompt through prompt_get", async () => {
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const { PROMPTS } = await import("../worker/prompts");
+    const dir = new URL("../plugin/commands/", import.meta.url);
+    const files = readdirSync(dir).filter((f) => f.endsWith(".md"));
+    expect(files.map((f) => f.replace(/\.md$/, "")).sort()).toEqual(PROMPTS.map((p) => p.name).sort());
+    for (const p of PROMPTS) {
+      const text = readFileSync(new URL(`${p.name}.md`, dir), "utf8");
+      expect(text).toMatch(/^---\ndescription: ".+"\n/);
+      expect(text).toContain(`\`prompt_get\` with name \`${p.name}\``);
+      for (const a of p.arguments) expect(text).toContain(`- ${a.name}`);
+    }
+    // The prompts point the owner to the short commands, never to the /mcp__ names.
+    for (const p of PROMPTS) expect(p.text({ url: "u", slug: "s", brand: "b", batchId: "", productUrl: "https://b.example/p", productTitle: "P", label: "W1", note: "n", adImageUrls: "https://a.example/1.png", title: "T" })).not.toContain("/mcp__");
+  });
   it("refuses GET", async () => {
     const r = await handleMcp(new Request("https://x/mcp"), env);
     expect(r.status).toBe(405);
