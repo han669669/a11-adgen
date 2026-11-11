@@ -29,7 +29,8 @@ verdicts are lost unless the same chat session still holds them:
 - his approval or rejection of pack copy,
 - his own comments on a pack link.
 
-`docs/marks.md` shows the cost: the owner's notes on the Phase 0 and W46c finals (14 rows) were
+`docs/marks.md` shows the cost: the owner's notes on Phase 0 and W46c renders
+(14 rows; they include draft picks and versioned sets, not only finals) were
 written into markdown by hand, and they drove most of the playbook section 7.4 changes.
 The `learn` command promises to turn "picks and notes" into canon changes,
 but it reads only picks. This design decides how a verdict is stored and read
@@ -119,9 +120,19 @@ The proposal must answer:
    limit. Give the result shape.
 4. Prompt changes: the exact new sentences for `final` step 1 and step 7,
    `pack` step 4, and `learn` step 1.
-5. Backfill: how every row of `docs/marks.md` (14 dated rows on 2026-11-11; count
-   them again) enters the table once (a script
-   or a one-time tool call), and that `docs/marks.md` then stays as history.
+5. Backfill, once, with `docs/marks.md` kept as history:
+   - Split each row of `docs/marks.md` (14 dated rows on 2026-11-11; count
+     them again) into one `verdicts` row for each marked ad and each distinct
+     verdict. A grouped row ("W46c v3 set (tof, mof, bof)") gives several
+     rows. Keep each render key and the owner's exact words.
+   - Give a mapping table from every value of the `Mark` column in
+     `docs/marks.md` to the design's marks. Do not invent a meaning: when a
+     source mark has no clear match, keep the source label as it is (a
+     `source_mark` column, or a mark value for "other") and say so.
+   - Record the stage of work from the row itself (draft, versioned render or
+     final), not as "final" for all.
+   - The import can run twice without a second copy of a row. State the number
+     of source rows and the number of verdict rows it makes.
 6. Deploy order: migration live first (owner's yes), then the code. State the
    test for each part.
 7. What this does not do: no automatic canon change, no regex on his words, no
