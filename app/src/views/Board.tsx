@@ -123,7 +123,7 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
             </div>
             <p className="mb-3 max-w-2xl text-body text-muted-foreground">{idea.insight}</p>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {[...idea.drafts].sort((x, y) => x.key.localeCompare(y.key, undefined, { numeric: true })).map((d) => {
+              {idea.drafts.map((d) => {
                 const on = picks.has(d.key);
                 const locked = idea.drafts.some((x) => started.has(x.key));
                 const revealed = savedIdeas.has(idea.id);

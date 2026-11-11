@@ -144,7 +144,7 @@ describe("batch flow", () => {
     expect(facts).toEqual([expect.objectContaining({ label: "price", quote: "S$6.90 per jar" })]);
   });
 
-  it("ranks drafts, records picks and returns them sorted on batch_get", async () => {
+  it("ranks drafts, records picks and returns the drafts in submit order on batch_get", async () => {
     const { env, raw } = makeEnv();
     const { b, ideas } = await seed(env);
     const keys = addDraft(raw, b.id, ideas[0]!.id, "11111111-1111-1111-1111-111111111111");
@@ -156,8 +156,9 @@ describe("batch flow", () => {
     await batch.picksSave(env, b.id, [{ key: keys[1], note: "yes" }]);
     const got = await batch.batchGet(env, b.id);
     const hook = got.ideas.find((i) => i.id === ideas[0]!.id)!;
-    expect(hook.drafts.map((d) => d.key)).toEqual([keys[1], keys[2], keys[0]]);
-    expect(hook.drafts[0]!).toMatchObject({ rank: 1, picked: true, reason: "clean jar" });
+    // Submit order, then image order. Never rank order: the owner sees the drafts blind.
+    expect(hook.drafts.map((d) => d.key)).toEqual([keys[0], keys[1], keys[2]]);
+    expect(hook.drafts.find((d) => d.rank === 1)!).toMatchObject({ key: keys[1], picked: true, reason: "clean jar" });
     expect(got.picks).toEqual([{ key: keys[1], ideaId: ideas[0]!.id, note: "yes", byOwner: true, finalRenderId: null }]);
     expect(got.kit?.logo.key).toMatch(/\/logo\.png$/);
   });
