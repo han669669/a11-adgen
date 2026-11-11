@@ -68,7 +68,7 @@ The automatic tests cover the posting and upload paths. Run a live write check o
 | Worker | Secrets are `secret_text`. Plain values are hashes or settings only. Logs hold no secret. |
 | Dependencies | `npm audit` is clean. `package-lock.json` is committed. |
 | History | No 64-character hex string and no key file in git history. |
-| Sign-in | The allow-list is right. The set-up code is closed or known. Old test packs are revoked. |
+| Sign-in | The allow-list is right. The set-up code is closed or known. Old test packs stay live while `docs/backlog.md` keeps them (W47 v1 to v4: the owner said on 2026-11-11 to revoke none of them until a real client makes it necessary). Never revoke a pack without the owner's yes. |
 
 ## 5. When something looks wrong
 

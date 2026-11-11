@@ -62,7 +62,7 @@ The business: a11studio.pro sells 16 static ads per month (4 per week) for S$2,8
 | Frontend | Vite + React + TypeScript SPA, Tailwind v4, shadcn/ui, Fluid Functionalism (`npx shadcn@latest registry add @fluid`, Radix flavour; needs Inter with the `opsz` axis) |
 | Auth | Email + password. Only allow-listed emails can sign up. |
 | Backend | Cloudflare only: Workers (API + static assets), D1, R2, Workflows, Browser Rendering, Cron Triggers, Images, Workers Logs. No Convex. |
-| MCP | Remote MCP server on Workers, hand-written (`worker/mcp.ts`: stateless Streamable HTTP, JSON responses, tools and prompts). No Agents SDK or MCP SDK: they made the bundle 1.2 MB. OAuth 2.1 comes from `@cloudflare/workers-oauth-provider` in `worker/entry.ts` (the Worker entry; the app is `worker/index.ts`); the bundle is about 225 KB. |
+| MCP | Remote MCP server on Workers, hand-written (`worker/mcp.ts`: stateless Streamable HTTP, JSON responses, tools and prompts). No Agents SDK or MCP SDK: they made the bundle 1.2 MB. OAuth 2.1 comes from `@cloudflare/workers-oauth-provider` in `worker/entry.ts` (the Worker entry; the app is `worker/index.ts`); the bundle is 372 KiB minified, 143 KiB gzip on 2026-11-11. |
 | Research | Exa (`/search`, `/contents`; Websets later for prospecting). |
 | Images | fal.ai `openai/gpt-image-2.5/sunburst/edit` and `/text-to-image`. Drafts `quality: low` at 1024x1280. Finals `quality: high` at 1536x1920. 4:5 only. |
 
@@ -84,7 +84,7 @@ The account is on the Workers Free plan. Design for these limits (read 2026-11-0
 
 ## 7. Deploy
 
-There is no Cloudflare API token in the session (owner decision: use the Cloudflare connector). To deploy: build with `npx wrangler deploy --dry-run --minify --outdir .wrangler/dry`, then upload `.wrangler/dry/index.js` with the connector (`PUT /accounts/{id}/workers/scripts/a11adgen`, multipart, the bindings from `wrangler.jsonc` plus `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256` as `plain_text` bindings (they are not in `wrangler.jsonc`; read each live value from `GET /accounts/{id}/workers/scripts/a11adgen/settings` just before the upload and pass it back unchanged, never from memory or an old backup, because `keep_bindings` does not keep plain values), `keep_bindings: ["secret_text"]` so the owner's secrets stay). D1 migrations run through the connector's D1 query API, and each one is recorded in `d1_migrations`. Keep the bundle small enough to upload this way (Phase 0: 14 KB).
+Deploys run through Cloudflare Workers Builds: a commit on `main` builds and deploys the Worker `a11adgen` (`docs/deploy.md`). A merge to `main` is thus a deploy. The connector upload is the fallback only; its steps live only in `docs/deploy.md` ("Manual deploy (fallback)"). Workers Builds does not cover D1 migrations or the web app files in R2 `app/`: these are manual (`docs/deploy.md`), and a live D1 migration needs the owner's explicit yes. There is no Cloudflare API token in the session (owner decision: use the Cloudflare connector). Bundle size: 372 KiB minified, 143 KiB gzip on 2026-11-11 (`npx wrangler deploy --dry-run --minify --outdir .wrangler/dry`). Keep it small enough for the fallback upload.
 
 The admin token (the static bearer token). The Worker keeps only its SHA-256 (`MCP_TOKEN_SHA256`, a plain var). The token is not in the repo and not on the Worker. Only the owner holds it. An agent must not ask for it, print it, log it or commit it. An agent has no copy, so it cannot call the admin routes alone. When one needs them (for example a web app upload), it tells the owner and the owner runs the step. The owner declined a secure credential form for agents on 2026-11-08, so the owner always runs these steps. What it is for:
 
@@ -115,10 +115,10 @@ The connector and the agents use OAuth for `/mcp`. That is separate from this to
 
 ## 9. Workflow
 
-1. Never push to `main` without the owner's explicit permission. Work on a branch: `feat/`, `fix/`, `docs/`, `chore/`, `ci/`.
+1. Never push to `main` directly. Work on a branch: `feat/`, `fix/`, `docs/`, `chore/`, `ci/`.
 2. Open a PR (ready, not draft). Title: `type(scope): subject`, lowercase subject, 72 characters or fewer.
 3. Before you push, run `npm run check` (typecheck, tests, build). All must pass.
-4. Never merge or deploy to production without the owner's yes.
+4. Merge only with the owner's yes, or under the standing rule of 09-11-2026: a thread may squash-merge its own pull request when it is confident and cubic, CI (`npm run check`) and the code review are all clean. A merge to `main` deploys the Worker (section 7). A live D1 migration, a manual deploy and anything in section 10 still need the owner's explicit yes.
 5. Commits and PR bodies in STE.
 6. **Security gate (owner rule, 2026-11-08).** Run `docs/security-checklist.md` on every change, without being asked. Put a "Security check" line in each PR body. After each deploy, run its live probes and check that the client and the owner can still do their jobs (its section 3). Treat the repository as public: report open weaknesses to the owner in chat, never in a file.
 
@@ -143,7 +143,7 @@ Go ahead without asking: code, docs, branches, PRs, free local tests, read-only 
 | `EXA_API_KEY` | Worker secret | Phase 0, first search |
 | `ALLOWED_EMAILS` | Worker secret | Phase 1, auth |
 | `MCP_TOKEN_SHA256` | Plain var (a hash, not a secret) | Hash of the admin token. The owner makes and holds the token. See "The admin token" above |
-| `BETTER_AUTH_SECRET` (or the auth library's signing secret) | Worker secret | Phase 1; generate it, do not ask the owner |
+| `SIGNUP_CODE_SHA256` | Plain var (a hash, not a secret) | Hash of the set-up code for sign-up. The owner sets it in the dashboard. Not in `wrangler.jsonc`. |
 | `APIFY_TOKEN` | Worker secret | Only if the Meta Ad Library step is built |
 
 How the owner sets a Worker secret, without chat:

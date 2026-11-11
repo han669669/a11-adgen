@@ -10,7 +10,7 @@ Needs Python 3 with Pillow, numpy and OpenCV (opencv-python-headless). Runs in t
 
   python3 scripts/box_print.py --config box_print.cat-and-the-fiddle.json --render final.jpg --out final-print.jpg [--debug mask.jpg]
 
---render must show the packshot's printed face (same product, a similar angle: SIFT matches the two). Run it on the composed picture of a final, never on a draft. Then take the result into the pack with PUT /admin/repair/<uuid>.jpg and final_attach (creative-playbook.md 7.5).
+--render must show the packshot's printed face (same product, a similar angle: SIFT matches the two). Run it on the composed picture of a final, never on a draft. Then take the result into the pack with the MCP tool upload_link (kind repair) and the curl command it returns (no admin token) (creative-playbook.md 7.5).
 Check the result at full size next to the packshot (creative-playbook.md 7.5).
 
 The config is one JSON file per product (keep it next to the brand's kit notes):
