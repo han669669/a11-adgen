@@ -1,6 +1,7 @@
 import type { Env } from "./env";
 import { mediaUrl } from "./fal";
 import { contentType, extFor, fetchHttpsImage, readCapped } from "./images";
+import { IMAGE_TYPES } from "./uploads";
 
 export const SLUG = "^[a-z0-9][a-z0-9-]{1,40}$";
 
@@ -87,7 +88,11 @@ export async function brandSave(env: Env, input: { slug: string; name: string; s
     const res = await fetchHttpsImage(ref.url, `Reference ${i + 1}`);
     const type = contentType(res);
     if (type.includes("svg")) throw new Error(`Reference ${i + 1} must be a PNG, JPEG or WebP file, not SVG.`);
-    refFiles.push({ bytes: await readCapped(res, `Reference ${i + 1}`), type, ref });
+    const bytes = await readCapped(res, `Reference ${i + 1}`);
+    // The file's own bytes say what it is; the web server's type is not trusted.
+    const kind = IMAGE_TYPES.find((t) => t.is(bytes.subarray(0, 16)));
+    if (!kind) throw new Error(`Reference ${i + 1} must be a PNG, JPEG or WebP file.`);
+    refFiles.push({ bytes, type: kind.type, ref });
   }
   const trimmed = await env.IMAGES.input(new Blob([logoBytes]).stream()).transform({ trim: "border" }).output({ format: "image/png" });
   const trimmedBytes = await trimmed.response().arrayBuffer();

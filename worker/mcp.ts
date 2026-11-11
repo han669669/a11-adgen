@@ -1081,7 +1081,13 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
   }
   const batch = Array.isArray(body);
   const msgs = (batch ? body : [body]) as RpcRequest[];
-  const answers = (await Promise.all(msgs.map((m) => handleOne(env, m)))).filter((a) => a !== null);
+  if (batch && msgs.length > 10) return Response.json(rpcError(null, -32600, "Batch too large: at most 10 messages."), { status: 400 });
+  // In order, one at a time: a multi-step batch never runs half of its steps side by side.
+  const answers = [];
+  for (const m of msgs) {
+    const a = await handleOne(env, m);
+    if (a !== null) answers.push(a);
+  }
   if (answers.length === 0) return new Response(null, { status: 202 });
   return Response.json(batch ? answers : answers[0]);
 }

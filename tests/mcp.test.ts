@@ -84,6 +84,20 @@ describe("mcp handler", () => {
     const j: any = await (await post({ jsonrpc: "2.0", id: 9, method: "prompts/get", params: { name: "gold-test", arguments: { note: "x".repeat(201) } } })).json();
     expect(j.error.message).toMatch(/too long \(at most 200/);
   });
+  it("refuses a batch of more than 10 messages", async () => {
+    const r = await post(Array.from({ length: 11 }, (_, i) => ({ jsonrpc: "2.0", id: i, method: "ping" })));
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as any).error).toMatchObject({ code: -32600, message: "Batch too large: at most 10 messages." });
+  });
+  it("answers a batch in the order sent", async () => {
+    const r = await post([
+      { jsonrpc: "2.0", id: "a", method: "ping" },
+      { jsonrpc: "2.0", id: "b", method: "tools/list" },
+    ]);
+    const j = (await r.json()) as any[];
+    expect(j.map((a) => a.id)).toEqual(["a", "b"]);
+    expect(j[1].result.tools.length).toBe(TOOLS.length);
+  });
   it("names only tools that exist in every prompt", async () => {
     const { PROMPTS } = await import("../worker/prompts");
     const known = new Set(TOOLS.map((t) => t.name));

@@ -166,6 +166,37 @@ describe("web app accounts", () => {
   });
 });
 
+describe("media route", () => {
+  const KEY = "brands/11111111-2222-4333-8444-555555555555/ref1.jpg";
+  const mediaEnv = () => {
+    const { env } = makeEnv();
+    // A stored object whose metadata says it is a page.
+    const obj = { body: "<html>", size: 6, httpMetadata: { contentType: "text/html" } };
+    Object.assign(env.MEDIA, { get: async (k: string) => (k === KEY ? obj : null), head: async (k: string) => (k === KEY ? obj : null) });
+    return env;
+  };
+  it("serves a picture type from the key, with nosniff and a locked CSP", async () => {
+    const r = await call(mediaEnv(), `/m/${KEY}`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toBe("image/jpeg");
+    expect(r.headers.get("content-length")).toBe("6");
+    expect(r.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(r.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+    const png = "brands/11111111-2222-4333-8444-555555555555/logo.png";
+    const env = mediaEnv();
+    Object.assign(env.MEDIA, { get: async () => ({ body: "x", size: 1, httpMetadata: { contentType: "text/html" } }) });
+    expect((await call(env, `/m/${png}`)).headers.get("content-type")).toBe("image/png");
+  });
+  it("answers HEAD with the same headers and no body (fal checks a reference with HEAD)", async () => {
+    const r = await call(mediaEnv(), `/m/${KEY}`, { method: "HEAD" });
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toBe("image/jpeg");
+    expect(r.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(r.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+    expect(await r.text()).toBe("");
+  });
+});
+
 describe("web app files", () => {
   const put = (env: Env, path: string, body: string, token = TOKEN) =>
     worker.fetch(
