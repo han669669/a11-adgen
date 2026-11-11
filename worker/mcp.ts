@@ -765,7 +765,7 @@ export const TOOLS: Tool[] = [
   {
     name: "render_submit",
     description:
-      "Start a GPT Image 2.5 Sunburst render on fal (edit endpoint, 4:5). kind 'draft' = quality low, 1024x1280, 1 image by default (numImages up to 3). kind 'final' = quality high, 1536x1920, 1 image; pass the chosen draft URL as the first reference, or for the house recipe's finish pass (docs/creative-playbook.md §7.1, prompt 3) the final first, then the kit's texture photo. Draft references: for a closed product the product-lock skeleton only (docs/creative-playbook.md §7.4: upload it with upload_link kind ref and the curl command it returns, then use the URL that upload_link gives; one call per skeleton with numImages 1); the real packshot only when the packshot cannot show the product state (§7.1, prompt 1). Returns a render id; then call render_status. Paid: the result shows the estimate.",
+      "Start a GPT Image 2.5 Sunburst render on fal (edit endpoint, 4:5). kind 'draft' = quality low, 1024x1280, 1 image by default (numImages up to 3). kind 'final' = quality high, 1536x1920, 1 image; pass the chosen draft URL as the first reference, or for the house recipe's finish pass (docs/creative-playbook.md §7.1, prompt 3) the final first, then the kit's texture photo. Draft references: for a closed product the product-lock skeleton only (docs/creative-playbook.md §7.4: upload it with upload_link kind ref and the curl command it returns, then use the url in the answer of that upload; one call per skeleton with numImages 1); the real packshot only when the packshot cannot show the product state (§7.1, prompt 1). Returns a render id; then call render_status. Paid: the result shows the estimate.",
     inputSchema: {
       type: "object",
       properties: {

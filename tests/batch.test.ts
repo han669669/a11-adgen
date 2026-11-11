@@ -148,17 +148,20 @@ describe("batch flow", () => {
     const { env, raw } = makeEnv();
     const { b, ideas } = await seed(env);
     const keys = addDraft(raw, b.id, ideas[0]!.id, "11111111-1111-1111-1111-111111111111");
+    // A second render of the same idea, submitted later. Its id sorts first, and its image has the best rank.
+    const [later] = addDraft(raw, b.id, ideas[0]!.id, "00000000-1111-1111-1111-111111111111", 1);
     await batch.draftsRank(env, b.id, [
-      { key: keys[0], rank: 3 },
-      { key: keys[1], rank: 1, reason: "clean jar" },
-      { key: keys[2], rank: 2 },
+      { key: keys[0], rank: 4 },
+      { key: keys[1], rank: 2, reason: "clean jar" },
+      { key: keys[2], rank: 3 },
+      { key: later, rank: 1 },
     ]);
     await batch.picksSave(env, b.id, [{ key: keys[1], note: "yes" }]);
     const got = await batch.batchGet(env, b.id);
     const hook = got.ideas.find((i) => i.id === ideas[0]!.id)!;
-    // Submit order, then image order. Never rank order: the owner sees the drafts blind.
-    expect(hook.drafts.map((d) => d.key)).toEqual([keys[0], keys[1], keys[2]]);
-    expect(hook.drafts.find((d) => d.rank === 1)!).toMatchObject({ key: keys[1], picked: true, reason: "clean jar" });
+    // Submit order of the renders, then image order. Never rank order, and never key order.
+    expect(hook.drafts.map((d) => d.key)).toEqual([keys[0], keys[1], keys[2], later]);
+    expect(hook.drafts.find((d) => d.rank === 2)!).toMatchObject({ key: keys[1], picked: true, reason: "clean jar" });
     expect(got.picks).toEqual([{ key: keys[1], ideaId: ideas[0]!.id, note: "yes", byOwner: true, finalRenderId: null }]);
     expect(got.kit?.logo.key).toMatch(/\/logo\.png$/);
   });

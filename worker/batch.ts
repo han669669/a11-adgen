@@ -352,7 +352,7 @@ export async function batchGet(env: Env, id: string) {
       picked: i.picked === 1,
       finalPrompt: i.final_prompt,
       finalRefs: JSON.parse(i.final_refs),
-      // Submit order, then image order. Never rank order: the owner sees the drafts blind.
+      // Submit order, then image order. Never rank order: the order must not show the critic's rank. rank and reason stay as fields; the board hides them until the owner picks.
       drafts: renders.results
         .filter((r) => r.idea === i.id && r.kind === "draft")
         .flatMap((r) => (r.image_keys ? (JSON.parse(r.image_keys) as string[]) : []))
