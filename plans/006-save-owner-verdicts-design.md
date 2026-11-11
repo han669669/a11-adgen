@@ -124,13 +124,17 @@ The proposal must answer:
    - Split each row of `docs/marks.md` (14 dated rows on 2026-11-11; count
      them again) into one `verdicts` row for each marked ad and each distinct
      verdict. A grouped row ("W46c v3 set (tof, mof, bof)") gives several
-     rows. Keep each render key and the owner's exact words.
+     rows. Keep each render key, the owner's exact words, and that ad's
+     own evidence from the `Lesson` column (for example a measured
+     height-to-width ratio) in a notes column of its row.
    - Give a mapping table from every value of the `Mark` column in
      `docs/marks.md` to the design's marks. Do not invent a meaning: when a
      source mark has no clear match, keep the source label as it is (a
      `source_mark` column, or a mark value for "other") and say so.
-   - Record the stage of work from the row itself (draft, versioned render or
-     final), not as "final" for all.
+   - Stage of work: the allowed values are `draft`, `final` and `pack` (point
+     1). A later version of a final (a "v2" or "v5 set" row) is stage `final`;
+     put its version label in the notes column. Do not add a fourth stage
+     value, and do not record a draft pick as `final`.
    - The import can run twice without a second copy of a row. State the number
      of source rows and the number of verdict rows it makes.
 6. Deploy order: migration live first (owner's yes), then the code. State the
