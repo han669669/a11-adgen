@@ -120,6 +120,7 @@ content. It adds a copy function. The fixture is the 2026-11-09 incident.
 - `tests/pack.test.ts`
 - `docs/creative-playbook.md` section 8 (one sentence), `docs/decisions.md`
   (append one row)
+- `plans/README.md` (the status row of this plan only)
 
 **Out of scope**:
 - `packUpdate`, `pack_revoke`, the portal. No change.
@@ -155,19 +156,22 @@ existing `publish` and `copy()` helpers as the pattern):
    `InputError` that names the idea's stage and number.
 5. No `copyFromVersion` and an ad without texts → `InputError` (texts are
    still required then).
+7. `copyFromVersion` of a revoked pack → `InputError`, nothing published.
+8. The source pack has a health note and the call gives no `healthProduct` →
+   the new pack has the same `healthNote`.
 6. The copied text still runs the number check: remove a fact from the fake
    database after v1, publish with `copyFromVersion: 1`, expect the "not in
    the fact sheet" error.
 
-**Verify**: `npx vitest run tests/pack.test.ts` → the 6 new tests fail, the old tests pass.
+**Verify**: `npx vitest run tests/pack.test.ts` → the 8 new tests fail, the old tests pass.
 
 ### Step 2: `packPublish`
 
 - Add `copyFromVersion?: number` to the input type. Make the text fields of
   `PackAdInput` optional in the type.
 - When `copyFromVersion` is set: read that pack row of this batch (same SELECT
-  as `packUpdate`; a revoked source is allowed, because the copy the owner
-  approved may sit on a link that was revoked later), parse its content, and
+  as `packUpdate`). Refuse a revoked source with an `InputError`, as
+  `packUpdate` does. Parse its content, and
   build `byKey` with `adKey` as `packUpdate` does.
 - In the per-ad loop, after `r` is read: if the ad input has no text fields,
   take them from the source ad whose key matches this ad's stage and idea
@@ -178,6 +182,12 @@ existing `publish` and `copy()` helpers as the pattern):
   `copyFromVersion`, a missing text field throws the `InputError` of test 5.
 - Launch plan: with `copyFromVersion` and no `launchPlan` input, use the
   source pack's `launchPlan`. Otherwise keep line 134 as it is.
+- Health note: with `copyFromVersion` and no `healthProduct` input, keep the
+  source pack's `healthNote` (a health product must not lose its HSA and Meta
+  note). An explicit `healthProduct` input wins. Check how the schema default
+  (`healthProduct` `default: false`) reaches `packPublish`: the server must be
+  able to tell "not given" from `false`; remove the schema default if needed
+  and apply it in code.
 - Leave the number check where it is, so it runs on copied text too.
 - Add `copiedFromVersion` to the result object when it was used.
 
@@ -216,13 +226,13 @@ Goals 1 and 2.
 
 ## Test plan
 
-6 new tests in `tests/pack.test.ts` (step 1). Pattern: the existing
+8 new tests in `tests/pack.test.ts` (step 1). Pattern: the existing
 `pack_publish` tests in the same `describe`.
 
 ## Done criteria
 
 - [ ] `grep -c "copyFromVersion" worker/pack.ts worker/mcp.ts worker/prompts.ts` → all three files match
-- [ ] `npx vitest run tests/pack.test.ts` → all pass, 6 new
+- [ ] `npx vitest run tests/pack.test.ts` → all pass, 8 new
 - [ ] `npm run check` exits 0
 - [ ] `git status --short` lists only in-scope files
 - [ ] `plans/README.md` status row updated

@@ -29,8 +29,8 @@ verdicts are lost unless the same chat session still holds them:
 - his approval or rejection of pack copy,
 - his own comments on a pack link.
 
-`docs/marks.md` shows the cost: 12 notes on W46c finals were written into
-markdown by hand, and they drove most of the playbook section 7.4 changes.
+`docs/marks.md` shows the cost: the owner's notes on the Phase 0 and W46c finals (14 rows) were
+written into markdown by hand, and they drove most of the playbook section 7.4 changes.
 The `learn` command promises to turn "picks and notes" into canon changes,
 but it reads only picks. This design decides how a verdict is stored and read
 back, so the build is small and the owner can say yes or no to one clear
@@ -74,7 +74,8 @@ Facts (read at `4062fb1`):
 
 **In scope** (create only): `docs/design/owner-verdicts.md`.
 
-**Out of scope**: all code, all migrations, every other doc, any MCP call
+**Out of scope**: all code, all migrations, every other doc except the status
+row of this plan in `plans/README.md`, any MCP call
 that writes. Do not start Phase 3 or Phase 4 work. Learning from real client
 results is a separate backlog item and is not part of this design.
 
@@ -105,7 +106,9 @@ The proposal must answer:
 
 1. Storage: one new table (name it `verdicts`) with a bounded, indexed read
    path. Give the exact `CREATE TABLE` and `CREATE INDEX` text. Columns must
-   cover: batch, idea (optional), render key (optional), stage of work
+   cover: batch, idea (optional), render key (optional), pack id or pack
+   version (optional; required for a verdict on pack copy, because one batch
+   has several pack versions), stage of work
    (`draft`, `final`, `pack`), mark (`pass`, `fix`, `approve`, `reject`), the
    owner's exact words, created time. Explain why `picks` is not extended
    instead (or choose that, if it is simpler, and say why).
@@ -116,7 +119,8 @@ The proposal must answer:
    limit. Give the result shape.
 4. Prompt changes: the exact new sentences for `final` step 1 and step 7,
    `pack` step 4, and `learn` step 1.
-5. Backfill: how the 12 rows of `docs/marks.md` enter the table once (a script
+5. Backfill: how every row of `docs/marks.md` (14 dated rows on 2026-11-11; count
+   them again) enters the table once (a script
    or a one-time tool call), and that `docs/marks.md` then stays as history.
 6. Deploy order: migration live first (owner's yes), then the code. State the
    test for each part.

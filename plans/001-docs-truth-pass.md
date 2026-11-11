@@ -104,17 +104,18 @@ Wrong or stale statements (each was read at commit `4062fb1`):
 
 **In scope** (the only files you may modify):
 - `README.md`
-- `AGENTS.md` (sections 7, 9 and 11 only)
+- `AGENTS.md` (sections 7, 9 and 11, and the bundle size sentence in section 5 on line 65, only)
 - `docs/blueprint.md`
 - `docs/security-checklist.md` (line 71 only)
 - `docs/creative-playbook.md` (the "D1 to D8" text on line 52 only)
 - `docs/render-checklist.md` (the "D1 to D8" text on line 53 only)
 - `docs/decisions.md` (append one row)
 - `scripts/box_print.py` (the docstring sentence on line 13 only; no code)
+- `plans/README.md` (the status row of this plan only)
 
 **Out of scope** (do NOT touch):
 - Any file in `worker/`, `app/`, `tests/`, `plugin/`, `migrations/`.
-- `AGENTS.md` sections 1 to 6, 8, 10, 12. The site-copy sentence in section 2
+- `AGENTS.md` sections 1 to 4, the rest of 5, 6, 8, 10, 12. The site-copy sentence in section 2
   ("4 per week", "first 4 ads") is the live offer on a11studio.pro and is
   correct as written.
 - `docs/deploy.md`. It is the source of truth for deploys.
@@ -236,7 +237,7 @@ Delete the `BETTER_AUTH_SECRET` row. Add a row:
   final_attach" with "with the MCP tool upload_link (kind repair) and the curl
   command it returns (no admin token)". Change nothing else in the file.
 
-**Verify**: `grep -rn "D1 to D8" docs/ | wc -l` → `0`; `python3 -c "import ast,sys; ast.parse(open('scripts/box_print.py').read())"` → exit 0; `git diff --stat -- scripts/box_print.py` → 1 line changed.
+**Verify**: `grep -n "D1 to D8" docs/creative-playbook.md docs/render-checklist.md | wc -l` → `0`; `python3 -c "import ast,sys; ast.parse(open('scripts/box_print.py').read())"` → exit 0; `git diff --stat -- scripts/box_print.py` → 1 line changed.
 
 ### Step 8: Full check
 

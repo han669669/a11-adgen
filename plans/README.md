@@ -43,26 +43,23 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED 
 ## Findings (vetted) that have no plan yet
 
 Each was confirmed in the code at `4062fb1`. They are ordered by leverage.
-Security findings are not listed in this public file (`AGENTS.md` section 9
-rule 6). The owner has them in chat and in the private project files.
+Findings about security, abuse limits and spend limits are not listed in this
+public file (`AGENTS.md` section 9 rule 6). The owner has them in chat and in
+the private project files. The numbers F4, F7, F8, F11, F16 and F17 are theirs.
 
 | # | Finding | Evidence | Effort | Note |
 |---|---------|----------|--------|------|
-| F1 | The critic subagent is not blind and not independent as its file claims: it may read `taste_log` and `docs/taste-seed.md` (which quotes gold-set ads with their marks), the draft rank runs in the main session, and the gold test for a canon change is run by the session that wants the change | `plugin/agents/critic.md:3-13`, `worker/prompts.ts:28,57,97` | M | Changes how the taste loop works: the owner should choose. See "Direction". |
+| F1 | The critic's independence is weaker than its file claims. `canon_get` and `taste_log` are required context for its judgement and must stay. The gaps are: `docs/taste-seed.md` quotes gold-set ads with their marks, so a gold run can see answers; the draft rank runs in the main session, not in the critic; and the gold test for a canon change is run by the session that wants the change | `plugin/agents/critic.md:3-13`, `worker/prompts.ts:28,57,97` | M | Changes how the taste loop works: the owner should choose. See "Direction". |
 | F2 | The art-director subagent is named by no prompt, and lacks the tools for its own checks | `plugin/agents/art-director.md:3-4`, `worker/prompts.ts` | S | Wire it in or delete it: the owner's call. |
 | F3 | Gates that are prose only: the 0.04 gold floor (`gold_score` compares with the last run, not with the "before" run), a rank for every draft before status `board`, the 3% product shape rule | `worker/canon.ts:271`, `worker/batch.ts:82-98`, `docs/creative-playbook.md:117` | M | Each is a true/false fact, so it fits the 15-check budget. Needs a decision row per check. |
-| F4 | Spend reservations are released on a timeout or a JSON error, although fal or Exa may still bill the call; the monthly cap can then be passed by those calls | `worker/fal.ts:74-91`, `worker/exa.ts:38-64`, `worker/spend.ts:23-28` | M | Makes the cap stricter. The owner should choose. |
 | F5 | `results_save` runs one text search over all the brand's packs for each row (up to 60) | `worker/results.ts:41-52` | S | Matters only when real results exist. |
 | F6 | Two queries of `taste_log` and `picks_save` have no index (`draft_ranks.idea_id`, `picks(by_owner, created_at)`) | `worker/batch.ts:233-252`, `migrations/` | S | Needs a migration, so the owner's yes. Cheap at today's size. |
-| F7 | `brand_extract` can pass 50 subrequests in the worst case and does not cancel redirect bodies | `worker/brandextract.ts:14-27,183-201` | S | Rare: needs long redirect chains. |
 | F9 | `scripts/box_print.py` (ships pixels to the client) has no test, and the Python scripts have no pinned versions | `scripts/box_print.py:197-243` | S | One stdlib `unittest` file on synthetic input; a 3-line `scripts/requirements.txt`. |
 | F10 | The tool-coverage gate passes on a quoted name: `render_submit` (draft path, 150-render limit, release on refusal) and `spend_get` have no behaviour test | `tests/tools.test.ts:104-115`, `tests/mcp.test.ts:34-42,183-190` | S | |
-| F11 | Large client files (xlsx up to 20 MB of XML, CSV up to 20 MB) and heavy home pages are parsed in the Worker; the 10 ms CPU limit is not measured for them | `worker/xlsx.ts:8-17`, `worker/uploads.ts:44-49`, `worker/brandextract.ts` | S to measure | Investigate first: time the parsers on the largest fixtures. |
 | F12 | Merge deploys new code before a manual D1 migration; nothing enforces "migration first" | `docs/deploy.md:14-22,37` | S | A rule in `AGENTS.md`: the migration PR merges and is applied before the PR that uses it. |
 | F13 | No `engines` field or `.nvmrc`, but tests need Node 22 (`node:sqlite`); Node 22 support ends in April 2027 | `package.json`, `.github/workflows/check.yml:24` | S | |
 | F14 | Workers Builds runs `typecheck` and `test` only, CI runs the full `npm run check`, and the ruleset requires neither | `docs/deploy.md:14,21` | S | Setting change in Cloudflare or GitHub: the owner's account. |
 | F15 | Batch labels W46, W46b, W46c and W47 were typed for batches that ran in ISO week 45; their ad names say W45 and W46 | `docs/marks.md:9-20`, `docs/decisions.md` | S | Labels are free text. `batch_create` could suggest the Singapore ISO week. |
-| F16 | Concurrent canon evidence updates can drop one evidence entry (counters stay right) | `worker/canon.ts:93-112` | S | Unlikely with one owner. |
 
 ## Direction (options for the owner; not ranked against the bugs)
 
@@ -80,9 +77,11 @@ Phase 4 work. None is on the declined list.
    The `picks` and `draft_ranks` tables already hold that data. Trade-off: the
    set is small for now (about 9 picked ideas), so the score has a wide error
    band; start with a design.
-3. **A truly blind critic** (F1 and F2). Save all ideas first, let the critic
+3. **An independent critic** (F1 and F2). Save all ideas first, let the critic
    subagent read them with `batch_get` and set the picks, route the draft rank
    and the gold test through it, and keep `taste-seed.md` out of a gold run.
+   The critic keeps `canon_get` and `taste_log`: they are its taste context.
+   Only its draft rank stays hidden from the owner until he picks.
    Trade-off: more subagent runs per batch (more plan usage) for a rank and a
    gate that can be trusted.
 4. **Build hard checks 6 and 7** (headline of 7 words or fewer; no price on
@@ -92,19 +91,13 @@ Phase 4 work. None is on the declined list.
 
 ## Findings considered and rejected
 
-- **A failed PUT burns a one-time upload link**: by design. The link is
-  claimed before the body is read so that it can never be used twice
-  (`worker/uploadlink.ts:80`). A new link costs one free tool call.
-- **`render_submit` accepts a `batch` or `idea` that is not in the
-  database**: by design (`worker/batch.ts:164`: "render_submit takes
-  free-form ids"); such renders do not reach the board, and the monthly cap
-  still holds.
+Three more rejected items concern security and are in the private project
+files with their reasons.
+
 - **Split `worker/mcp.ts` into files per domain**: not worth it. 37 of 47
   handlers are one-line calls; the tests rely on one `TOOLS` array.
 - **Add a linter or formatter**: not worth it under the "minimum tooling"
   rule. Strict TypeScript and the tests cover it.
-- **CSV formula text in stored client uploads**: only the agent reads these
-  files, as text. Revisit if a person ever opens one in a spreadsheet.
 - **Batch status can move backward**: no failure seen; a resumed batch may
   need it.
 - **Shared helper for SHA-256 and `now()`**: do it when that code is next

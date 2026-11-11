@@ -125,15 +125,16 @@ command it returns; agents never hold the admin token.
 ## Scope
 
 **In scope**:
-- `worker/batch.ts` (the `.sort` on line 359 only)
+- `worker/batch.ts` (in `batchGet`: the `.sort` on line 359 and the `ORDER BY` of the renders query)
 - `app/src/views/Board.tsx` (line 126 only)
 - `worker/mcp.ts` (the `INSTRUCTIONS` string; add `export`; the
   `render_submit` description and its `numImages` default; the `batch_update`
-  description)
+  and `batch_get` descriptions)
 - `worker/prompts.ts` (lines 57, 76, 83 only)
 - `docs/creative-playbook.md` (lines 50 and 78 only)
 - `tests/batch.test.ts`, `tests/mcp.test.ts`
 - `docs/decisions.md` (append one row)
+- `plans/README.md` (the status row of this plan only)
 
 **Out of scope**:
 - `worker/fal.ts` and the paid render path (plan 003).
@@ -164,6 +165,10 @@ position (`hook.drafts.find((d) => d.rank === 1)` matches
 
 ### Step 2: Remove the rank sort; the board keeps the server order
 
+- `worker/batch.ts`, renders query in `batchGet` (line 324): change
+  `ORDER BY created_at LIMIT` to `ORDER BY created_at, rowid LIMIT`, so two
+  renders saved in the same millisecond keep their submit order (the `renders`
+  table is a normal rowid table, `migrations/0001_init.sql`).
 - `worker/batch.ts:359`: delete the `.sort(...)` line. Add a one-line comment
   above `drafts:`: `// Submit order, then image order. Never rank order: the owner sees the drafts blind.`
 - `app/src/views/Board.tsx:126`: replace
@@ -194,6 +199,9 @@ In the string:
   Keep the rest of the sentence.
 - Line 777: `default: 3` → `default: 1`. In the description change
   `up to 3 images` to `1 image by default (numImages up to 3)`.
+- In the `batch_get` description (line 254) replace
+  `ideas with their drafts (ranked)` with
+  `ideas with their drafts (in submit order, then image order: the order the owner sees; rank and reason are fields of each draft)`.
 - In the `batch_update` description add one sentence:
   `notes replaces the whole field: read batch_get first and send the old notes with the new line.`
 

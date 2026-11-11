@@ -156,14 +156,15 @@ request). Add no loop over large data and no extra fetch.
 
 **In scope**:
 - `worker/fal.ts`, `worker/batch.ts` (function `finalRender` only),
-  `worker/mcp.ts` (the `compose_final` handler only)
+  `worker/mcp.ts` (the `compose_final` handler only), `worker/picks.ts`
+  (line 93 only, see step 4)
 - `tests/fal.test.ts`, `tests/batch.test.ts`
 - `docs/decisions.md` (append one row)
+- `plans/README.md` (the status row of this plan only)
 
 **Out of scope**:
 - `worker/spend.ts` and when a reservation is released on a timeout. That
-  changes how the spend cap counts; the owner decides it (see
-  `plans/README.md`).
+  changes how the spend cap counts; the owner decides it.
 - Validation of `render_submit` `batch` and `idea` values. The code accepts
   free-form ids on purpose (`worker/batch.ts:164`).
 - `worker/api.ts`. Copy its pattern; do not change it.
@@ -210,9 +211,13 @@ stay `done`.
 In `worker/fal.ts` change the final update to
 `UPDATE renders SET status = ?, image_keys = ?, error = ?, updated_at = ? WHERE id = ? AND status = 'queued'`.
 When `meta.changes !== 1`, read the row again with the same SELECT as the top
-of `check` and return `view(env, thatRow)`. Apply the same
-`AND status = 'queued'` guard in the helper `fail` (line 166) if it writes
-`status` without one.
+of `check` and return `view(env, thatRow)`. The helper `fail` (line 166) writes
+`UPDATE renders SET status = 'failed', ... WHERE id = ?` with no guard. Give it
+the same `AND status = 'queued'` guard, and the same rule: when
+`meta.changes !== 1`, read the row again and return `view(env, thatRow)`, so a
+late poller gets the winning `done` state and never a false `failed`. Add a
+test for it: the row turns `done` while `check` is on its way to `fail` (fal
+status answers HTTP 400); expect the returned status `done`.
 
 **Verify**: `npx vitest run tests/fal.test.ts` → all pass.
 
@@ -228,36 +233,66 @@ try the same insert once more; if it fails again, throw
 `new AcceptedError(`fal accepted render ${id} (request ${q.request_id}) but the row was not saved: ${message}. Do not submit again; tell the owner.`)`.
 The outer `catch` already skips the release when `accepted` is true.
 
-Test in `tests/fal.test.ts`: stub `fetch` to accept the job, make the insert
-fail (drop the `renders` table through `env.DB.raw` before the call), expect
+Test in `tests/fal.test.ts`: stub `fetch` to accept the job, make only the
+insert fail. Do not drop the table: `submit` reads `renders` first (the
+150-render count). Use a trigger through `env.DB.raw`:
+`CREATE TRIGGER no_insert BEFORE INSERT ON renders BEGIN SELECT RAISE(ABORT, 'insert refused'); END;`
+Expect
 `AcceptedError`, and expect the spend row to be `spent`
 (`SELECT status FROM spend`).
 
 **Verify**: `npx vitest run tests/fal.test.ts` → all pass.
 
-### Step 4: The final claim goes stale, and stays after an accepted job
+### Step 4: A stuck final claim can be taken over, but never after fal accepted the job
+
+The rule: a claim may be taken over only when it is certain that no paid job
+exists for it. Three states of `picks.final_render_id` (besides NULL and a
+real render id):
+
+| Value | Meaning | Take over? |
+|---|---|---|
+| `pending:<ISO time>:<uuid>` (new format) | claimed; the fal call has not returned yet | Yes, when older than 2 minutes AND no final render row exists for this batch and idea created at or after the claim time |
+| `accepted:<render id>` | fal accepted the job (billed) but the render row or the pick update was not saved | Never |
+| `pending:<uuid>` (old format, no time; made before this change) | unknown age | Never by code. Leave as it is today. |
 
 In `worker/batch.ts` `finalRender`:
-1. Build the claim like `claimCompose`:
-   `pending:${new Date().toISOString()}:${crypto.randomUUID()}`.
-2. A claim older than 2 minutes is stale. Change the early return on line 283
-   so that a `final_render_id` that starts with `pending:` and is older than
-   the stale limit does not return; and change the claim statement to
-   `UPDATE picks SET final_render_id = ? WHERE render_key = ? AND (final_render_id IS NULL OR (final_render_id LIKE 'pending:%' AND final_render_id < ?))`
-   bound with `pending:<iso time 2 minutes ago>`.
-3. In the `catch`, release the claim only when the error is not an
-   `fal.AcceptedError`. For an `AcceptedError`, leave the claim and rethrow.
+1. Build the claim as `pending:${new Date().toISOString()}:${crypto.randomUUID()}`.
+2. Early return (line 283): return `already started` for a real id, for
+   `accepted:` (with a note: "fal accepted this final but its row was not
+   saved; tell the owner; do not submit again") and for an old-format
+   `pending:` value. Recognise the new format with the prefix `pending:20`
+   (an ISO year); an old-format value has a UUID there. Do not use a plain
+   string comparison on old-format values.
+3. For a new-format `pending:` value older than 2 minutes: first look for a
+   render of this batch and idea with `kind = 'final'` and `created_at >=` the
+   claim time. If one exists, write its id into the pick (guarded
+   `WHERE final_render_id = <the stale claim>`) and return it as
+   `already started`. Do not submit. Only if none exists, take the claim over
+   with a guarded update: `UPDATE picks SET final_render_id = ? WHERE render_key = ? AND final_render_id = ?`
+   (the exact stale value), and go on.
+4. In the `catch` around `fal.submit`: for an `fal.AcceptedError`, change the
+   claim to `accepted:<render id>` (add the render id as a field of
+   `AcceptedError`) with a guarded update, then rethrow. For any other error
+   release the claim as today.
+5. After a good submit, the existing `env.DB.batch([...])` writes the render
+   id. If that write throws, the render row exists (step 3 of this plan saved
+   it before `submit` returned), so the takeover rule in point 3 finds it and
+   adopts it. Do not add a retry here.
 
-`worker/picks.ts:93` already treats any `pending:` value as "no final yet";
-do not change it.
+`worker/picks.ts:93` reads `p.final_render_id?.startsWith("pending:") ? null : p.final_render_id`.
+Make it treat `accepted:` the same way as `pending:` (no final id yet).
 
 Tests in `tests/batch.test.ts` (pattern: the existing final render tests in
 this file; search for `finalRender`):
-- a pick with a `pending:` claim 3 minutes old → `finalRender` starts a final.
-- a pick with a `pending:` claim 10 seconds old → `status: "already started"`,
-  no fal call.
+- new-format claim 3 minutes old, no final row → `finalRender` starts a final.
+- new-format claim 3 minutes old, a final row for the idea exists that is
+  newer than the claim → no fal call; the pick gets that render id.
+- new-format claim 10 seconds old → `already started`, no fal call.
+- old-format `pending:<uuid>` claim (use one UUID that starts with `0` and one
+  that starts with `f`) → `already started`, no fal call, value unchanged.
 - fal answers HTTP 500 → the claim is released (as today).
-- `fal.submit` throws `AcceptedError` → the claim stays, the error is thrown.
+- `fal.submit` throws `AcceptedError` → the pick holds `accepted:<id>`; a
+  second `finalRender` call 10 minutes later makes no fal call.
 
 **Verify**: `npx vitest run tests/batch.test.ts tests/picks.test.ts` → all pass.
 
@@ -285,7 +320,7 @@ logo. No hard check was added (these are state guards, not copy checks).
 
 ## Test plan
 
-New tests: 3 in `tests/fal.test.ts` steps 1-2, 1 in step 3, 4 in
+New tests: 3 in `tests/fal.test.ts` steps 1-2, 1 in step 3, 6 in
 `tests/batch.test.ts` step 4, 1 in step 5. Every new test must fail before its
 code change and pass after it.
 
@@ -313,7 +348,10 @@ code change and pass after it.
 - After step 3 a render can be billed with no row. The error text names the
   fal request id so a person can find it. If this ever happens in production,
   the next step is a reconcile tool; do not build it now.
-- Reviewer: read the stale-claim SQL closely. String comparison of
-  `pending:<ISO time>` values is what makes it work, as in `claimCompose`.
-- Deferred, needs the owner: release of spend reservations on timeouts
-  (`worker/fal.ts:74-91`, `worker/exa.ts`), see `plans/README.md`.
+- Reviewer: read the takeover rule closely. A claim is taken over only when
+  no paid job can exist for it. Old-format `pending:<uuid>` claims stay stuck
+  on purpose; list them once after deploy with a read-only query
+  (`SELECT render_key, final_render_id FROM picks WHERE final_render_id LIKE 'pending:%' AND final_render_id NOT LIKE 'pending:20%'`)
+  and give the list to the owner.
+- Deferred, needs the owner: how spend reservations are settled on a
+  timeout. The owner has that finding in the private project files.
