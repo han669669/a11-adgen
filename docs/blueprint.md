@@ -90,7 +90,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | Images | `render_submit` (drafts), `final_render`, `food_fix`, `region_fix`, `render_status`, `compose_final`, `image_get` (returns the image) |
 | Human step | `picks_save` (saves the owner's draft picks with his own words; the board saves the same picks) |
 | Memory | `taste_log` (his picks and passes with the critic's rank), `canon_get`, `canon_update`, `swipe_add`, `swipe_search`, `gold_import`, `gold_get`, `gold_score`, `gold_runs` (all built in Phase 2a), `picks_get` (built 09-11-2026: picks with their finals, pack versions and next step), `baseline_save`, `results_save`, `results_get` (built in Phase 3b: the results ledger), `comments_get` (built in Phase 3b: the client's comments), `uploads_get`, `uploads_done` (built in Phase 3b: the client's results files) |
-| Ops | `batch_create`, `batch_get`, `batch_list`, `batch_update`, `spend_get`, `pack_publish`, `upload_link` (one-time upload of a repaired final or a skeleton, so agents need no admin token; built 09-11-2026), `final_attach`, `prompt_get` (the text of one prompt with its arguments filled in; each plugin short command calls it; built 09-11-2026), `pack_update` (newer approved ads into an existing client link, in place; built 09-11-2026, see §5) |
+| Ops | `batch_create`, `batch_get`, `batch_list`, `batch_update`, `spend_get`, `pack_publish`, `pack_revoke` (stops a client link; only on the owner's yes), `upload_link` (one-time upload of a repaired final or a skeleton, so agents need no admin token; built 09-11-2026), `final_attach`, `prompt_get` (the text of one prompt with its arguments filled in; each plugin short command calls it; built 09-11-2026), `pack_update` (newer approved ads into an existing client link, in place; built 09-11-2026, see §5) |
 
 Prompts (slash commands) live on the server (`worker/prompts.ts`). With the plugin installed, type them as its short commands, `/a11:<name>` (added 09-11-2026: each file in `plugin/commands/` calls the `prompt_get` tool, so it runs the same server text). Claude Code also shows each MCP prompt as `/mcp__a11__<name>`; it sets that name and the server cannot change it. Without the plugin, use those names. The prompts: `brand`, `batch`, `final`, `learn`, `gold-test` (built in Phase 2b); `redesign` (built, with the redesign subject), `results` (built in Phase 3b) and `pack` (built 09-11-2026: the approved final per pick, box print for a boxed product, then `pack_publish`). Each is resumable; state lives in D1.
 
@@ -115,7 +115,7 @@ Then run `/mcp` in Claude Code and choose a11 to sign in. For a script that cann
 
 ## 8. Hard checks (budget 15)
 
-Status on 2026-11-11: checks 1, 9 and 10 are built in code. Checks 2 to 8 are not built: the critic and the agent check them by reading.
+Status on 2026-11-11: checks 1 and 9 are built in code. Check 10 is built as the sign-in: every tool, paid or free, needs an allow-listed account, and the allow-list holds only the owner's accounts; there is no separate gate for the paid tools. Checks 2 to 8 are not built: the critic and the agent check them by reading.
 
 1. Every price, number and offer in the copy matches the fact sheet text. Built in Phase 3a for the Meta text in `pack_publish` as a number check: every number must be in a fact's value or quote. A claim with no number ("free delivery") is checked by the critic against the fact sheet, not by code.
 2. Painted text equals the approved copy (vision read, then code compares).
