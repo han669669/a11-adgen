@@ -90,7 +90,7 @@ export async function picksGet(env: Env, batchId: string) {
       byOwner: p.by_owner === 1,
       ownerNote: p.note,
       pickedAt: p.created_at,
-      firstFinalId: p.final_render_id?.startsWith("pending:") ? null : p.final_render_id,
+      firstFinalId: /^(pending|accepted):/.test(p.final_render_id ?? "") ? null : p.final_render_id,
       finals: list,
       latest,
       next,

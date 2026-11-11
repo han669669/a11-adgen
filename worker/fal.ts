@@ -47,6 +47,13 @@ export interface SubmitInput {
   id?: string;
 }
 
+/** fal took the job (it is billed) but the render row was not saved. The caller must not start the job again. */
+export class AcceptedError extends Error {
+  constructor(message: string, readonly renderId: string) {
+    super(message);
+  }
+}
+
 export async function submit(env: Env, input: SubmitInput) {
   const size = SIZES[input.kind];
   const id = input.id ?? crypto.randomUUID();
@@ -77,15 +84,29 @@ export async function submit(env: Env, input: SubmitInput) {
     const q = (await res.json()) as { request_id: string; status_url: string; response_url: string };
     accepted = true;
     await settle(env, spendId, true);
-    await env.DB.prepare(
-      `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images,
-        fal_request_id, status_url, response_url, usd_est, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(id, input.batch, input.idea, input.kind, prompt, JSON.stringify(input.referenceUrls),
-        size.width, size.height, size.quality, input.numImages,
-        q.request_id, q.status_url, q.response_url, usd, now, now)
-      .run();
+    const insert = () =>
+      env.DB.prepare(
+        `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images,
+          fal_request_id, status_url, response_url, usd_est, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+        .bind(id, input.batch, input.idea, input.kind, prompt, JSON.stringify(input.referenceUrls),
+          size.width, size.height, size.quality, input.numImages,
+          q.request_id, q.status_url, q.response_url, usd, now, now)
+        .run();
+    try {
+      await insert();
+    } catch {
+      // The job is billed. Try the row once more; then tell the caller that it must not submit again.
+      try {
+        await insert();
+      } catch (e) {
+        throw new AcceptedError(
+          `fal accepted render ${id} (request ${q.request_id}) but the row was not saved: ${(e as Error).message}. Do not submit again; tell the owner.`,
+          id,
+        );
+      }
+    }
     return { id, usdEstimate: usd, status: "queued" as const };
   } catch (e) {
     if (!accepted) await settle(env, spendId, false);
@@ -104,11 +125,15 @@ interface RenderRow {
   usd_est: number;
 }
 
-/** Check a render. When fal is done, copy the images to R2 once and return their keys. */
-export async function check(env: Env, id: string) {
-  const row = await env.DB.prepare(
+function read(env: Env, id: string) {
+  return env.DB.prepare(
     "SELECT id, status, status_url, response_url, image_keys, error, kind, usd_est FROM renders WHERE id = ?",
   ).bind(id).first<RenderRow>();
+}
+
+/** Check a render. When fal is done, copy the images to R2 once and return their keys. */
+export async function check(env: Env, id: string) {
+  const row = await read(env, id);
   if (!row) throw new Error(`No render with id ${id}.`);
   if (row.status !== "queued") return view(env, row);
 
@@ -131,7 +156,11 @@ export async function check(env: Env, id: string) {
   const keys: string[] = [];
   for (const [i, img] of images.entries()) {
     const file = await fetch(img.url, { signal: AbortSignal.timeout(15_000) });
-    if (!file.ok) continue;
+    if (!file.ok) {
+      // A temporary error from the image host: stay queued, the next poll downloads again (R2 puts repeat safely).
+      if (transient(file.status)) return { id, status: "queued", note: `image download HTTP ${file.status}; poll again.` };
+      continue;
+    }
     const key = `renders/${id}/${i + 1}.jpg`;
     const raw = await file.arrayBuffer();
     // A food_fix result keeps the original outside its boxes (paste.ts). When the paste fails, the render fails:
@@ -153,9 +182,11 @@ export async function check(env: Env, id: string) {
   const status = keys.length > 0 && keys.length === images.length ? "done" : "failed";
   const error =
     images.length === 0 ? "fal returned no images" : keys.length === images.length ? null : `saved ${keys.length} of ${images.length} images`;
-  await env.DB.prepare("UPDATE renders SET status = ?, image_keys = ?, error = ?, updated_at = ? WHERE id = ?")
+  // Only a queued row takes the result: a late poll must not overwrite what another poll finished.
+  const res = await env.DB.prepare("UPDATE renders SET status = ?, image_keys = ?, error = ?, updated_at = ? WHERE id = ? AND status = 'queued'")
     .bind(status, JSON.stringify(keys), error, new Date().toISOString(), id)
     .run();
+  if (res.meta.changes !== 1) return view(env, (await read(env, id)) ?? row);
   return view(env, { ...row, status, error, image_keys: JSON.stringify(keys) });
 }
 
@@ -164,9 +195,11 @@ export function transient(httpStatus: number): boolean {
 }
 
 async function fail(env: Env, row: RenderRow, error: string) {
-  await env.DB.prepare("UPDATE renders SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
+  const res = await env.DB.prepare("UPDATE renders SET status = 'failed', error = ?, updated_at = ? WHERE id = ? AND status = 'queued'")
     .bind(error, new Date().toISOString(), row.id)
     .run();
+  // Another poll finished the render first: give its state, never a false failure.
+  if (res.meta.changes !== 1) return view(env, (await read(env, row.id)) ?? row);
   return view(env, { ...row, status: "failed", error });
 }
 

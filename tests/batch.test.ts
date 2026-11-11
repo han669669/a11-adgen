@@ -4,6 +4,7 @@ import * as batch from "../worker/batch";
 import { brandGet, brandSave } from "../worker/brand";
 import type { Env } from "../worker/env";
 import { TOOLS } from "../worker/mcp";
+import { picksGet } from "../worker/picks";
 import { validate } from "../worker/schema";
 import { reserve, totals } from "../worker/spend";
 import { fakeD1 } from "./helpers/d1";
@@ -321,6 +322,84 @@ describe("batch flow", () => {
     expect(raw.prepare("SELECT final_render_id FROM picks").get()).toEqual({ final_render_id: null });
   });
 
+  /** One pick with a final prompt, and a fal stub that counts the submits. */
+  async function claimSetup(renderId: string) {
+    const { env, raw } = makeEnv();
+    const { b, ideas } = await seed(env);
+    const keys = addDraft(raw, b.id, ideas[0]!.id, renderId);
+    await batch.picksSave(env, b.id, [{ key: keys[0] }]);
+    await batch.ideasUpdate(env, [{ id: ideas[0]!.id, finalPrompt: "E".repeat(50) }]);
+    const fal = { submits: 0 };
+    vi.stubGlobal("fetch", async () => {
+      fal.submits++;
+      return new Response(JSON.stringify({ request_id: "r", status_url: "https://q/s", response_url: "https://q/r" }));
+    });
+    const setClaim = (v: string) => void raw.prepare("UPDATE picks SET final_render_id = ?").run(v);
+    const claimNow = () => (raw.prepare("SELECT final_render_id FROM picks").get() as { final_render_id: string | null }).final_render_id;
+    return { env, raw, b, ideas, key: keys[0], fal, setClaim, claimNow };
+  }
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+
+  it("takes over a final claim that is 3 minutes old when no final was made", async () => {
+    const t = await claimSetup("a1a1a1a1-0000-4000-8000-000000000001");
+    t.setClaim(`pending:${ago(180_000)}:00000000-0000-4000-8000-000000000000`);
+    const r = await batch.finalRender(t.env, t.b.id, t.key);
+    expect(t.fal.submits).toBe(1);
+    expect(r.status).toBe("queued");
+    expect(t.claimNow()).toBe(r.id);
+  });
+
+  it("adopts the final that was made after a stale claim, and pays for no second one", async () => {
+    const t = await claimSetup("a1a1a1a1-0000-4000-8000-000000000002");
+    t.setClaim(`pending:${ago(180_000)}:00000000-0000-4000-8000-000000000000`);
+    t.raw
+      .prepare(
+        `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, usd_est, created_at, updated_at)
+         VALUES ('made-1', ?, ?, 'final', 'queued', 'p', '[]', 1536, 1920, 'high', 1, 0.06, ?, ?)`,
+      )
+      .run(t.b.id, t.ideas[0]!.id, ago(170_000), ago(170_000));
+    expect(await batch.finalRender(t.env, t.b.id, t.key)).toEqual({ id: "made-1", status: "already started" });
+    expect(t.fal.submits).toBe(0);
+    expect(t.claimNow()).toBe("made-1");
+  });
+
+  it("keeps a final claim that is 10 seconds old", async () => {
+    const t = await claimSetup("a1a1a1a1-0000-4000-8000-000000000003");
+    const claim = `pending:${ago(10_000)}:00000000-0000-4000-8000-000000000000`;
+    t.setClaim(claim);
+    expect(await batch.finalRender(t.env, t.b.id, t.key)).toEqual({ id: null, status: "already started" });
+    expect(t.fal.submits).toBe(0);
+    expect(t.claimNow()).toBe(claim);
+  });
+
+  it.each(["0f3b2c1d-0000-4000-8000-000000000000", "f93b2c1d-0000-4000-8000-000000000000", "20261111-0000-4000-8000-000000000000"])(
+    "never takes over an old claim that has no time (pending:%s)",
+    async (uuid) => {
+      const t = await claimSetup("a1a1a1a1-0000-4000-8000-000000000004");
+      t.setClaim(`pending:${uuid}`);
+      expect(await batch.finalRender(t.env, t.b.id, t.key)).toEqual({ id: null, status: "already started" });
+      expect(t.fal.submits).toBe(0);
+      expect(t.claimNow()).toBe(`pending:${uuid}`);
+    },
+  );
+
+  it("closes the pick for ever when fal accepted the final but its row was not saved", async () => {
+    const t = await claimSetup("a1a1a1a1-0000-4000-8000-000000000005");
+    t.raw.exec("CREATE TRIGGER no_insert BEFORE INSERT ON renders BEGIN SELECT RAISE(ABORT, 'insert refused'); END;");
+    await expect(batch.finalRender(t.env, t.b.id, t.key)).rejects.toThrow("Do not submit again");
+    expect(t.fal.submits).toBe(1);
+    expect(t.claimNow()).toMatch(/^accepted:[0-9a-f-]{36}$/);
+    t.raw.exec("DROP TRIGGER no_insert");
+    vi.useFakeTimers({ now: Date.now() + 600_000, toFake: ["Date"] });
+    try {
+      expect(await batch.finalRender(t.env, t.b.id, t.key)).toMatchObject({ id: null, status: "already started", note: expect.stringContaining("tell the owner") });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(t.fal.submits).toBe(1);
+    expect((await picksGet(t.env, t.b.id)).picks[0]!.firstFinalId).toBeNull();
+  });
+
   it("does not block 'board' on a draft render that has no images", async () => {
     const { env, raw } = makeEnv();
     const { b, ideas } = await seed(env);
@@ -422,5 +501,23 @@ describe("compose_final with brandSlug", () => {
     // The newest compose becomes the render's board image.
     const row = raw.prepare("SELECT composed_key FROM renders WHERE id = ?").get(renderId) as { composed_key: string };
     expect(row.composed_key).toMatch(new RegExp(`^renders/${renderId}/1-c\\d+\\.jpg$`));
+  });
+
+  it("refuses a render that is not in a batch of that brand", async () => {
+    const { env, raw } = makeEnv();
+    const { b, ideas } = await seed(env);
+    await brandSave(env, { slug: "other", name: "Other", kit });
+    const renderId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    raw
+      .prepare(
+        `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, image_keys, usd_est, created_at, updated_at)
+         VALUES (?, ?, ?, 'final', 'done', 'p', '[]', 1536, 1920, 'high', 1, ?, 0.06, 'now', 'now')`,
+      )
+      .run(renderId, b.id, ideas[0]!.id, JSON.stringify([`renders/${renderId}/1.jpg`]));
+    const tool = TOOLS.find((t) => t.name === "compose_final")!;
+    await expect(tool.run(env, validate(tool.inputSchema, { key: `renders/${renderId}/1.jpg`, brandSlug: "other" }))).rejects.toThrow(
+      "is not a render of a batch of brand other",
+    );
+    expect(raw.prepare("SELECT composed_key FROM renders WHERE id = ?").get(renderId)).toEqual({ composed_key: null });
   });
 });

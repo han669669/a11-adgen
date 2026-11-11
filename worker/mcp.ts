@@ -857,7 +857,9 @@ export const TOOLS: Tool[] = [
         )
           .bind(String(a.key).split("/")[1], brand.id)
           .first<{ kit_version: number }>();
-        const kit = await latestKit(env, brand.id, pinned?.kit_version);
+        // Another brand's logo must never go on a final.
+        if (!pinned) throw new Error(`${a.key} is not a render of a batch of brand ${a.brandSlug}. Check the key and the brand.`);
+        const kit = await latestKit(env, brand.id, pinned.kit_version);
         if (!kit) throw new Error(`Brand ${a.brandSlug} has no kit.`);
         logoKey = kit.kit.logo.key;
         place = kit.kit.placement;
