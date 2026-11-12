@@ -202,20 +202,66 @@ export async function ideasSave(env: Env, batchId: string, ideas: IdeaInput[]) {
   return saved.map((s) => ({ id: s.id, n: s.n, format: s.format, headline: s.headline, picked: !!s.picked }));
 }
 
-export async function ideasUpdate(env: Env, updates: { id: string; picked?: boolean; finalPrompt?: string; finalRefs?: string[] }[]) {
-  const stmts = updates.map((u) => {
+export interface IdeaUpdate {
+  id: string;
+  picked?: boolean;
+  finalPrompt?: string;
+  finalRefs?: string[];
+  /** The owner's change to the words on the picture. */
+  headline?: string;
+  subline?: string;
+  /** The owner's exact words when he approved this idea's headline and subline (the copy review). */
+  copyApproved?: string;
+}
+
+export async function ideasUpdate(env: Env, updates: IdeaUpdate[]) {
+  const stmts: D1PreparedStatement[] = [];
+  const owner: string[] = []; // the idea id each statement must change
+  for (const u of updates) {
     const sets: string[] = [];
     const args: unknown[] = [];
     if (u.picked !== undefined) (sets.push("picked = ?"), args.push(u.picked ? 1 : 0));
     if (u.finalPrompt !== undefined) (sets.push("final_prompt = ?"), args.push(u.finalPrompt));
     if (u.finalRefs !== undefined) (sets.push("final_refs = ?"), args.push(JSON.stringify(u.finalRefs)));
-    if (sets.length === 0) throw new Error(`Nothing to update for idea ${u.id}.`);
-    return env.DB.prepare(`UPDATE ideas SET ${sets.join(", ")} WHERE id = ?`).bind(...args, u.id);
-  });
+    if (u.headline !== undefined) (sets.push("headline = ?"), args.push(u.headline));
+    if (u.subline !== undefined) (sets.push("copy = json_set(copy, '$.subline', ?)"), args.push(u.subline));
+    if (sets.length === 0 && u.copyApproved === undefined) throw new Error(`Nothing to update for idea ${u.id}.`);
+    if (sets.length) (stmts.push(env.DB.prepare(`UPDATE ideas SET ${sets.join(", ")} WHERE id = ?`).bind(...args, u.id)), owner.push(u.id));
+    // A second statement, so the approval keeps the words as they are after the change above.
+    if (u.copyApproved !== undefined) {
+      stmts.push(
+        env.DB.prepare(
+          `UPDATE ideas SET copy = json_set(copy, '$.ownerApproved',
+             json_object('headline', headline, 'subline', COALESCE(json_extract(copy, '$.subline'), ''), 'ownerSaid', ?, 'at', ?))
+           WHERE id = ?`,
+        ).bind(u.copyApproved, now(), u.id),
+      );
+      owner.push(u.id);
+    }
+  }
   const res = await env.DB.batch(stmts);
-  const missing = updates.filter((_, i) => res[i]?.meta.changes !== 1).map((u) => u.id);
+  const missing = [...new Set(owner.filter((_, i) => res[i]?.meta.changes !== 1))];
   if (missing.length) throw new Error(`No idea with id: ${missing.join(", ")}.`);
   return { updated: updates.length };
+}
+
+/**
+ * The copy review (owner, 12-11-2026: "ill approve of the headlines and all copywriting that goes on the ad images").
+ * A draft is rendered only for an idea whose headline and subline the owner approved, as they are now.
+ */
+export async function copyApprovedCheck(env: Env, batchId: string, ideaId: string) {
+  const row = await env.DB.prepare("SELECT headline, copy FROM ideas WHERE id = ? AND batch_id = ?").bind(ideaId, batchId).first<{ headline: string; copy: string }>();
+  if (!row) throw new Error(`No idea ${ideaId} in batch ${batchId}. A draft belongs to an idea of its batch.`);
+  const copy = JSON.parse(row.copy) as { subline?: string; ownerApproved?: { headline: string; subline: string } };
+  const ok = copy.ownerApproved;
+  if (!copy.subline?.trim())
+    throw new Error(`Idea ${ideaId} has no subline. Every ad has one (the owner found ads without one incomplete): set it, show it to the owner, and save his approval.`);
+  if (!ok)
+    throw new Error(
+      `The owner has not approved the words of idea ${ideaId}. Show him the headline and subline as text first (docs/creative-playbook.md §8, copy review), then save his words with ideas_update copyApproved.`,
+    );
+  if (ok.headline !== row.headline || ok.subline !== copy.subline)
+    throw new Error(`The words of idea ${ideaId} changed after the owner approved them. Show him the new words and save his approval again.`);
 }
 
 /** The critic's pick: set picked on ideas of one batch. It cannot unpick, write a prompt or touch another batch (the pick limit, 1 per stage, still holds). */
