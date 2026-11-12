@@ -116,6 +116,15 @@ class ProductLock(Tmp):
     def test_a_box_inside_the_packshot_passes(self):
         product_lock.check_box((0, 0, 80, 100), (80, 100))
 
+    def test_a_packshot_in_another_format_is_refused(self):
+        # Only JPEG, PNG and WEBP open; a GIF named .png is still refused.
+        path = os.path.join(self.dir.name, "fake.png")
+        Image.fromarray(np.full((100, 80, 3), 128, np.uint8)).save(path, format="GIF")
+        a = self.args("10,10,50,50")
+        a.packshot = path
+        with self.assertRaises(Image.UnidentifiedImageError):
+            product_lock.skeleton(a)
+
 
 class FoodGrade(unittest.TestCase):
     def picture(self):
