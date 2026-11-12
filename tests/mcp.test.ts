@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Env } from "../worker/env";
-import { handleMcp, TOOLS } from "../worker/mcp";
+import { handleMcp, INSTRUCTIONS, TOOLS } from "../worker/mcp";
 import { validate } from "../worker/schema";
 
 const env = { PUBLIC_BASE_URL: "https://x.example" } as Env;
@@ -134,6 +134,17 @@ describe("mcp handler", () => {
     const scripts = new Set(["box_print"]);
     expect([...used].filter((n) => !known.has(n) && !scripts.has(n))).toEqual([]);
   });
+  it("names only tools that exist in the server instructions, and keeps the draft order blind", () => {
+    const known = new Set(TOOLS.map((t) => t.name));
+    const used = new Set<string>();
+    for (const m of INSTRUCTIONS.matchAll(/\b([a-z]+_[a-z_]+)\b/g)) used.add(m[1]!);
+    expect(used.size).toBeGreaterThan(10);
+    // Script names in the repo (scripts/<name>.py) are not tools.
+    const scripts = new Set(["box_print"]);
+    expect([...used].filter((n) => !known.has(n) && !scripts.has(n))).toEqual([]);
+    expect(INSTRUCTIONS).toContain("in image order");
+    expect(INSTRUCTIONS).not.toContain("then tell him");
+  });
   it("names only tools that exist in the plugin's subagents", async () => {
     const { readdirSync, readFileSync } = await import("node:fs");
     const dir = new URL("../plugin/agents/", import.meta.url);
@@ -223,7 +234,7 @@ describe("mcp handler", () => {
 describe("validate", () => {
   const schema = TOOLS.find((t) => t.name === "render_submit")!.inputSchema;
   const ok = { batch: "b", idea: "i", kind: "draft", prompt: "x".repeat(40), referenceUrls: ["https://a.b/c.png"] };
-  it("fills defaults", () => expect(validate(schema, ok).numImages).toBe(3));
+  it("fills defaults", () => expect(validate(schema, ok).numImages).toBe(1));
   it("rejects an unknown kind", () => expect(() => validate(schema, { ...ok, kind: "huge" })).toThrow());
   it("rejects a non-URL reference", () => expect(() => validate(schema, { ...ok, referenceUrls: ["file:///etc/passwd"] })).toThrow());
   it("rejects unknown arguments", () => expect(() => validate(schema, { ...ok, extra: 1 })).toThrow());

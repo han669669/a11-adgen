@@ -1,6 +1,7 @@
+import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../worker/env";
-import { check } from "../worker/fal";
+import { AcceptedError, check, submit } from "../worker/fal";
 
 /** The finished-render view (the queued views have no error field). */
 const done = async (p: ReturnType<typeof check>) => (await p) as { status: string; error: string | null; images: { key: string }[] };
@@ -60,5 +61,62 @@ describe("render check", () => {
     const r = await done(check(env, ID));
     expect(r.status).toBe("failed");
     expect(r.error).toBe("fal returned no images");
+  });
+
+  const statusOf = (env: Env) => (env.DB as unknown as { raw: DatabaseSync }).raw.prepare("SELECT status, error FROM renders WHERE id = ?").get(ID);
+  const finish = (env: Env) =>
+    (env.DB as unknown as { raw: DatabaseSync }).raw.prepare("UPDATE renders SET status = 'done', image_keys = ? WHERE id = ?").run(JSON.stringify([`renders/${ID}/1.jpg`]), ID);
+
+  it("stays queued when an image download gets a temporary error", async () => {
+    const { env } = setup();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(Response.json({ status: "COMPLETED" }))
+      .mockResolvedValueOnce(Response.json({ images: [{ url: "https://cdn/1" }] }))
+      .mockResolvedValueOnce(new Response("busy", { status: 503 })));
+    expect(await check(env, ID)).toMatchObject({ status: "queued", note: "image download HTTP 503; poll again." });
+    expect(statusOf(env)).toMatchObject({ status: "queued" });
+  });
+
+  it("fails when an image download is gone (HTTP 404)", async () => {
+    const { env } = setup();
+    stubFal(["https://cdn/1"], [false]);
+    expect((await done(check(env, ID))).status).toBe("failed");
+    expect(statusOf(env)).toMatchObject({ status: "failed" });
+  });
+
+  it("does not overwrite a render that another poll finished during the downloads", async () => {
+    const { env } = setup();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(Response.json({ status: "COMPLETED" }))
+      .mockResolvedValueOnce(Response.json({ images: [{ url: "https://cdn/1" }] }))
+      .mockImplementationOnce(async () => (finish(env), new Response("gone", { status: 404 }))));
+    const r = await done(check(env, ID));
+    expect(r.status).toBe("done");
+    expect(r.images.map((i) => i.key)).toEqual([`renders/${ID}/1.jpg`]);
+    expect(statusOf(env)).toMatchObject({ status: "done", error: null });
+  });
+
+  it("does not mark a render failed that another poll finished first", async () => {
+    const { env } = setup();
+    vi.stubGlobal("fetch", vi.fn().mockImplementationOnce(async () => (finish(env), new Response("bad", { status: 400 }))));
+    expect((await done(check(env, ID))).status).toBe("done");
+    expect(statusOf(env)).toMatchObject({ status: "done", error: null });
+  });
+});
+
+describe("render submit", () => {
+  it("says that fal accepted the job when the render row cannot be saved, and keeps the spend", async () => {
+    const { env } = setup();
+    const raw = (env.DB as unknown as { raw: DatabaseSync }).raw;
+    raw.exec("CREATE TRIGGER no_insert BEFORE INSERT ON renders BEGIN SELECT RAISE(ABORT, 'insert refused'); END;");
+    const fetchMock = vi.fn(async () => Response.json({ request_id: "req-1", status_url: "https://q/s", response_url: "https://q/r" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const err = await submit({ ...env, SPEND_CAP_USD: "5.00" } as Env, { batch: "b", idea: "i", kind: "final", prompt: "p".repeat(40), referenceUrls: ["https://a/1.jpg"], numImages: 1 }).catch((e) => e);
+    expect(err).toBeInstanceOf(AcceptedError);
+    expect(err.message).toContain("request req-1");
+    expect(err.message).toContain("Do not submit again");
+    expect(err.renderId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(raw.prepare("SELECT status FROM spend").all()).toEqual([{ status: "spent" }]);
   });
 });

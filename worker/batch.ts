@@ -280,21 +280,51 @@ export async function finalRender(env: Env, batchId: string, key: string) {
      WHERE p.batch_id = ? AND p.render_key = ?`,
   ).bind(batchId, key).first<{ idea_id: string; final_render_id: string | null; final_prompt: string | null; final_refs: string }>();
   if (!pick) throw new Error(`${key} is not a pick of batch ${batchId}.`);
-  if (pick.final_render_id) return { id: pick.final_render_id, status: "already started" };
+  const held = pick.final_render_id;
+  if (held?.startsWith("accepted:"))
+    return { id: null, status: "already started", note: "fal accepted this final but its row was not saved; tell the owner; do not submit again." };
+  // A claim with a time (pending:<ISO time>:<uuid>) can go stale. An old claim (pending:<uuid>) has no time: it stays as it is.
+  const claimedAt = held?.match(/^pending:(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z):/)?.[1];
+  const stale = claimedAt ? held! : null;
+  if (held && !stale) return { id: held.startsWith("pending:") ? null : held, status: "already started" };
+  if (stale && claimedAt) {
+    if (Date.now() - Date.parse(claimedAt) < 120_000) return { id: null, status: "already started" };
+    // Take a stale claim over only when no paid job can exist for it. A final made since the claim is that job: adopt it.
+    const made = await env.DB.prepare(
+      "SELECT id FROM renders WHERE batch = ? AND idea = ? AND kind = 'final' AND created_at >= ? ORDER BY created_at LIMIT 1",
+    ).bind(batchId, pick.idea_id, claimedAt).first<{ id: string }>();
+    if (made) {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE picks SET final_render_id = ? WHERE render_key = ? AND final_render_id = ?").bind(made.id, key, stale),
+        env.DB.prepare("UPDATE batches SET status = 'finals', updated_at = ? WHERE id = ? AND status IN ('drafts', 'board')").bind(now(), batchId),
+      ]);
+      return { id: made.id, status: "already started" };
+    }
+  }
   if (!pick.final_prompt) throw new Error(`Idea ${pick.idea_id} has no final prompt. Set it with ideas_update.`);
   // Claim the pick before the paid call, so two taps (or a retry) cannot start two finals.
-  const claim = `pending:${crypto.randomUUID()}`;
-  const claimed = await env.DB.prepare("UPDATE picks SET final_render_id = ? WHERE render_key = ? AND final_render_id IS NULL")
-    .bind(claim, key)
-    .run();
+  const claim = `pending:${new Date().toISOString()}:${crypto.randomUUID()}`;
+  const claimed = await (stale
+    ? env.DB.prepare("UPDATE picks SET final_render_id = ? WHERE render_key = ? AND final_render_id = ?").bind(claim, key, stale)
+    : env.DB.prepare("UPDATE picks SET final_render_id = ? WHERE render_key = ? AND final_render_id IS NULL").bind(claim, key)
+  ).run();
   if (claimed.meta.changes !== 1) return { id: null, status: "already started" };
   const refs = [fal.mediaUrl(env, key), ...(JSON.parse(pick.final_refs) as string[])];
   let r: Awaited<ReturnType<typeof fal.submit>>;
   try {
     r = await fal.submit(env, { batch: batchId, idea: pick.idea_id, kind: "final", prompt: pick.final_prompt, referenceUrls: refs, numImages: 1 });
   } catch (e) {
-    // fal did not take the job: free the pick so the owner can tap Render again.
-    await env.DB.prepare("UPDATE picks SET final_render_id = NULL WHERE render_key = ? AND final_render_id = ?").bind(key, claim).run();
+    // fal took the job (billed) but its row was not saved: keep the pick closed for ever, so no second final is paid.
+    // Any other error: fal did not take the job, so free the pick and the owner can tap Render again.
+    const mark = () =>
+      env.DB.prepare("UPDATE picks SET final_render_id = ? WHERE render_key = ? AND final_render_id = ?")
+        .bind(e instanceof fal.AcceptedError ? `accepted:${e.renderId}` : null, key, claim)
+        .run();
+    // Try the write twice. If both fail after fal took the job, say so: the claim then goes stale and could be paid again.
+    await mark().catch(mark).catch((w) => {
+      if (e instanceof fal.AcceptedError)
+        throw new fal.AcceptedError(`${e.message} The pick was not closed (${(w as Error).message}): do not tap Render for it.`, e.renderId);
+    });
     throw e;
   }
   await env.DB.batch([
@@ -321,7 +351,7 @@ export async function batchGet(env: Env, id: string) {
     env.DB.prepare("SELECT id, kind, title, url, data FROM subjects WHERE id = ?").bind(b.subject_id).first<Record<string, any>>(),
     env.DB.prepare("SELECT * FROM ideas WHERE batch_id = ? ORDER BY n LIMIT 60").bind(id).all<Record<string, any>>(),
     env.DB.prepare(
-      `SELECT id, idea, kind, status, image_keys, composed_key, error, usd_est, created_at FROM renders WHERE batch = ? ORDER BY created_at LIMIT ${MAX_BATCH_RENDERS}`,
+      `SELECT id, idea, kind, status, image_keys, composed_key, error, usd_est, created_at FROM renders WHERE batch = ? ORDER BY created_at, rowid LIMIT ${MAX_BATCH_RENDERS}`,
     ).bind(id).all<Record<string, any>>(),
     env.DB.prepare("SELECT render_key, idea_id, rank, reason FROM draft_ranks WHERE batch_id = ? LIMIT 200").bind(id).all<Record<string, any>>(),
     env.DB.prepare("SELECT render_key, idea_id, note, by_owner, final_render_id, created_at FROM picks WHERE batch_id = ? LIMIT 100").bind(id).all<Record<string, any>>(),
@@ -352,11 +382,11 @@ export async function batchGet(env: Env, id: string) {
       picked: i.picked === 1,
       finalPrompt: i.final_prompt,
       finalRefs: JSON.parse(i.final_refs),
+      // Submit order, then image order. Never rank order: the order must not show the critic's rank. rank and reason stay as fields; the board hides them until the owner picks.
       drafts: renders.results
         .filter((r) => r.idea === i.id && r.kind === "draft")
         .flatMap((r) => (r.image_keys ? (JSON.parse(r.image_keys) as string[]) : []))
-        .map((key) => ({ ...img(key), rank: rankBy.get(key)?.rank ?? null, reason: rankBy.get(key)?.reason ?? null, picked: pickBy.has(key) }))
-        .sort((x, y) => (x.rank ?? 99) - (y.rank ?? 99)),
+        .map((key) => ({ ...img(key), rank: rankBy.get(key)?.rank ?? null, reason: rankBy.get(key)?.reason ?? null, picked: pickBy.has(key) })),
       finals: renders.results
         .filter((r) => r.idea === i.id && r.kind === "final")
         .map((r) => ({
