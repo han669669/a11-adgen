@@ -44,6 +44,8 @@ K = 4  # working scale: pixels per packshot pixel
 DEFAULT_THR = (0.40, 0.60, 0.6)
 
 
+ECC_MIN = 0.5  # a local fit below this score is reported, so the owner checks that block at full size
+
 def load_font(path, size, wght):
     try:
         f = ImageFont.truetype(path, size)
@@ -117,7 +119,9 @@ class Box:
             cv2.line(m, p0, p1, 255, int(2 * hw * K))
             m = cv2.GaussianBlur(m.astype(np.float32) / 255, (0, 0), 1.2 * K)
         if "xmin" in b:
-            m[:, :int((b["xmin"] - cx0) * K)] = 0
+            m[:, :max(0, int((b["xmin"] - cx0) * K))] = 0  # an xmin left of the crop cuts nothing (a negative slice would cut almost all)
+        if not (m > 0.5).any():
+            sys.exit(f"Block {i}: its band or xmin leaves no part of the block box {list(b['box'])}. Check them in the config.")
         d0 = d0 * m
         ref = np.percentile(d0[m > 0.5], 99.5)
         loc = cv2.dilate(d0, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (4 * K + 1, 4 * K + 1)))  # strongest ink within 4 px: each stroke is judged against its neighbours
@@ -268,6 +272,8 @@ def refine(H, box, gF, pg, pad=40):
     except cv2.error as e:
         print("ecc failed", e)
         cc = 0
+    if cc < ECC_MIN:
+        print(f"WARNING: block {list(box)}: the local fit is weak (ecc {float(cc):.3f}, below {ECC_MIN}). The print can sit a few px off: check this block at full size.")
     A3 = np.vstack([warp, [0, 0, 1]]).astype(np.float64)
     T0 = np.array([[1, 0, x0], [0, 1, y0], [0, 0, 1.0]])
     corr = T0 @ A3 @ np.linalg.inv(T0)

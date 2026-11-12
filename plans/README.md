@@ -53,7 +53,6 @@ the private project files. The numbers F4, F7, F8, F11, F16 and F17 are theirs.
 | F3 | Gates that are prose only: the 0.04 gold floor (`gold_score` compares with the last run, not with the "before" run), a rank for every draft before status `board`, the 3% product shape rule | `worker/canon.ts:271`, `worker/batch.ts:82-98`, `docs/creative-playbook.md:117` | M | Each is a true/false fact, so it fits the 15-check budget. Needs a decision row per check. |
 | F5 | `results_save` runs one text search over all the brand's packs for each row (up to 60) | `worker/results.ts:41-52` | S | Matters only when real results exist. |
 | F6 | Two queries of `taste_log` and `picks_save` have no index (`draft_ranks.idea_id`, `picks(by_owner, created_at)`) | `worker/batch.ts:233-252`, `migrations/` | S | Needs a migration, so the owner's yes. Cheap at today's size. |
-| F9 | `scripts/box_print.py` (ships pixels to the client) has no test, and the Python scripts have no pinned versions | `scripts/box_print.py:197-243` | S | One stdlib `unittest` file on synthetic input; a 3-line `scripts/requirements.txt`. |
 | F10 | The tool-coverage gate passes on a quoted name: `render_submit` (draft path, 150-render limit, release on refusal) and `spend_get` have no behaviour test | `tests/tools.test.ts:104-115`, `tests/mcp.test.ts:34-42,183-190` | S | |
 | F12 | Merge deploys new code before a manual D1 migration; nothing enforces "migration first" | `docs/deploy.md:14-22,37` | S | A rule in `AGENTS.md`: the migration PR merges and is applied before the PR that uses it. |
 | F13 | No `engines` field or `.nvmrc`, but tests need Node 22 (`node:sqlite`); Node 22 support ends in April 2027 | `package.json`, `.github/workflows/check.yml:24` | S | |
@@ -61,6 +60,8 @@ the private project files. The numbers F4, F7, F8, F11, F16 and F17 are theirs.
 | F15 | Batch labels W46, W46b, W46c and W47 were typed for batches that ran in ISO week 45; their ad names say W45 and W46 | `docs/marks.md:9-20`, `docs/decisions.md` | S | Labels are free text. `batch_create` could suggest the Singapore ISO week. |
 
 Done since the audit: F1 (2026-11-12). The critic picks the ideas, ranks the drafts and runs the gold test in a fresh context (`docs/decisions.md`).
+
+Also done on 2026-11-12: F9 (`scripts/test_scripts.py`, a stdlib `unittest` on synthetic pictures, and `scripts/requirements.txt`; five input checks in the three scripts), and F11 (closed after a read-only measurement; details in the private project files).
 
 ## Direction (options for the owner; not ranked against the bugs)
 

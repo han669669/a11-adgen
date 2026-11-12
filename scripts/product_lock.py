@@ -33,6 +33,14 @@ def ints(s, n):
     return v
 
 
+def check_box(box, size, flag="--box"):
+    """A box must lie inside the image and have a width and a height."""
+    x0, y0, x1, y1 = box
+    W, H = size
+    if not (0 <= x0 < x1 <= W and 0 <= y0 < y1 <= H):
+        sys.exit(f"{flag} {x0},{y0},{x1},{y1} is outside the packshot ({W}x{H}) or not x0<x1, y0<y1")
+
+
 def rgb(s):
     if s.startswith("#"):
         return tuple(int(s[i:i + 2], 16) for i in (1, 3, 5))
@@ -142,6 +150,7 @@ def skeleton(a):
     pack = Image.open(a.packshot).convert("RGB")
     W, H = ints(a.size, 2)
     x0, y0, x1, y1 = ints(a.box, 4)
+    check_box((x0, y0, x1, y1), pack.size)
     piece = cut(pack, (x0, y0, x1, y1))
     jar_h = round(H * a.jar_height)
     scale = jar_h / (y1 - y0 + 2 * PAD)
@@ -162,6 +171,7 @@ def swap(a):
     pack = Image.open(a.packshot).convert("RGB")
     scene = Image.open(a.scene).convert("RGB")
     x0, y0, x1, y1 = ints(a.box, 4)
+    check_box((x0, y0, x1, y1), pack.size)
     ox0, ox1, otop, obase = ints(a.old, 4)  # the old product in the scene: x0,x1,top,base (one product per call)
     arr = np.asarray(scene).astype(float)
     H, W = arr.shape[:2]
@@ -296,7 +306,7 @@ def vary_food(a):
     horizontal glass highlights stay where they are, because the strips keep their height. Copy 1 is the photo unchanged."""
     import random
     pack = np.asarray(Image.open(a.packshot).convert("RGB")).copy()
-    # more kernels to draw from: other photos of the same pack with the same framing (e.g. another flavour), graded to match
+    # more kernels to draw from: other photos of the same pack with the same framing (e.g. another flavour). This step does not grade them: grade each to match first (food_grade.py)
     extras = [np.asarray(Image.open(e).convert("RGB")) for e in (a.extra_src or [])]
     for e in extras:
         if e.shape != pack.shape:

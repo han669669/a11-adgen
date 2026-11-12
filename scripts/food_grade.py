@@ -18,6 +18,7 @@ from PIL import Image
 
 M = np.array([[0.4124564, 0.3575761, 0.1804375], [0.2126729, 0.7151522, 0.0721750], [0.0193339, 0.1191920, 0.9503041]])
 WP = np.array([0.95047, 1.0, 1.08883])
+BG_STRIP, BG_GAP = 30, 5  # the backdrop is sampled in a strip from 30 to 5 px beside a region
 
 def to_lab(rgb):
     c = rgb / 255.0
@@ -50,6 +51,14 @@ def grade(src, regions, ref, ref_box, strength=0.8, sd_boost=1.0, contrast=1.0, 
     a = np.asarray(src.convert("RGB")).astype(float)
     r = np.asarray(ref.convert("RGB")).astype(float)
     x0, y0, x1, y1 = ref_box
+    if not (0 <= x0 < x1 <= r.shape[1] and 0 <= y0 < y1 <= r.shape[0]):
+        raise ValueError(f"ref_box {ref_box} is outside the close-up ({r.shape[1]}x{r.shape[0]}) or not x0<x1, y0<y1")
+    for reg in regions:
+        X0, Y0, X1, Y1 = reg
+        if not (0 <= X0 < X1 <= a.shape[1] and 0 <= Y0 < Y1 <= a.shape[0]):
+            raise ValueError(f"region {tuple(reg)} is outside the packshot ({a.shape[1]}x{a.shape[0]}) or not x0<x1, y0<y1")
+        if X0 < BG_GAP + 1 and X1 > a.shape[1] - BG_GAP - 1:
+            raise ValueError(f"region {tuple(reg)} leaves no backdrop to sample at its left or right side: make it narrower")
     rc = r[y0:y1, x0:x1]
     for name, v, lo in (("strength", strength, 0.0), ("sd_boost", sd_boost, 0.01), ("contrast", contrast, 0.01), ("clarity", clarity, 0.0), ("dist", dist, 0.0), ("sat_min", sat_min, 0.0)):
         if not np.isfinite(v) or v < lo:
@@ -66,7 +75,9 @@ def grade(src, regions, ref, ref_box, strength=0.8, sd_boost=1.0, contrast=1.0, 
     s_mu = t_mu
     for (X0, Y0, X1, Y1) in regions:
         reg = a[Y0:Y1, X0:X1]
-        bg = np.median(a[Y0:Y1, max(0, X0 - 30):X0 - 5].reshape(-1, 3), axis=0)
+        # the backdrop colour: a strip just left of the region, or just right of it when the region starts at the left edge
+        strip = a[Y0:Y1, max(0, X0 - BG_STRIP):X0 - BG_GAP] if X0 >= BG_GAP + 1 else a[Y0:Y1, X1 + BG_GAP:X1 + BG_STRIP]
+        bg = np.median(strip.reshape(-1, 3), axis=0)
         m = kernel_mask(reg, bg, dist, sat_min)
         if not m.any():
             raise ValueError(f"no kernel pixels found in region {(X0, Y0, X1, Y1)}: check the box, or lower --sat-min and --dist for pale kernels")

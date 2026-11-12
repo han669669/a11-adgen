@@ -1,0 +1,4 @@
+# Tested with these versions (2026-11-12). Install: python3 -m pip install -r scripts/requirements.txt
+numpy==2.5.3
+pillow==12.3.0
+opencv-python-headless==5.0.0.93
