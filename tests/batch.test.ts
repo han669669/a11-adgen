@@ -600,3 +600,95 @@ describe("compose_final with brandSlug", () => {
     expect(asked).toContain(latestLogo);
   });
 });
+
+describe("owner verdicts", () => {
+  const RID = "99999999-9999-4999-8999-999999999999";
+  async function setup() {
+    const { env, raw } = makeEnv();
+    const { b, ideas, subject } = await seed(env);
+    const keys = addDraft(raw, b.id, ideas[0]!.id, RID);
+    return { env, raw, b, ideas, keys, subject };
+  }
+
+  it("saves each kind of verdict with his words, and taste_log returns them newest first with the limit", async () => {
+    const { env, raw, b, ideas, keys } = await setup();
+    raw.prepare("INSERT INTO packs (id, batch_id, version, token_hash, title, content, created_at) VALUES ('p1', ?, 1, 'h', 't', '{}', 'now')").run(b.id);
+    const res = await batch.batchUpdate(env, {
+      id: b.id,
+      ownerVerdicts: [
+        { stage: "draft", mark: "pass", ideaId: ideas[1]!.id, ownerSaid: "none of these" },
+        { stage: "final", mark: "fix", key: keys[0], ownerSaid: "logo a bit lower", notes: "v2" },
+        { stage: "pack", mark: "approve", packVersion: 1, ownerSaid: "i approve of it" },
+        { stage: "pack", mark: "reject", ownerSaid: "the old copy was better" },
+      ],
+    });
+    expect(res).toMatchObject({ verdictsSaved: 4, updated: [] });
+    const log = await batch.tasteLog(env);
+    expect(log.verdicts).toHaveLength(4);
+    expect(log.verdicts[0]).toMatchObject({ stage: "pack", mark: "reject", packVersion: null, batch: "W46", idea: null });
+    expect(log.verdicts[1]).toMatchObject({ stage: "pack", packVersion: 1, ownerSaid: "i approve of it" });
+    // The final's idea comes from its render.
+    expect(log.verdicts[2]).toMatchObject({ stage: "final", key: keys[0], notes: "v2", idea: { stage: "tof", headline: "Somehow the jar is empty again." } });
+    expect(log.verdicts[3]).toMatchObject({ stage: "draft", mark: "pass", idea: { stage: "bof" } });
+    expect((await batch.tasteLog(env, 1)).verdicts).toHaveLength(1);
+  });
+
+  it("refuses a verdict that does not fit the batch, and saves none of the call", async () => {
+    const { env, raw, b, ideas, keys, subject } = await setup();
+    const other = await batch.batchCreate(env, { brandSlug: "wongi", subjectId: subject.id, label: "W47" });
+    const bad: [batch.OwnerVerdict, RegExp][] = [
+      [{ stage: "final", mark: "pass", key: keys[0], ownerSaid: "x" }, /not a mark of stage 'final'/],
+      [{ stage: "draft", mark: "approve", ideaId: ideas[0]!.id, ownerSaid: "x" }, /not a mark of stage 'draft'/],
+      [{ stage: "draft", mark: "pass", ownerSaid: "x" }, /needs ideaId/],
+      [{ stage: "final", mark: "fix", ownerSaid: "x" }, /needs key/],
+      [{ stage: "final", mark: "fix", key: "renders/11111111-1111-4111-8111-111111111111/1.jpg", ownerSaid: "x" }, /not a picture of this batch/],
+      [{ stage: "final", mark: "fix", key: keys[0], ideaId: ideas[1]!.id, ownerSaid: "x" }, /picture of another idea/],
+      [{ stage: "pack", mark: "approve", packVersion: 3, ownerSaid: "x" }, /no pack version 3/],
+    ];
+    for (const [v, msg] of bad) {
+      await expect(batch.batchUpdate(env, { id: b.id, ownerVerdicts: [{ stage: "draft", mark: "pass", ideaId: ideas[0]!.id, ownerSaid: "ok" }, v] })).rejects.toThrow(msg);
+    }
+    // An idea of this batch is refused on another batch.
+    await expect(batch.batchUpdate(env, { id: other.id, ownerVerdicts: [{ stage: "draft", mark: "pass", ideaId: ideas[0]!.id, ownerSaid: "x" }] })).rejects.toThrow(/not an idea of this batch/);
+    await expect(batch.batchUpdate(env, { id: "00000000-0000-4000-8000-000000000000", ownerVerdicts: [{ stage: "pack", mark: "fix", ownerSaid: "x" }] })).rejects.toThrow(/No batch/);
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM verdicts").get()).toEqual({ n: 0 });
+  });
+
+  it("checks ownerVerdicts on the MCP batch_update tool", () => {
+    const tool = TOOLS.find((t) => t.name === "batch_update")!;
+    const id = "12345678-1234-4234-8234-123456789012";
+    expect(() => validate(tool.inputSchema, { id, ownerVerdicts: [{ stage: "final", mark: "fix", key: `renders/${RID}/1.jpg`, ownerSaid: "ok" }] })).not.toThrow();
+    expect(() => validate(tool.inputSchema, { id, ownerVerdicts: [{ stage: "final", mark: "fix", ownerSaid: "" }] })).toThrow();
+    expect(() => validate(tool.inputSchema, { id, ownerVerdicts: [{ stage: "board", mark: "fix", ownerSaid: "ok" }] })).toThrow();
+    expect(() => validate(tool.inputSchema, { id, ownerVerdicts: [{ stage: "final", mark: "fix", ownerSaid: "ok", key: "../x" }] })).toThrow();
+    expect(() => validate(tool.inputSchema, { id, ownerVerdicts: Array.from({ length: 21 }, () => ({ stage: "pack", mark: "fix", ownerSaid: "ok" })) })).toThrow();
+  });
+});
+
+describe("backfill of the old owner marks", () => {
+  const { readFileSync } = require("node:fs") as typeof import("node:fs");
+  const sql = readFileSync(new URL("../scripts/backfill-verdicts.sql", import.meta.url), "utf8");
+
+  it("imports 21 rows on a database with the W46c batch, and a second run adds none", async () => {
+    const { env, raw } = makeEnv();
+    const { b } = await seed(env);
+    raw.prepare("UPDATE batches SET label = 'W46c WonGi Pop Barley (house recipe)' WHERE id = ?").run(b.id);
+    await batch.ideasSave(env, b.id, [{ format: "mof", insight: "m", visual: "m", headline: "M", picked: true }]);
+    await batch.ideasUpdate(env, [{ id: (await batch.batchGet(env, b.id)).ideas.find((i: { format: string }) => i.format === "bof")!.id, picked: true }]);
+    raw.exec(sql);
+    raw.exec(sql);
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM verdicts").get()).toEqual({ n: 21 });
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM verdicts WHERE batch_id IS NULL").get()).toEqual({ n: 3 });
+    expect(raw.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    const log = await batch.tasteLog(env, 100);
+    expect(log.verdicts).toHaveLength(21);
+    expect(log.verdicts[0]).toMatchObject({ stage: "final", mark: "reject", sourceMark: "v11 worse than v10; revert", idea: { stage: "bof" } });
+    expect(log.verdicts.find((v) => v.sourceMark === "Corrected: not a product-truth bar")).toMatchObject({ mark: null, batch: null });
+  });
+
+  it("adds only the 3 Phase 0 rows when the W46c batch is not there", () => {
+    const { raw } = makeEnv();
+    raw.exec(sql);
+    expect(raw.prepare("SELECT id FROM verdicts ORDER BY id").all()).toEqual([{ id: "marks-01" }, { id: "marks-02" }, { id: "marks-09" }]);
+  });
+});

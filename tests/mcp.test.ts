@@ -69,7 +69,7 @@ describe("mcp handler", () => {
     const j: any = await (await post({ jsonrpc: "2.0", id: 8, method: "prompts/get", params: { name: "final", arguments: { batchId: "abc" } } })).json();
     const text: string = j.result.messages[0].content.text;
     expect(text.indexOf("passed on all 3 drafts")).toBeLessThan(text.indexOf("picks_save"));
-    expect(text).toContain("batch_update notes");
+    expect(text).toContain("batch_update ownerVerdicts (stage 'draft', mark 'pass'");
     expect(text).toContain("when food shows");
   });
   it("runs the gold test inline, in the full set, and never asks to run another prompt", async () => {
@@ -178,6 +178,15 @@ describe("mcp handler", () => {
     expect(tools.split(", ")).toEqual(["Read", "Grep", "Glob", "Bash", "mcp__a11__batch_get", "mcp__a11__brand_get", "mcp__a11__canon_get", "mcp__a11__image_get", "mcp__a11__render_status"]);
     expect(text("final")).toContain("give the finished drafts to the art-director subagent to check");
     expect(text("final")).toContain("When he picks one of the new drafts, ideas_update finalPrompt for that idea first");
+  });
+  it("tells the agent to save the owner's verdicts in the final, pack and learn prompts", async () => {
+    const { PROMPTS } = await import("../worker/prompts");
+    const text = (name: string) => PROMPTS.find((p) => p.name === name)!.text({ brand: "wongi", batchId: "b1", title: "t", label: "W1" });
+    expect(text("final")).toContain("batch_update ownerVerdicts (stage 'draft', mark 'pass'");
+    expect(text("final")).toContain("batch_update ownerVerdicts (stage 'final', key = that final");
+    expect(text("final")).not.toContain("batch notes (batch_get");
+    expect(text("pack")).toContain("batch_update ownerVerdicts (stage 'pack'");
+    expect(text("learn")).toContain("the newest is his current view");
   });
   it("prompt_get returns the same text as prompts/get, and refuses a missing argument", async () => {
     const call = async (args: unknown) =>

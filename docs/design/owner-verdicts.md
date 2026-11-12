@@ -143,7 +143,7 @@ Source: 14 dated rows (counted on 2026-11-12). Result: 21 `verdicts` rows from 1
 
 Rules of the backfill:
 
-- `owner_said` is the "Owner's words" cell, as written. For a set, each of the 3 rows holds the words that are about that ad, and the words about the whole set.
+- `owner_said` is the "Owner's words" cell, as written. For a set, each of the 3 rows holds the whole cell (built 2026-11-12: a split of his words by ad could misquote him).
 - `notes` holds the version label ("v2", "v5 set") and that ad's own evidence from the "Lesson" cell (for example "height ÷ width 2.46 against the real 2.65").
 - `render_key` is set when `docs/marks.md` gives a key. The set rows give no key: `render_key` stays NULL and `idea_id` is the W46c idea of that stage. The rule "stage `final` needs a key" is a rule of the tool for new verdicts; these old rows have none to give.
 - `batch_id` is the W46c batch for rows 6 to 8 and 10 to 14. It is NULL for rows 1, 2 and 9: the Phase 0 renders are in no batch (read from the live database on 2026-11-12, read-only).
