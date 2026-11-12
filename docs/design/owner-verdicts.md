@@ -27,10 +27,11 @@ One new table, `verdicts`. One new optional input on one existing tool. No new t
 ### 2.1 Storage
 
 ```sql
--- Migration 0014_verdicts.sql
--- One row for each thing the owner said about a draft, a final or pack copy. A draft pick stays in picks.
+-- Migration 0014_verdicts.sql, as merged and applied to the live database on 12-11-2026
+-- One row for each thing the owner said about a draft, a final or pack copy (docs/design/owner-verdicts.md).
+-- A draft pick stays in picks. Rows are only added, never changed.
 CREATE TABLE verdicts (
-  id TEXT PRIMARY KEY,                    -- a UUID; the backfill uses fixed ids, so a second run adds nothing
+  id TEXT PRIMARY KEY NOT NULL,           -- a UUID; the backfill uses fixed ids, so a second run adds nothing
   batch_id TEXT REFERENCES batches(id),   -- NULL only for an ad that was made in no batch (the Phase 0 ads)
   idea_id TEXT,                           -- the idea, when the verdict is about one idea (it must be an idea of batch_id)
   render_key TEXT,                        -- the draft or final picture, when the verdict is about one picture
@@ -47,13 +48,21 @@ CREATE TABLE verdicts (
     OR (stage = 'draft' AND mark IN ('pass', 'fix'))
     OR (stage IN ('final', 'pack') AND mark IN ('fix', 'approve', 'reject'))),
   CHECK (stage <> 'pack' OR batch_id IS NOT NULL),
+  CHECK (stage <> 'draft' OR idea_id IS NOT NULL),               -- a draft verdict is about the drafts of one idea
+  CHECK (idea_id IS NULL OR batch_id IS NOT NULL),               -- so the composite key below always applies
   FOREIGN KEY (idea_id, batch_id) REFERENCES ideas(id, batch_id)   -- the same composite key as picks and draft_ranks
 );
+-- packs has no unique (id, batch_id) pair for a composite key, so a trigger keeps a pack verdict on a pack of its own batch.
+CREATE TRIGGER verdicts_pack_of_batch BEFORE INSERT ON verdicts
+WHEN NEW.pack_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM packs WHERE id = NEW.pack_id AND batch_id = NEW.batch_id)
+BEGIN
+  SELECT RAISE(ABORT, 'verdicts: the pack is not a pack of this batch');
+END;
 CREATE INDEX verdicts_recent ON verdicts (created_at);
 CREATE INDEX verdicts_batch ON verdicts (batch_id, created_at);
 ```
 
-`packs` has no unique `(id, batch_id)` pair, so the table cannot hold a composite key for the pack. The code checks that the pack is a pack of the batch (2.2), as it does for `render_key`.
+`packs` has no unique `(id, batch_id)` pair, so the table cannot hold a composite key for the pack. The trigger `verdicts_pack_of_batch` refuses a pack of another batch, and the code also checks it (2.2), as it does for `render_key`.
 
 The four marks:
 
@@ -157,7 +166,7 @@ A merge to `main` deploys the Worker at once. `AGENTS.md` section 7: code that n
 
 | Step | What | Test or check |
 |---|---|---|
-| A | Pull request 1: `migrations/0014_verdicts.sql` only. | `npm run check` (the test database applies every migration). A test inserts one row of each stage and shows that the two CHECK rules refuse a bad row. |
+| A | Pull request 1: `migrations/0014_verdicts.sql` only. | `npm run check` (the test database applies every migration). A test inserts one row of each stage and shows that the CHECK rules and the trigger refuse a bad row. |
 | B | The owner says yes. The migration runs on the live database as `docs/deploy.md` step 3 says. | Read back: `SELECT name FROM d1_migrations` shows `0014_verdicts.sql`; `SELECT COUNT(*) FROM verdicts` gives 0. |
 | C | Pull request 2: the write path, the read path, the prompts and the docs. | Tests: each rule of 2.2 refuses the bad input; `taste_log` returns verdicts newest first and obeys the limit; the prompt text names only real tools. |
 | D | The backfill file runs once on the live database (the owner's yes covers it). | A test seeds a batch with the W46c label and one picked idea for each stage, runs the file twice and gets 21 rows; on a database with no such batch it gets the 3 Phase 0 rows only. Live read back: 21 rows; `taste_log` shows them. |
