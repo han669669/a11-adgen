@@ -47,9 +47,9 @@ Three ads per batch: 1 tof, 1 mof, 1 bof (owner, 07-11-2026). The database allow
 
 ## 5. Process for each batch
 
-1. Research: the product page facts, buyer words (Reddit, reviews), and the Ad Library through Apify (the oldest active statics in the category; record how long each has run). Read the angle, never the look.
+1. Research: the product page facts and buyer words (Reddit, reviews). Skip the Ad Library through Apify (the oldest active statics in the category, and how long each has run) until its Phase 4 integration is built and the owner approves the paid step. Read the angle, never the look.
 2. Burst: at least 8 ideas per stage before you pick. Ideas cost nothing; drafts cost money.
-3. Kill: apply §2, and kill an idea that needs a `render-checklist.md` defect (D1 to D8) to work. Most ideas must die here. If fewer than the needed picks survive, write more ideas. Do not lower the bar.
+3. Kill: apply §2, and kill an idea that needs a `render-checklist.md` defect (D1 to D9) to work. Most ideas must die here. If fewer than the needed picks survive, write more ideas. Do not lower the bar.
 4. Looks: give each of the 3 picks its own look (§7.2): a different backdrop, light and camera per stage. Do not copy option B's look onto every ad.
 5. Draft: 3 `low` drafts per picked idea, one render each (`numImages` 1). Each draft starts from its own product-lock skeleton (§7.4): the real product at its exact proportions, placed differently per draft (position, scale, crop, light, camera), so the 3 drafts differ and the product shape is exact. When the packshot cannot show the idea's product state (an open, nearly empty jar), draft with the packshot only (§7.1, prompt 1) and build the product's state from an open source (§7.4 C) and swap it into the picked draft.
 6. Review (the owner picks, 07-11-2026): read `taste_log` first. Then rank the drafts blind with `drafts_rank` (judge each against §2, then the product shape against the packshot §7.3, then `render-checklist.md` §1 to §3 at phone size, craft last; write what you see in each reason). Then STOP. Show the owner the drafts: one picture per idea with its 3 drafts numbered 1, 2, 3 from left to right in image order, and no rank. Name any draft that has a D item and tell him not to pick it. Do not say which you prefer. The owner picks 1 eligible draft per idea. If he passes on all 3 drafts of an idea, redraft that idea and add one line with his words to the batch notes (`batch_get` for the current notes, then `batch_update` with them and the new line: it replaces the whole field), because `taste_log` keeps only ideas where he picked a draft. Save his picks with `picks_save` and his own words. Read the result: where he chose a draft you ranked lower, find what he saw that you missed and let it steer the next batch. Then the final (§7.1, prompt 2) and, when food shows, the finish pass (§7.1, prompt 3).
@@ -75,7 +75,7 @@ Option B was made in 3 renders plus the logo in code. W46b used more steps and b
 
 Fill the parts in angle brackets. Keep the rest of the words.
 
-1. **Draft** (`render_submit` kind `draft`, 3 images, low; references: the packshot only):
+1. **Draft** (fallback only, for a product state the packshot cannot show, §5 step 5; the normal draft is one render per draft from a product-lock skeleton, §7.4) (`render_submit` kind `draft`, 3 images, low; references: the packshot only):
    > <Look opener: "Premium studio product photograph" for a studio look, "Real phone photo, honest and unposed" for a native look> for a static social ad. Image 1 is the exact product: <product name>. Keep its label, <the label's main elements>, <the cap or closure> and <the pack material> exactly as in the photo. <The kit's shape words (kit notes), with the product's real size.>
    >
    > Scene: <one or two sentences: where the product stands (which side of the frame, not centred unless the look says so), its state that carries the idea (open, almost empty, one missing), at most one other object at its true size>. <This stage's backdrop, light and camera (§7.2)>. No other objects. No hands.
