@@ -5,14 +5,17 @@ const now = () => new Date().toISOString();
 
 export const CTAS = ["SHOP_NOW", "LEARN_MORE", "ORDER_NOW", "GET_OFFER", "SIGN_UP", "BUY_NOW"] as const;
 
+/** The text fields are left out only with copyFromVersion: the server then copies them from that pack. */
 export interface PackAdInput {
   renderId: string;
-  primaryTexts: string[];
-  headlines: string[];
-  description: string;
-  cta: (typeof CTAS)[number];
-  why: string;
+  primaryTexts?: string[];
+  headlines?: string[];
+  description?: string;
+  cta?: (typeof CTAS)[number];
+  why?: string;
 }
+
+const TEXT_FIELDS = ["primaryTexts", "headlines", "description", "cta", "why"] as const;
 
 export interface PackAd {
   name: string;
@@ -81,7 +84,7 @@ interface FactRow {
  */
 export async function packPublish(
   env: Env,
-  a: { batchId: string; ads: PackAdInput[]; launchPlan?: string; healthProduct?: boolean; at?: Date },
+  a: { batchId: string; ads: PackAdInput[]; launchPlan?: string; healthProduct?: boolean; copyFromVersion?: number; at?: Date },
 ) {
   const b = await env.DB.prepare(
     `SELECT b.id, b.label, b.subject_id, b.brand_id, b.created_at, br.slug, br.name FROM batches b JOIN brands br ON br.id = b.brand_id WHERE b.id = ?`,
@@ -93,6 +96,16 @@ export async function packPublish(
   const facts = (await env.DB.prepare("SELECT label, value, quote, source_url FROM facts WHERE subject_id = ? ORDER BY id LIMIT 200")
     .bind(b.subject_id).all<FactRow>()).results;
   const week = isoWeek(singaporeClock(a.at ?? new Date()));
+  // Approved copy is copied by the server, never typed again (owner, 09-11-2026: v4 and v5 held rewritten copy).
+  let source: PackContent | null = null;
+  if (a.copyFromVersion !== undefined) {
+    const src = await env.DB.prepare("SELECT content, revoked_at FROM packs WHERE batch_id = ? AND version = ?")
+      .bind(a.batchId, a.copyFromVersion).first<{ content: string; revoked_at: string | null }>();
+    if (!src) throw new InputError(`This batch has no pack version ${a.copyFromVersion}.`);
+    if (src.revoked_at) throw new InputError(`Pack version ${a.copyFromVersion} is revoked. Copy from a version that is live. Nothing was published.`);
+    source = JSON.parse(src.content) as PackContent;
+  }
+  const sourceAds = new Map((source?.ads ?? []).map((x) => [adKey(x.name), x]));
 
   const ads: PackAd[] = [];
   const factCheck: PackContent["factCheck"] = [];
@@ -109,7 +122,19 @@ export async function packPublish(
     if (seenIdeas.has(r.idea_id)) throw new InputError("Two ads are for the same idea. Send one final per idea.");
     seenIdeas.add(r.idea_id);
     ideaNumbers.push(r.n);
-    const texts = [...ad.primaryTexts, ...ad.headlines, ad.description];
+    const given = TEXT_FIELDS.filter((f) => ad[f] !== undefined);
+    let copy: Pick<PackAd, (typeof TEXT_FIELDS)[number]>;
+    if (source) {
+      if (given.length) throw new InputError(`Give the Meta text or copyFromVersion for an ad, not both (render ${ad.renderId} has ${given.join(", ")}).`);
+      const from = sourceAds.get(adKey(adName(week, b.slug, batchNo, r.format, r.n, 0)));
+      if (!from) throw new InputError(`Pack version ${a.copyFromVersion} has no ad for the ${r.format} idea ${r.n}. Copy from a version that holds this idea, or give the Meta text for every ad without copyFromVersion.`);
+      copy = { primaryTexts: from.primaryTexts, headlines: from.headlines, description: from.description, cta: from.cta, why: from.why };
+    } else {
+      const missing = TEXT_FIELDS.filter((f) => ad[f] === undefined);
+      if (missing.length) throw new InputError(`Render ${ad.renderId} has no ${missing.join(", ")}. Give the Meta text for each ad, or give copyFromVersion to copy approved text.`);
+      copy = { primaryTexts: ad.primaryTexts!, headlines: ad.headlines!, description: ad.description!, cta: ad.cta!, why: ad.why! };
+    }
+    const texts = [...copy.primaryTexts, ...copy.headlines, copy.description];
     for (const n of new Set(texts.flatMap(numbersIn))) {
       const f = facts.find((x) => numbersIn(`${x.value} ${x.quote}`).includes(n));
       if (!f) throw new InputError(`The number ${n} in the copy for "${r.headline}" is not in the fact sheet. Add the fact with its source (facts_save) or remove the number.`);
@@ -121,19 +146,16 @@ export async function packPublish(
       stage: r.format,
       headline: r.headline,
       imageKey: r.composed_key,
-      primaryTexts: ad.primaryTexts,
-      headlines: ad.headlines,
-      description: ad.description,
-      cta: ad.cta,
-      why: ad.why,
+      ...copy,
     });
   }
   const content: PackContent = {
     brand: b.name,
     ads,
-    launchPlan: a.launchPlan?.trim() || DEFAULT_LAUNCH_PLAN,
+    launchPlan: a.launchPlan?.trim() || source?.launchPlan || DEFAULT_LAUNCH_PLAN,
     factCheck,
-    healthNote: a.healthProduct ? HEALTH_NOTE : null,
+    // A health product must not lose its note: with no healthProduct input the copy keeps the source pack's note.
+    healthNote: a.healthProduct === undefined && source ? source.healthNote : a.healthProduct ? HEALTH_NOTE : null,
   };
   const token = [...crypto.getRandomValues(new Uint8Array(24))].map((x) => x.toString(16).padStart(2, "0")).join("");
   const id = crypto.randomUUID();
@@ -155,6 +177,7 @@ export async function packPublish(
       note: "The link is shown once. Give it to the owner only: he decides whether and how the client gets it. packRevoke stops it.",
       adNames: named.ads.map((x) => x.name),
       numbersChecked: factCheck.length,
+      ...(a.copyFromVersion !== undefined ? { copiedFromVersion: a.copyFromVersion } : {}),
     };
   }
 }

@@ -687,7 +687,7 @@ export const TOOLS: Tool[] = [
   {
     name: "pack_publish",
     description:
-      "Publish the weekly pack for a batch: a private client link with the finished ads, the Meta text, the ad names, why each ad, the launch plan and the fact check. For each ad give the final's render id (it must be composed: compose_final first) and the Meta text: 2 primary texts (the first 125 characters show), 2 headlines (about 40 characters), a description and the button. Hard check: every number in the Meta text must be in the fact sheet (facts_save), or the call is refused. The client link is shown ONCE in the result. Give it to the owner only; he decides whether and how the client gets it. Never post it anywhere else. Ad names are a11_W<week>_<brand>_b<batch number of the brand>_<stage>_c<idea>_v<version>, so many batches per brand and week stay apart; the client uses them in Ads Manager so results map back. Publishing again makes version 2 with a new link; the old link stays until pack_revoke.",
+      "Publish the weekly pack for a batch: a private client link with the finished ads, the Meta text, the ad names, why each ad, the launch plan and the fact check. For each ad give the final's render id (it must be composed: compose_final first) and the Meta text: 2 primary texts (the first 125 characters show), 2 headlines (about 40 characters), a description and the button. Hard check: every number in the Meta text must be in the fact sheet (facts_save), or the call is refused. The client link is shown ONCE in the result. Give it to the owner only; he decides whether and how the client gets it. Never post it anywhere else. Ad names are a11_W<week>_<brand>_b<batch number of the brand>_<stage>_c<idea>_v<version>, so many batches per brand and week stay apart; the client uses them in Ads Manager so results map back. Publishing again makes version 2 with a new link; the old link stays until pack_revoke. To reuse approved copy, give copyFromVersion and no text: the server copies it exactly.",
     inputSchema: {
       type: "object",
       properties: {
@@ -706,12 +706,13 @@ export const TOOLS: Tool[] = [
               cta: { type: "string", enum: [...pack.CTAS] },
               why: { type: "string", minLength: 10, maxLength: 300, pattern: "\\S", description: "One line: the buyer truth and its source." },
             },
-            required: ["renderId", "primaryTexts", "headlines", "description", "cta", "why"],
+            required: ["renderId"],
             additionalProperties: false,
           },
         },
         launchPlan: { type: "string", minLength: 20, maxLength: 1200, pattern: "\\S", description: "Replaces the default plan (one ad set, 72 hours, pause ads below the client's CTR)." },
-        healthProduct: { type: "boolean", default: false, description: "Adds the HSA and Meta health-ad note." },
+        healthProduct: { type: "boolean", description: "true adds the HSA and Meta health-ad note. Not given: no note, or with copyFromVersion the note of that version." },
+        copyFromVersion: { type: "integer", minimum: 1, description: "Take the Meta text, why and launch plan word for word from this earlier pack version of the batch (the one the owner approved). Then give only renderId for each ad." },
       },
       required: ["batchId", "ads"],
       additionalProperties: false,
