@@ -33,7 +33,7 @@ These are words for you to apply with judgement, not code rules (`docs/v1-lesson
 
 ## 3. Copy checks (headline, sticker, subline)
 
-- Headline: one idea with a turn, up to 6 words most of the time and never more than 8 (the copy length guide, `creative-playbook.md` §8; it narrows the 7-word maximum of `blueprint.md` hard check 6), sentence case, no exclamation mark. A buyer's own words win (a Reddit title used word for word worked). An oddly specific true detail is good.
+- Headline: one idea with a turn, up to 6 words most of the time and never more than 8 (the copy length guide, `creative-playbook.md` §8, and `blueprint.md` hard check 6), sentence case, no exclamation mark. A buyer's own words win (a Reddit title used word for word worked). An oddly specific true detail is good.
 - No hype words (unlock, elevate, game-changer, "you deserve", "say goodbye to"). No urgency. No "you" diagnosis question ("Struggling with...?").
 - A short true subline under the headline, backed by the product page or the fact sheet (a fact with its source), up to 8 words, and up to 14 words with the headline ("Hand-packaged to order"). Every ad has one: the owner felt ads without one were incomplete. The owner approves both as text before any draft (copy review, `creative-playbook.md` §8).
 - No filler sticker: no shelf life, no bare size, no flavour scale, no thin review count (fewer than 20 reviews is never proof).

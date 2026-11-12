@@ -182,6 +182,12 @@ describe("mcp handler", () => {
     const { readFileSync } = await import("node:fs");
     const critic = readFileSync(new URL("../plugin/agents/critic.md", import.meta.url), "utf8");
     expect(critic.match(/^tools: (.*)$/m)![1]!.split(", ")).toEqual(["Read", "Grep", "Glob", "mcp__a11__canon_get", "mcp__a11__taste_log", "mcp__a11__batch_get", "mcp__a11__ideas_pick", "mcp__a11__drafts_rank", "mcp__a11__image_get", "mcp__a11__gold_get", "mcp__a11__gold_score"]);
+    // The copy length guide: only a headline over 8 words is a kill rule (owner, 12-11-2026).
+    expect(critic).toContain("Kill a headline over 8 words.");
+    expect(critic).toContain("as a warning, not a kill rule");
+    const writer = readFileSync(new URL("../plugin/agents/writer.md", import.meta.url), "utf8");
+    expect(writer).toContain("up to 6 words most of the time, never more than 8");
+    expect(writer).toContain("Up to 14 words together");
     expect(critic).toContain("Do not read `docs/taste-seed.md` §1, `docs/marks.md`, `docs/creative-playbook.md` §8 or `taste_log` for this task");
   });
   it("names the art-director subagent in the draft step and in the final check", async () => {
