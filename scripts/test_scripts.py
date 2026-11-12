@@ -218,6 +218,7 @@ class Headline(Tmp):
 
     def test_non_latin_words_are_refused(self):
         self.assertIn("only Latin-script", exit_message(self.run_, "--font", self.FONT, "--headline", "十种口味", "--area", "0,0,1,1"))
+        self.assertIsNone(headline.non_latin("Crème brûlée, 1º lugar"))
 
     def test_a_negative_gap_is_refused(self):
         self.assertIn("--gap must be 0 or more", exit_message(self.run_, "--font", self.FONT, "--headline", "Hi", "--area", "0,0,1,1", "--gap", "-1"))

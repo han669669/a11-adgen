@@ -99,7 +99,8 @@ def non_latin(text):
     """The first letter that is not Latin script, or None. Wrapping is by spaces and Pillow gets no
     direction or shaping, so right-to-left, CJK and other complex scripts are not supported yet."""
     for ch in text:
-        if unicodedata.category(ch).startswith("L") and "LATIN" not in unicodedata.name(ch, ""):
+        # NFKD maps compatibility letters such as º and ª to their Latin base letter.
+        if unicodedata.category(ch).startswith("L") and not any("LATIN" in unicodedata.name(b, "") for b in unicodedata.normalize("NFKD", ch)):
             return ch
     return None
 
