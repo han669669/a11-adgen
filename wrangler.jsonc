@@ -7,7 +7,7 @@
   "workers_dev": true,
   // No public per-version URLs. Set on purpose: when this field is missing, Wrangler sends no value and Cloudflare's default (on) can apply. The app is served from the main address only.
   "preview_urls": false,
-  // keep_vars keeps a plain value that the owner sets in the dashboard (for example SPEND_CAP_USD) on the next deploy.
+  // keep_vars keeps a plain value that is set in the dashboard and is not in this file. A value in "vars" below (SPEND_CAP_USD) is set from this file on each deploy.
   "keep_vars": true,
   // A deploy stops, and changes nothing, if one of these secrets is missing on the Worker.
   // MCP_TOKEN_SHA256 and SIGNUP_CODE_SHA256 are Worker secrets (since 2026-11-12); they hold hashes only.

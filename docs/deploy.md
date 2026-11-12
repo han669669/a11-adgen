@@ -22,7 +22,7 @@ Rules:
 - This path deploys the Worker only. The web app files in R2 `app/` (step 5 below) and D1 migrations (step 3 below) are still manual.
 - After each automatic deploy, check `/api/me` (401), the test portal link (200) and `spend_get` through `/mcp`. Workers Logs keep no invocation logs (`wrangler.jsonc`: they would keep the pack-link token from the URL). To see one request, use `wrangler tail`, which is not stored. Also read `GET /accounts/{id}/workers/scripts/a11adgen/subdomain`: `previews_enabled` must be `false`.
 - The dashboard may say "Update your Wrangler configuration with these changes" after a variable edit. Ignore it. Do not put `MCP_TOKEN_SHA256` or `SIGNUP_CODE_SHA256` in `wrangler.jsonc` vars: the repo is public. Both are Worker secrets since 2026-11-12, so a deploy keeps them, and a deploy stops when `MCP_TOKEN_SHA256` is missing (`secrets.required`).
-- A secret cannot be read back. If `MCP_TOKEN_SHA256` is lost, the owner makes a new admin token and sets its hash as the secret ("The admin token" in `AGENTS.md`). If `SIGNUP_CODE_SHA256` is lost, sign-up stays closed until the owner sets the hash of a new set-up code. Neither is in git.
+- A secret cannot be read back. When the owner sets `MCP_TOKEN_SHA256` or `SIGNUP_CODE_SHA256`, he keeps a copy of the value (or of the token or code it comes from) in a private note, never in git. If `MCP_TOKEN_SHA256` is lost, the owner makes a new admin token and sets its hash as the secret ("The admin token" in `AGENTS.md`). If `SIGNUP_CODE_SHA256` is lost, sign-up stays closed until the owner sets the hash of a new set-up code. Neither is in git.
 - Known risk, accepted by the owner on 2026-11-08 (no expiry, and the scope below): the build token has no expiry, and `Workers Scripts: Edit` covers every Worker in this account, not only `a11adgen`. A leaked token could replace the code of any of them. It cannot directly call the zone, KV, R2 or D1 APIs, but replacement code can use the bindings of an affected Worker, including its secrets and data. Cloudflare Builds takes only user tokens today. A token limited to one Worker needs an account-owned token. When Builds supports those, switch to one limited to `a11adgen`, and give it an expiry.
 - Roll back by deploying the last good version in the dashboard (Worker, Deployments), or `PUT` it again with the connector. A rollback keeps the Worker's secrets.
 
@@ -37,8 +37,8 @@ The steps below are for the live Worker `a11adgen` (D1 `a11adgen-db`, R2 `a11adg
 3. D1 migrations, before the new code goes live (the code may need the new tables): in the connector, read each staged SQL file, check its SHA-256, run it with the D1 query API on the target database, then insert its name into `d1_migrations`. Skip a file already listed there.
 4. Deploy with the connector: read `deploy/<name>.js` from the target bucket, check its SHA-256 against step 1, then `PUT /accounts/{id}/workers/scripts/<worker>` (multipart): upload the bundle as a JavaScript module part named `index.js` (`application/javascript+module`) and set metadata `main_module` to `index.js`, with:
    - `compatibility_date` `2026-10-20`, `compatibility_flags` `["nodejs_compat"]`;
-   - the bindings in `wrangler.jsonc` (including `{ "type": "images", "name": "IMAGES" }` and the KV namespace `OAUTH_KV` = live `a11adgen-oauth` `e29131310aa446489fa715d74e1c35ff`, for `a11adgen` only; a preview deploy uses its own, see the Preview deploy table), plus `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256` as `plain_text` (hashes only; not in `wrangler.jsonc`);
-   - `keep_bindings: ["secret_text"]`, so the owner's `FAL_KEY`, `EXA_API_KEY` and `ALLOWED_EMAILS` stay.
+   - the bindings in `wrangler.jsonc` (including `{ "type": "images", "name": "IMAGES" }` and the KV namespace `OAUTH_KV` = live `a11adgen-oauth` `e29131310aa446489fa715d74e1c35ff`, for `a11adgen` only; a preview deploy uses its own, see the Preview deploy table), and `observability` `{ "enabled": true, "logs": { "invocation_logs": false } }` (no invocation logs, as in `wrangler.jsonc`);
+   - `keep_bindings: ["secret_text"]`, so the Worker's secrets stay: `FAL_KEY`, `EXA_API_KEY`, `ALLOWED_EMAILS`, `APIFY_TOKEN`, `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256`. Never send the two hashes as `plain_text`.
    - After the upload, turn per-version URLs off: `POST /accounts/{id}/workers/scripts/<worker>/subdomain` with `{"enabled": true, "previews_enabled": false}`. A connector upload does not read `preview_urls` from `wrangler.jsonc`.
 5. Web app: `npm run build:app`, then `PUT /admin/app/<path>` on the target Worker (same bearer token) for each file in `dist/app`, `index.html` last. It saves to `app/` in that Worker's bucket, and the Worker serves the app from there. Old hashed files in `app/assets/` can stay; `index.html` points to the new ones.
 6. Smoke test: `spend_get` through `/mcp`, `/api/me` (401 without a session), one call of each changed tool, and `previews_enabled` is `false` on the Worker's subdomain setting.
@@ -61,7 +61,7 @@ On 2026-11-07 a 24 KB bundle copied by hand into a connector call had one wrong 
 
 | Worker | Use | Secrets |
 |---|---|---|
-| `a11adgen` | Live. Deploys only `main`. | `FAL_KEY`, `EXA_API_KEY`, `ALLOWED_EMAILS` (web app sign-in) |
+| `a11adgen` | Live. Deploys only `main`. | `FAL_KEY`, `EXA_API_KEY`, `ALLOWED_EMAILS` (web app sign-in), `APIFY_TOKEN`, `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256` (hashes only) |
 | `a11adgen-preview` | Tests a branch before its PR merges. Since 2026-11-07 it uses its own D1 `a11adgen-preview-db` (`2c28c64f-f8c0-46f9-9e2d-7ca70d2a0f70`) and R2 `a11adgen-preview-assets`, both APAC. | none (no paid calls from it); `ALLOWED_EMAILS` is a plain test address |
 
 ### Preview deploy
