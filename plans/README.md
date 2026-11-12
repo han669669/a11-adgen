@@ -25,7 +25,7 @@ follow `AGENTS.md`, and update your row when done.
 | [002](002-one-batch-flow-text.md) | One batch flow in every text; drafts shown in a blind order | 1 | P1 | M | LOW | none | DONE (2026-11-12) |
 | [003](003-harden-paid-render-path.md) | A paid render is never lost, charged twice or given the wrong logo | 2 | P1 | M | MED | none | DONE (2026-11-12) |
 | 004 | Security hardening (2 small changes). The plan file is not in this public repo (`AGENTS.md` section 9 rule 6); the owner and the coordinator hold it in the private project files | 2 | P2 | S | LOW | none | DONE (2026-11-12) |
-| [005](005-pack-copy-from-version.md) | `pack_publish` copies approved copy by itself | 1, 2 | P2 | M | LOW | none | TODO |
+| [005](005-pack-copy-from-version.md) | `pack_publish` copies approved copy by itself | 1, 2 | P2 | M | LOW | none | DONE (2026-11-12) |
 | [006](006-save-owner-verdicts-design.md) | Design: every owner verdict saved as data that `learn` reads | 1 | P2 | S | LOW | none (the build after it needs the owner's yes) | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line reason)
