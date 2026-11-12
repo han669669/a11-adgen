@@ -195,4 +195,4 @@ Result: the design is ready. Today only your draft picks are kept; your notes on
 - It needs one live D1 migration and one import of the old rows of `docs/marks.md` (21 verdicts; the 3 draft picks of W46c are in `picks` already).
 - Recommendation: yes.
 
-The owner approved the build, with the live migration and the one-time import, on 2026-11-12.
+The owner approved the build, with the live migration and the one-time import, on 2026-11-12 (`docs/decisions.md`, row of that date).
