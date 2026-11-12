@@ -507,6 +507,38 @@ describe("batch flow", () => {
   });
 });
 
+describe("copy review", () => {
+  const draft = (b: string, idea: string) => ({ batch: b, idea, kind: "draft", prompt: "P".repeat(50), referenceUrls: ["https://w/m/refs/a.jpg"] });
+  const submit = (env: Env, a: Record<string, unknown>) => TOOLS.find((t) => t.name === "render_submit")!.run(env, a);
+
+  it("refuses a draft until the owner approved the words, and again after they change", async () => {
+    const { env } = makeEnv();
+    const { b, ideas } = await seed(env);
+    const id = ideas[0]!.id;
+    await expect(submit(env, draft(b.id, id))).rejects.toThrow("has not approved the words");
+    await expect(submit(env, draft(b.id, "77777777-7777-7777-7777-777777777777"))).rejects.toThrow("A draft belongs to an idea of its batch");
+
+    // He changes the headline and approves in one update: the approval keeps the new words.
+    await batch.ideasUpdate(env, [{ id, headline: "Wait, there's ten?", subline: "Ten flavours, one cake.", copyApproved: "yes this one" }]);
+    await expect(batch.copyApprovedCheck(env, b.id, id)).resolves.toBeUndefined();
+    const got = (await batch.batchGet(env, b.id)).ideas.find((i) => i.id === id)!;
+    expect(got.headline).toBe("Wait, there's ten?");
+    expect(got.copy).toMatchObject({ subline: "Ten flavours, one cake.", ownerApproved: { headline: "Wait, there's ten?", subline: "Ten flavours, one cake.", ownerSaid: "yes this one" } });
+
+    await batch.ideasUpdate(env, [{ id, subline: "Ten flavours." }]);
+    await expect(batch.copyApprovedCheck(env, b.id, id)).rejects.toThrow("changed after the owner approved");
+    await batch.ideasUpdate(env, [{ id, copyApproved: "ok" }]);
+    await expect(batch.copyApprovedCheck(env, b.id, id)).resolves.toBeUndefined();
+  });
+
+  it("reports an unknown idea on approval, and the schema takes only his words", async () => {
+    const { env } = makeEnv();
+    await expect(batch.ideasUpdate(env, [{ id: "55555555-5555-5555-5555-555555555555", copyApproved: "yes" }])).rejects.toThrow("No idea");
+    const s = TOOLS.find((t) => t.name === "ideas_update")!.inputSchema;
+    expect(() => validate(s, { updates: [{ id: "55555555-5555-5555-5555-555555555555", copyApproved: " " }] })).toThrow();
+  });
+});
+
 describe("monthly spend cap", () => {
   it("does not count last month's spend", async () => {
     const { env, raw } = makeEnv();

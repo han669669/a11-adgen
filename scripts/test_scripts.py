@@ -6,6 +6,7 @@ import contextlib
 import importlib.util
 import io
 import os
+import shutil
 import sys
 import tempfile
 import types
@@ -27,6 +28,7 @@ def load(name):
 box_print = load("box_print")
 product_lock = load("product_lock")
 food_grade = load("food_grade")
+headline = load("headline")
 
 
 def exit_message(fn, *args):
@@ -158,6 +160,61 @@ class FoodGrade(unittest.TestCase):
     def test_a_ref_box_outside_the_close_up_is_refused(self):
         with self.assertRaisesRegex(ValueError, r"ref_box \(0, 0, 80, 40\) is outside the close-up \(40x40\)"):
             food_grade.grade(self.picture(), [(0, 10, 40, 50)], self.ref(), (0, 0, 80, 40))
+
+
+class Headline(Tmp):
+    # DejaVu Sans ships with Ubuntu (the CI runner) and this session; any TrueType file works.
+    FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+    def run_(self, *extra):
+        src = self.save("in.png", np.full((500, 400, 3), 220))
+        out = os.path.join(self.dir.name, "out.jpg")
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            headline.main(["--in", src, "--out", out, *extra])
+        return out, buf.getvalue()
+
+    def test_the_words_are_set_inside_the_area(self):
+        out, msg = self.run_("--font", self.FONT, "--headline", "Ten flavours, one cake.", "--subline", "Every slice differs.", "--area", "0.5,0.2,0.95,0.5")
+        a = np.asarray(Image.open(out).convert("L"))
+        ys, xs = np.where(a < 100)
+        self.assertTrue(len(xs) > 0, "no text was drawn")
+        self.assertGreaterEqual(xs.min(), 0.5 * 400 - 2)
+        self.assertLessEqual(xs.max(), 0.95 * 400 + 2)
+        self.assertGreaterEqual(ys.min(), 0.2 * 500 - 2)
+        self.assertLessEqual(ys.max(), 0.5 * 500 + 2)
+        self.assertIn("text top 20.0%", msg)
+
+    def test_a_missing_font_stops_with_a_clear_message(self):
+        self.assertIn("font file not found", exit_message(self.run_, "--font", "/no/such.ttf", "--headline", "Hi", "--area", "0,0,1,1"))
+
+    def test_an_area_outside_the_picture_is_refused(self):
+        self.assertIn("is not inside the picture", exit_message(self.run_, "--font", self.FONT, "--headline", "Hi", "--area", "0.5,0.2,1.2,0.5"))
+
+    def test_words_that_cannot_fit_stop_with_a_clear_message(self):
+        self.assertIn("do not fit", exit_message(self.run_, "--font", self.FONT, "--headline", "Supercalifragilisticexpialidocious", "--area", "0.9,0.1,0.95,0.12"))
+
+    def family_run(self, *extra):
+        # The kit font comes from a cache; a fetch would fail (no network in the tests).
+        cache = os.path.join(self.dir.name, "fonts")
+        os.makedirs(cache, exist_ok=True)
+        shutil.copy(self.FONT, os.path.join(cache, "dejavu-sans-600.ttf"))
+        old, headline.GOOGLE_CSS = headline.GOOGLE_CSS, "file:///no/such/{family}-{wght}.css"
+        try:
+            return self.run_("--cache", cache, "--wght", "600", "--headline", "Ten flavours.", "--area", "0.1,0.2,0.9,0.5", *extra)
+        finally:
+            headline.GOOGLE_CSS = old
+
+    def test_the_kit_font_family_is_used_by_name(self):
+        out, msg = self.family_run("--family", "DejaVu Sans")
+        self.assertIn("headline", msg)
+        self.assertNotIn("FALLBACK", msg)
+
+    def test_a_family_that_cannot_be_found_stops_with_a_clear_message(self):
+        self.assertIn("is not on Google Fonts", exit_message(self.family_run, "--family", "No Such Brand Font"))
+
+    def test_the_fallback_family_is_used_and_named(self):
+        out, msg = self.family_run("--family", "No Such Brand Font", "--fallback", "DejaVu Sans")
+        self.assertIn("FALLBACK: the headline font 'No Such Brand Font'", msg)
 
 
 if __name__ == "__main__":
