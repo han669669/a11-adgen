@@ -105,6 +105,56 @@ describe("render check", () => {
 });
 
 describe("render submit", () => {
+  const input = { batch: "b", idea: "i", kind: "draft" as const, prompt: "p".repeat(40), referenceUrls: ["https://a/1.jpg"], numImages: 1 };
+  const spendOf = (env: Env) => (env.DB as unknown as { raw: DatabaseSync }).raw.prepare("SELECT status FROM spend").all();
+
+  it.each([
+    ["times out", async () => Promise.reject(new DOMException("The operation timed out.", "TimeoutError"))],
+    ["sends an answer that cannot be read", async () => new Response("<html>", { status: 200 })],
+  ])("keeps the spend when the submit %s (fal may still bill the job)", async (_what, fetchStub) => {
+    const { env } = setup();
+    vi.stubGlobal("fetch", fetchStub);
+    await expect(submit({ ...env, SPEND_CAP_USD: "5.00" } as Env, input)).rejects.toThrow();
+    expect(spendOf(env)).toEqual([{ status: "spent" }]);
+  });
+
+  it("gives the spend back when the call was never sent (no FAL_KEY)", async () => {
+    const { env } = setup();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submit({ ...env, SPEND_CAP_USD: "5.00", FAL_KEY: "" } as Env, input)).rejects.toThrow("FAL_KEY is not set");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(spendOf(env)).toEqual([{ status: "released" }]);
+  });
+
+  it("keeps the spend after a 5xx status: it is not sure that fal did not take the job", async () => {
+    const { env } = setup();
+    vi.stubGlobal("fetch", async () => new Response("bad gateway", { status: 502 }));
+    await expect(submit({ ...env, SPEND_CAP_USD: "5.00" } as Env, input)).rejects.toThrow("fal submit failed: HTTP 502");
+    expect(spendOf(env)).toEqual([{ status: "spent" }]);
+  });
+
+  it("keeps the spend after an unexpected 3xx status: only a 4xx is a sure refusal", async () => {
+    const { env } = setup();
+    vi.stubGlobal("fetch", async () => new Response("moved", { status: 307 }));
+    await expect(submit({ ...env, SPEND_CAP_USD: "5.00" } as Env, input)).rejects.toThrow("fal submit failed: HTTP 307");
+    expect(spendOf(env)).toEqual([{ status: "spent" }]);
+  });
+
+  it("gives the spend back for a refusal whose body cannot be read", async () => {
+    const { env } = setup();
+    vi.stubGlobal("fetch", async () => ({ ok: false, status: 422, text: async () => Promise.reject(new Error("stream broke")) }));
+    await expect(submit({ ...env, SPEND_CAP_USD: "5.00" } as Env, input)).rejects.toThrow("fal submit failed: HTTP 422");
+    expect(spendOf(env)).toEqual([{ status: "released" }]);
+  });
+
+  it("gives the spend back when fal refuses the submit with an error status", async () => {
+    const { env } = setup();
+    vi.stubGlobal("fetch", async () => new Response("bad prompt", { status: 422 }));
+    await expect(submit({ ...env, SPEND_CAP_USD: "5.00" } as Env, input)).rejects.toThrow("fal submit failed: HTTP 422");
+    expect(spendOf(env)).toEqual([{ status: "released" }]);
+  });
+
   it("says that fal accepted the job when the render row cannot be saved, and keeps the spend", async () => {
     const { env } = setup();
     const raw = (env.DB as unknown as { raw: DatabaseSync }).raw;

@@ -16,16 +16,20 @@ export const PRICE = {
 
 export class BudgetError extends Error {}
 
-/**
- * A reservation that was never settled (the request was cut off) stops counting after this time.
- * Settled rows ('spent') always count.
- */
-const STALE_RESERVATION = "-15 minutes";
-
 /** The cap is per calendar month (UTC): AGENTS.md §8 asks for a monthly cap. */
 const THIS_MONTH = `at >= strftime('%Y-%m-01T00:00:00.000Z', 'now')`;
 
-const COUNTED = `(${THIS_MONTH} AND (status = 'spent' OR (status = 'reserved' AND at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '${STALE_RESERVATION}'))))`;
+/**
+ * Only a released reservation stops counting. A reservation that was never settled (the request was cut off) has an unknown
+ * outcome: the provider may have billed it, so it counts for the rest of the month.
+ */
+const COUNTED = `(${THIS_MONTH} AND status IN ('spent', 'reserved'))`;
+
+/**
+ * It is sure that the provider did not take the call (it refused the request with a 4xx status, Exa answered 503 'not processed', or the call was never sent), so it does not bill it.
+ * Any other failure (a timeout, a broken connection, an answer that cannot be read) has an unknown outcome and stays counted.
+ */
+export class NotBilledError extends Error {}
 
 /**
  * Reserve an estimated spend. The cap check and the insert are one statement, so parallel calls cannot pass the cap.
@@ -57,7 +61,7 @@ export async function reserve(
   return Number(res.meta.last_row_id);
 }
 
-/** ok = the provider accepted (and will bill) the call; otherwise the reservation is released. */
+/** ok = the provider took the call or may have taken it (it stays counted); false = it is sure that the provider did not (released). */
 export async function settle(env: Env, id: number, ok: boolean): Promise<void> {
   await env.DB.prepare("UPDATE spend SET status = ? WHERE id = ?")
     .bind(ok ? "spent" : "released", id)
