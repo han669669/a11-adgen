@@ -111,6 +111,127 @@ describe("pack_publish", () => {
     await expect(publish([{ renderId: finals[0]!, ...copy() }], "dddddddd-dddd-dddd-dddd-dddddddddddd")).rejects.toThrow(/No such batch/);
   });
 
+  describe("copyFromVersion", () => {
+    const PLAN = "Run the two ads in one ad set for 72 hours, then pause the weaker one.";
+    const mof = copy({ primaryTexts: ["Four jars, one order. Free delivery from S$35.", "Stock the shelf. S$8.90 a jar."], headlines: ["One shot buy four", "S$8.90 a jar"], description: "Stock up today", cta: "ORDER_NOW" as const, why: "Buyers order in bundles (the product page, 07-11-2026)." });
+    /** v1 of a seeded batch: two ads with different copy and a custom launch plan. */
+    async function v1(over: Record<string, unknown> = {}) {
+      const { env, raw, files } = makeEnv();
+      const { b, finals } = await seed(env, raw, files);
+      await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy() }, { renderId: finals[1]!, ...mof }], launchPlan: PLAN, ...over });
+      const content = (v: number) => JSON.parse((raw.prepare("SELECT content FROM packs WHERE batch_id = ? AND version = ?").get(b.id, v) as { content: string }).content) as pack.PackContent;
+      const count = () => (raw.prepare("SELECT COUNT(*) AS n FROM packs").get() as { n: number }).n;
+      return { env, raw, b, finals, content, count };
+    }
+    const TEXT = ["primaryTexts", "headlines", "description", "cta", "why"] as const;
+    const textOf = (ad: pack.PackAd) => TEXT.map((f) => ad[f]);
+
+    it("copies the Meta text, why and launch plan of an earlier version, string for string", async () => {
+      const t = await v1();
+      // The ads are sent in the other order: each one still gets the copy of its own idea.
+      const r = await pack.packPublish(t.env, { batchId: t.b.id, copyFromVersion: 1, ads: [{ renderId: t.finals[1]! }, { renderId: t.finals[0]! }] });
+      expect(r).toMatchObject({ version: 2, copiedFromVersion: 1, numbersChecked: 2 });
+      expect(r.adNames.every((n) => n.endsWith("_v2"))).toBe(true);
+      const [a, b] = [t.content(1), t.content(2)];
+      expect(textOf(b.ads[0]!)).toEqual(textOf(a.ads[1]!));
+      expect(textOf(b.ads[1]!)).toEqual(textOf(a.ads[0]!));
+      expect(b.launchPlan).toBe(PLAN);
+      expect(b.factCheck).toEqual(expect.arrayContaining(a.factCheck));
+    });
+
+    it("matches an ad of a pack made before 07-11-2026, whose names have no batch number", async () => {
+      const t = await v1();
+      const old = t.content(1);
+      old.ads.forEach((x) => (x.name = x.name.replace("_b01_", "_")));
+      t.raw.prepare("UPDATE packs SET content = ? WHERE version = 1").run(JSON.stringify(old));
+      // The second idea: a match that ignored the ad key and took the first source ad would fail here.
+      await pack.packPublish(t.env, { batchId: t.b.id, copyFromVersion: 1, ads: [{ renderId: t.finals[1]! }] });
+      expect(textOf(t.content(2).ads[0]!)).toEqual(textOf(old.ads[1]!));
+      expect(textOf(old.ads[1]!)).not.toEqual(textOf(old.ads[0]!));
+    });
+
+    it("publishes nothing when the source version is revoked while the publish runs", async () => {
+      const t = await v1();
+      const db = t.env.DB as unknown as { prepare: (sql: string) => unknown };
+      const prepare = db.prepare.bind(db);
+      // The revoke lands after the source was read and just before the new pack is saved.
+      db.prepare = (sql) => {
+        if (sql.startsWith("SELECT MAX(version)")) t.raw.prepare("UPDATE packs SET revoked_at = 'now' WHERE version = 1").run();
+        return prepare(sql);
+      };
+      await expect(pack.packPublish(t.env, { batchId: t.b.id, copyFromVersion: 1, ads: [{ renderId: t.finals[0]! }] })).rejects.toThrow("is revoked");
+      expect(t.count()).toBe(1);
+    });
+
+    it("refuses an ad with no Meta text and no copyFromVersion before it reads the database", async () => {
+      const t = await v1();
+      const db = t.env.DB as unknown as { prepare: (sql: string) => unknown };
+      let reads = 0;
+      const prepare = db.prepare.bind(db);
+      db.prepare = (sql) => (reads++, prepare(sql));
+      await expect(pack.packPublish(t.env, { batchId: t.b.id, ads: [{ renderId: t.finals[0]! }] })).rejects.toThrow("Give the Meta text for each ad");
+      expect(reads).toBe(0);
+    });
+
+    it("refuses an ad that gives text together with copyFromVersion", async () => {
+      const t = await v1();
+      await expect(pack.packPublish(t.env, { batchId: t.b.id, copyFromVersion: 1, ads: [{ renderId: t.finals[0]!, headlines: ["New words", "More new words"] }] })).rejects.toThrow(
+        /Give the Meta text or copyFromVersion for an ad, not both .*headlines/,
+      );
+      expect(t.count()).toBe(1);
+    });
+
+    it("refuses a version that does not exist", async () => {
+      const t = await v1();
+      await expect(pack.packPublish(t.env, { batchId: t.b.id, copyFromVersion: 7, ads: [{ renderId: t.finals[0]! }] })).rejects.toThrow("This batch has no pack version 7.");
+    });
+
+    it("refuses when the source pack has no ad for an idea, and names the idea", async () => {
+      const { env, raw, files } = makeEnv();
+      const { b, finals } = await seed(env, raw, files);
+      await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy() }] });
+      await expect(pack.packPublish(env, { batchId: b.id, copyFromVersion: 1, ads: [{ renderId: finals[0]! }, { renderId: finals[1]! }] })).rejects.toThrow(
+        "Pack version 1 has no ad for the bof idea 2.",
+      );
+      expect(raw.prepare("SELECT COUNT(*) AS n FROM packs").get()).toEqual({ n: 1 });
+    });
+
+    it("still needs the Meta text for each ad when copyFromVersion is not given", async () => {
+      const t = await v1();
+      await expect(pack.packPublish(t.env, { batchId: t.b.id, ads: [{ renderId: t.finals[0]! }] })).rejects.toThrow(/has no primaryTexts, headlines, description, cta, why/);
+      const { why: _why, ...noWhy } = copy();
+      await expect(pack.packPublish(t.env, { batchId: t.b.id, ads: [{ renderId: t.finals[0]!, ...noWhy }] })).rejects.toThrow(/has no why\./);
+      expect(t.count()).toBe(1);
+    });
+
+    it("runs the number check on copied text too", async () => {
+      const t = await v1();
+      t.raw.prepare("DELETE FROM facts WHERE label = 'Price'").run();
+      await expect(pack.packPublish(t.env, { batchId: t.b.id, copyFromVersion: 1, ads: [{ renderId: t.finals[0]! }] })).rejects.toThrow(/number 8\.90.*not in the fact sheet/);
+      expect(t.count()).toBe(1);
+    });
+
+    it("refuses a revoked source pack and publishes nothing", async () => {
+      const t = await v1();
+      t.raw.prepare("UPDATE packs SET revoked_at = 'now' WHERE version = 1").run();
+      await expect(pack.packPublish(t.env, { batchId: t.b.id, copyFromVersion: 1, ads: [{ renderId: t.finals[0]! }] })).rejects.toThrow("Pack version 1 is revoked.");
+      expect(t.count()).toBe(1);
+    });
+
+    it("keeps the source pack's health note unless healthProduct is given", async () => {
+      const t = await v1({ healthProduct: true });
+      const ads = [{ renderId: t.finals[0]! }];
+      await pack.packPublish(t.env, { batchId: t.b.id, copyFromVersion: 1, ads });
+      expect(t.content(2).healthNote).toBe(pack.HEALTH_NOTE);
+      await pack.packPublish(t.env, { batchId: t.b.id, copyFromVersion: 1, ads, healthProduct: false });
+      expect(t.content(3).healthNote).toBeNull();
+      // Through the tool: the schema adds no default, so "not given" reaches the server.
+      const tool = TOOLS.find((x) => x.name === "pack_publish")!;
+      await tool.run(t.env, validate(tool.inputSchema, { batchId: t.b.id, copyFromVersion: 1, ads }));
+      expect(t.content(4).healthNote).toBe(pack.HEALTH_NOTE);
+    });
+  });
+
   it("checks the tool input: two texts, headline 40 characters at most, a known button", () => {
     const t = TOOLS.find((x) => x.name === "pack_publish")!;
     const base = { batchId: "11111111-1111-1111-1111-111111111111" };
