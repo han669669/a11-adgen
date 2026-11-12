@@ -107,12 +107,13 @@ async function verdictInserts(env: Env, batchId: string, verdicts: OwnerVerdict[
       if (!idea) throw new Error(`${where}: idea ${v.ideaId} is not an idea of this batch.`);
     }
     if (v.key) {
-      const render = await env.DB.prepare("SELECT idea, image_keys, composed_key FROM renders WHERE id = ? AND batch = ?")
+      const render = await env.DB.prepare("SELECT idea, kind, image_keys, composed_key FROM renders WHERE id = ? AND batch = ?")
         .bind(v.key.split("/")[1] ?? "", batchId)
-        .first<{ idea: string | null; image_keys: string | null; composed_key: string | null }>();
+        .first<{ idea: string | null; kind: string; image_keys: string | null; composed_key: string | null }>();
       // The key must be a saved picture of the render: one of its images, or its composed final.
       const saved = !!render && ((JSON.parse(render.image_keys ?? "[]") as string[]).includes(v.key) || render.composed_key === v.key);
       if (!render || !saved) throw new Error(`${where}: ${v.key} is not a picture of this batch.`);
+      if (v.stage === "final" && render.kind === "draft") throw new Error(`${where}: ${v.key} is a draft, not a final picture.`);
       if (ideaId && render.idea && render.idea !== ideaId) throw new Error(`${where}: ${v.key} is a picture of another idea.`);
       ideaId ??= render.idea;
     }

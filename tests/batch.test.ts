@@ -607,17 +607,22 @@ describe("owner verdicts", () => {
     const { env, raw } = makeEnv();
     const { b, ideas, subject } = await seed(env);
     const keys = addDraft(raw, b.id, ideas[0]!.id, RID);
-    return { env, raw, b, ideas, keys, subject };
+    // A final of the same idea: final verdicts are about a final picture, never a draft.
+    const FID = "88888888-8888-4888-8888-888888888888";
+    addDraft(raw, b.id, ideas[0]!.id, FID, 1);
+    raw.prepare("UPDATE renders SET kind = 'final' WHERE id = ?").run(FID);
+    const finalKey = `renders/${FID}/1.jpg`;
+    return { env, raw, b, ideas, keys, subject, finalKey };
   }
 
   it("saves each kind of verdict with his words, and taste_log returns them newest first with the limit", async () => {
-    const { env, raw, b, ideas, keys } = await setup();
+    const { env, raw, b, ideas, finalKey } = await setup();
     raw.prepare("INSERT INTO packs (id, batch_id, version, token_hash, title, content, created_at) VALUES ('p1', ?, 1, 'h', 't', '{}', 'now')").run(b.id);
     const res = await batch.batchUpdate(env, {
       id: b.id,
       ownerVerdicts: [
         { stage: "draft", mark: "pass", ideaId: ideas[1]!.id, ownerSaid: "none of these" },
-        { stage: "final", mark: "fix", key: keys[0], ownerSaid: "logo a bit lower", notes: "v2" },
+        { stage: "final", mark: "fix", key: finalKey, ownerSaid: "logo a bit lower", notes: "v2" },
         { stage: "pack", mark: "approve", packVersion: 1, ownerSaid: "i approve of it" },
         // Copy that is not published yet has no pack version (creative-playbook §6 step 6).
         { stage: "pack", mark: "reject", ownerSaid: "the old copy was better", notes: "new draft copy, not published" },
@@ -629,13 +634,13 @@ describe("owner verdicts", () => {
     expect(log.verdicts[0]).toMatchObject({ stage: "pack", mark: "reject", packVersion: null, batch: "W46", idea: null });
     expect(log.verdicts[1]).toMatchObject({ stage: "pack", packVersion: 1, ownerSaid: "i approve of it" });
     // The final's idea comes from its render.
-    expect(log.verdicts[2]).toMatchObject({ stage: "final", key: keys[0], notes: "v2", idea: { stage: "tof", headline: "Somehow the jar is empty again." } });
+    expect(log.verdicts[2]).toMatchObject({ stage: "final", key: finalKey, notes: "v2", idea: { stage: "tof", headline: "Somehow the jar is empty again." } });
     expect(log.verdicts[3]).toMatchObject({ stage: "draft", mark: "pass", idea: { stage: "bof" } });
     expect((await batch.tasteLog(env, 1)).verdicts).toHaveLength(1);
   });
 
   it("refuses a verdict that does not fit the batch, and saves none of the call", async () => {
-    const { env, raw, b, ideas, keys, subject } = await setup();
+    const { env, raw, b, ideas, keys, subject, finalKey } = await setup();
     const other = await batch.batchCreate(env, { brandSlug: "wongi", subjectId: subject.id, label: "W47" });
     const bad: [batch.OwnerVerdict, RegExp][] = [
       [{ stage: "final", mark: "pass", key: keys[0], ownerSaid: "x" }, /not a mark of stage 'final'/],
@@ -643,7 +648,8 @@ describe("owner verdicts", () => {
       [{ stage: "draft", mark: "pass", ownerSaid: "x" }, /needs ideaId/],
       [{ stage: "final", mark: "fix", ownerSaid: "x" }, /needs key/],
       [{ stage: "final", mark: "fix", key: "renders/11111111-1111-4111-8111-111111111111/1.jpg", ownerSaid: "x" }, /not a picture of this batch/],
-      [{ stage: "final", mark: "fix", key: keys[0], ideaId: ideas[1]!.id, ownerSaid: "x" }, /picture of another idea/],
+      [{ stage: "final", mark: "fix", key: finalKey, ideaId: ideas[1]!.id, ownerSaid: "x" }, /picture of another idea/],
+      [{ stage: "final", mark: "approve", key: keys[0], ownerSaid: "x" }, /a draft, not a final picture/],
       // The render is of this batch, but the key is not one of its saved pictures.
       [{ stage: "final", mark: "fix", key: `renders/${RID}/9.jpg`, ownerSaid: "x" }, /not a picture of this batch/],
       [{ stage: "pack", mark: "approve", packVersion: 3, ownerSaid: "x" }, /no pack version 3/],
@@ -693,6 +699,15 @@ describe("backfill of the old owner marks", () => {
     expect(log.verdicts).toHaveLength(21);
     expect(log.verdicts[0]).toMatchObject({ stage: "final", mark: "reject", sourceMark: "v11 worse than v10; revert", idea: { stage: "bof" } });
     expect(log.verdicts.find((v) => v.sourceMark === "Corrected: not a product-truth bar")).toMatchObject({ mark: null, batch: null });
+  });
+
+  it("adds no W46c row when two batches have the W46c label", async () => {
+    const { env, raw } = makeEnv();
+    const { b, subject } = await seed(env);
+    raw.prepare("UPDATE batches SET label = 'W46c WonGi Pop Barley (house recipe)' WHERE id = ?").run(b.id);
+    await batch.batchCreate(env, { brandSlug: "wongi", subjectId: subject.id, label: "W46c WonGi Pop Barley (house recipe)" });
+    raw.exec(sql);
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM verdicts").get()).toEqual({ n: 3 });
   });
 
   it("adds only the 3 Phase 0 rows when the W46c batch is not there", () => {
