@@ -195,7 +195,7 @@ First use: the Cat & the Fiddle Fickle Feline 2.0 cake on its box. The owner rej
 
 ## 8. The owner's copy standard (owner, 09-11-2026)
 
-The owner approved the W47 v3 Meta text and rejected the rewrite in packs v4 and v5 ("the previously v3 copywriting's much much much better"). Approved copy is reused word for word in every later pack of the batch (`pack` prompt, step 4). `picks_get` shows each pack version's copy. Write new copy only when no earlier pack exists or the owner asks for it, and show it next to the approved copy before you publish.
+The owner approved the W47 v3 Meta text and rejected the rewrite in packs v4 and v5 ("the previously v3 copywriting's much much much better"). Approved copy is reused word for word in every later pack of the batch (`pack` prompt, step 4). Do not retype it: give `pack_publish` `copyFromVersion` (the approved pack's version) and the render ids, with no Meta text, and the server copies the text exactly. The launch plan and the health note of that version stay unless the call gives new ones. `picks_get` shows each pack version's copy. Write new copy only when no earlier pack exists or the owner asks for it, and show it next to the approved copy before you publish.
 
 What the approved v3 copy does (the agent's reading, confirmed by the owner on 09-11-2026: "yes i agree its correct"):
 
