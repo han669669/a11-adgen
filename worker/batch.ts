@@ -77,7 +77,66 @@ export async function batchCreate(env: Env, input: { brandSlug: string; subjectI
   return { id, label: input.label, kitVersion: kit.version, status: "research" };
 }
 
-export async function batchUpdate(env: Env, input: { id: string; status?: string; insights?: unknown[]; notes?: string }) {
+/** The marks of each stage (docs/design/owner-verdicts.md 2.1). The table has the same CHECK rule. */
+export const VERDICT_MARKS = { draft: ["pass", "fix"], final: ["fix", "approve", "reject"], pack: ["fix", "approve", "reject"] } as const;
+
+export interface OwnerVerdict {
+  stage: keyof typeof VERDICT_MARKS;
+  mark: string;
+  ownerSaid: string;
+  ideaId?: string;
+  key?: string;
+  packVersion?: number;
+  notes?: string;
+}
+
+/** Check each verdict against the batch and make its insert. The owner's words are saved as he said them, only added, never changed. */
+async function verdictInserts(env: Env, batchId: string, verdicts: OwnerVerdict[]) {
+  const at = now();
+  const out = [];
+  for (const [i, v] of verdicts.entries()) {
+    const where = `ownerVerdicts[${i}]`;
+    if (!(VERDICT_MARKS[v.stage] as readonly string[]).includes(v.mark)) {
+      throw new Error(`${where}: mark '${v.mark}' is not a mark of stage '${v.stage}' (use ${VERDICT_MARKS[v.stage].join(", ")}).`);
+    }
+    if (v.stage === "draft" && !v.ideaId) throw new Error(`${where}: a draft verdict needs ideaId.`);
+    if (v.stage === "final" && !v.key) throw new Error(`${where}: a final verdict needs key (the final picture).`);
+    let ideaId = v.ideaId ?? null;
+    if (v.ideaId) {
+      const idea = await env.DB.prepare("SELECT 1 FROM ideas WHERE id = ? AND batch_id = ?").bind(v.ideaId, batchId).first();
+      if (!idea) throw new Error(`${where}: idea ${v.ideaId} is not an idea of this batch.`);
+    }
+    if (v.key) {
+      const render = await env.DB.prepare("SELECT idea, kind, image_keys, composed_key FROM renders WHERE id = ? AND batch = ?")
+        .bind(v.key.split("/")[1] ?? "", batchId)
+        .first<{ idea: string | null; kind: string; image_keys: string | null; composed_key: string | null }>();
+      // The key must be a saved picture of the render: one of its images, or its composed final.
+      const saved = !!render && ((JSON.parse(render.image_keys ?? "[]") as string[]).includes(v.key) || render.composed_key === v.key);
+      if (!render || !saved) throw new Error(`${where}: ${v.key} is not a picture of this batch.`);
+      if (v.stage === "final" && render.kind === "draft") throw new Error(`${where}: ${v.key} is a draft, not a final picture.`);
+      if (ideaId && render.idea && render.idea !== ideaId) throw new Error(`${where}: ${v.key} is a picture of another idea.`);
+      ideaId ??= render.idea;
+    }
+    let packId: string | null = null;
+    if (v.packVersion !== undefined) {
+      const pack = await env.DB.prepare("SELECT id FROM packs WHERE batch_id = ? AND version = ?").bind(batchId, v.packVersion).first<{ id: string }>();
+      if (!pack) throw new Error(`${where}: this batch has no pack version ${v.packVersion}.`);
+      packId = pack.id;
+    }
+    out.push(
+      env.DB.prepare(
+        `INSERT INTO verdicts (id, batch_id, idea_id, render_key, pack_id, stage, mark, owner_said, notes, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(crypto.randomUUID(), batchId, ideaId, v.key ?? null, packId, v.stage, v.mark, v.ownerSaid, v.notes ?? null, at),
+    );
+  }
+  return out;
+}
+
+export async function batchUpdate(
+  env: Env,
+  input: { id: string; status?: string; insights?: unknown[]; notes?: string; ownerVerdicts?: OwnerVerdict[] },
+) {
   // Every picked idea with drafts must have its final prompt before the picks are made (D2: Claude picks the drafts).
   if (input.status === "board") {
     // A funnel batch needs exactly one picked idea per stage. Batches made before the stages are exempt.
@@ -102,12 +161,18 @@ export async function batchUpdate(env: Env, input: { id: string; status?: string
   if (input.status) (sets.push("status = ?"), args.push(input.status));
   if (input.insights) (sets.push("insights = ?"), args.push(JSON.stringify(input.insights)));
   if (input.notes !== undefined) (sets.push("notes = ?"), args.push(input.notes));
-  if (sets.length === 0) throw new Error("Nothing to update.");
-  const res = await env.DB.prepare(`UPDATE batches SET ${sets.join(", ")}, updated_at = ? WHERE id = ?`)
-    .bind(...args, now(), input.id)
-    .run();
-  if (res.meta.changes !== 1) throw new Error(`No batch with id ${input.id}.`);
-  return { id: input.id, updated: sets.map((s) => s.split(" ")[0]) };
+  const verdicts = input.ownerVerdicts ?? [];
+  if (sets.length === 0 && verdicts.length === 0) throw new Error("Nothing to update.");
+  // An unknown batch is refused, and every verdict is checked, before anything is written.
+  if (!(await env.DB.prepare("SELECT 1 FROM batches WHERE id = ?").bind(input.id).first())) throw new Error(`No batch with id ${input.id}.`);
+  const inserts = await verdictInserts(env, input.id, verdicts);
+  // One D1 batch is one transaction: the batch row and its verdicts are saved together or not at all.
+  const [res] = await env.DB.batch([
+    env.DB.prepare(`UPDATE batches SET ${[...sets, "updated_at = ?"].join(", ")} WHERE id = ?`).bind(...args, now(), input.id),
+    ...inserts,
+  ]);
+  if (res?.meta.changes !== 1) throw new Error(`No batch with id ${input.id}.`);
+  return { id: input.id, updated: sets.map((s) => s.split(" ")[0]), verdictsSaved: verdicts.length };
 }
 
 export interface IdeaInput {
@@ -251,8 +316,25 @@ export async function tasteLog(env: Env, limit = 30) {
   const ranks = await env.DB.prepare(
     "SELECT render_key, idea_id, rank, reason FROM draft_ranks WHERE idea_id IN (SELECT value FROM json_each(?)) ORDER BY rank",
   ).bind(JSON.stringify(ideaIds)).all<{ render_key: string; idea_id: string; rank: number; reason: string | null }>();
+  const verdicts = await env.DB.prepare(
+    `SELECT v.created_at, v.stage, v.mark, v.source_mark, v.owner_said, v.notes, v.render_key, b.label, i.format, i.headline, pk.version
+     FROM verdicts v LEFT JOIN batches b ON b.id = v.batch_id LEFT JOIN ideas i ON i.id = v.idea_id LEFT JOIN packs pk ON pk.id = v.pack_id
+     ORDER BY v.created_at DESC, v.rowid DESC LIMIT ?`,
+  ).bind(limit).all<Record<string, any>>();
   return {
     tally: await tasteTally(env),
+    verdicts: verdicts.results.map((v) => ({
+      at: v.created_at,
+      batch: v.label ?? null,
+      stage: v.stage,
+      mark: v.mark,
+      sourceMark: v.source_mark,
+      ownerSaid: v.owner_said,
+      notes: v.notes,
+      idea: v.format ? { stage: v.format, headline: v.headline } : null,
+      key: v.render_key,
+      packVersion: v.version ?? null,
+    })),
     picks: picks.results.map((p) => {
       const mine = ranks.results.filter((r) => r.idea_id === p.idea_id);
       const chosen = mine.find((r) => r.render_key === p.render_key);
