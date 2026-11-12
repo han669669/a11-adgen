@@ -46,18 +46,24 @@ describe("0004_funnel on a database with rows", () => {
 });
 
 describe("0014_verdicts", () => {
-  const db = fakeD1().raw;
-  db.exec(`
+  // A fresh database for each test, so each test runs alone too.
+  const fresh = () => {
+    const db = fakeD1().raw;
+    db.exec(`
     INSERT INTO brands (id, slug, name, created_at, updated_at) VALUES ('br', 'wongi', 'WonGi', 't', 't');
     INSERT INTO subjects (id, brand_id, kind, title, created_at) VALUES ('su', 'br', 'product', 'Pop Barley', 't');
     INSERT INTO batches (id, brand_id, subject_id, kit_version, label, status, created_at, updated_at)
       VALUES ('ba', 'br', 'su', 1, 'W46', 'board', 't', 't'), ('bb', 'br', 'su', 1, 'W47', 'board', 't', 't');
     INSERT INTO ideas (id, batch_id, n, format, insight, visual, headline, created_at) VALUES ('i1', 'ba', 1, 'tof', 'x', 'x', 'x', 't');
     INSERT INTO packs (id, batch_id, version, token_hash, title, content, created_at) VALUES ('p1', 'ba', 1, 'h', 't', '{}', 't');
+    INSERT INTO packs (id, batch_id, version, token_hash, title, content, created_at) VALUES ('p2', 'bb', 1, 'h2', 't', '{}', 't');
   `);
-  const add = (cols: string, vals: string) => db.exec(`INSERT INTO verdicts (${cols}, owner_said, created_at) VALUES (${vals}, 'his words', 't')`);
+    const add = (cols: string, vals: string) => db.exec(`INSERT INTO verdicts (${cols}, owner_said, created_at) VALUES (${vals}, 'his words', 't')`);
+    return { db, add };
+  };
 
   it("takes one row of each stage, and an old row with a source mark only", () => {
+    const { db, add } = fresh();
     add("id, batch_id, idea_id, stage, mark", "'v1', 'ba', 'i1', 'draft', 'pass'");
     add("id, batch_id, render_key, stage, mark", "'v2', 'ba', 'renders/r/1.jpg', 'final', 'fix'");
     add("id, batch_id, pack_id, stage, mark", "'v3', 'ba', 'p1', 'pack', 'approve'");
@@ -67,14 +73,20 @@ describe("0014_verdicts", () => {
   });
 
   it("refuses a bad row", () => {
+    const { db, add } = fresh();
+    add("id, batch_id, stage, mark", "'v2', 'ba', 'final', 'fix'");
     expect(() => add("id, batch_id, stage", "'x1', 'ba', 'final'")).toThrow(/CHECK/); // no mark and no source mark
     expect(() => add("id, batch_id, stage, mark", "'x2', 'ba', 'final', 'pass'")).toThrow(/CHECK/); // 'pass' is for drafts
     expect(() => add("id, batch_id, stage, mark", "'x3', 'ba', 'draft', 'approve'")).toThrow(/CHECK/);
     expect(() => add("id, stage, mark", "'x4', 'pack', 'approve'")).toThrow(/CHECK/); // pack copy belongs to a batch
     expect(() => add("id, batch_id, stage, mark", "'x5', 'ba', 'board', 'fix'")).toThrow(/CHECK/);
     expect(() => add("id, batch_id, idea_id, stage, mark", "'x6', 'bb', 'i1', 'draft', 'pass'")).toThrow(/FOREIGN KEY/); // an idea of another batch
-    expect(() => add("id, batch_id, pack_id, stage, mark", "'x7', 'ba', 'nope', 'pack', 'approve'")).toThrow(/FOREIGN KEY/);
+    expect(() => add("id, batch_id, pack_id, stage, mark", "'x7', 'ba', 'nope', 'pack', 'approve'")).toThrow(/FOREIGN KEY|not a pack of this batch/);
     expect(() => db.exec("INSERT INTO verdicts (id, batch_id, stage, mark, owner_said, created_at) VALUES ('x8', 'ba', 'final', 'fix', '', 't')")).toThrow(/CHECK/);
     expect(() => add("id, batch_id, stage, mark", "'v2', 'ba', 'final', 'fix'")).toThrow(/UNIQUE|PRIMARY/);
+    expect(() => add("id, batch_id, stage, mark", "NULL, 'ba', 'final', 'fix'")).toThrow(/NOT NULL/);
+    expect(() => add("id, batch_id, stage, mark", "'x9', 'ba', 'draft', 'pass'")).toThrow(/CHECK/); // a draft verdict needs its idea
+    expect(() => add("id, idea_id, stage, mark", "'x10', 'i1', 'final', 'fix'")).toThrow(/CHECK/); // an idea needs its batch
+    expect(() => add("id, batch_id, pack_id, stage, mark", "'x11', 'ba', 'p2', 'pack', 'approve'")).toThrow(/not a pack of this batch/);
   });
 });
