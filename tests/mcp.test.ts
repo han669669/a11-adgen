@@ -188,6 +188,7 @@ describe("mcp handler", () => {
     const writer = readFileSync(new URL("../plugin/agents/writer.md", import.meta.url), "utf8");
     expect(writer).toContain("up to 6 words most of the time, never more than 8");
     expect(writer).toContain("Up to 14 words together");
+    expect(writer).toContain("Set `copy.subline` for every idea too, up to 8 words");
     expect(critic).toContain("Do not read `docs/taste-seed.md` §1, `docs/marks.md`, `docs/creative-playbook.md` §8 or `taste_log` for this task");
   });
   it("names the art-director subagent in the draft step and in the final check", async () => {
