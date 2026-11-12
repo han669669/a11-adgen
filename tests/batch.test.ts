@@ -318,6 +318,9 @@ describe("batch flow", () => {
     const { subject, b, ideas } = await seed(env); // seed: one tof picked, one bof not picked
     const other = await batch.batchCreate(env, { brandSlug: "wongi", subjectId: subject.id, label: "other" });
     await expect(batch.ideasPick(env, other.id, [ideas[1]!.id])).rejects.toThrow("No idea of batch");
+    // One wrong id: nothing is picked, not even the good one.
+    await expect(batch.ideasPick(env, b.id, [ideas[1]!.id, "55555555-5555-5555-5555-555555555555"])).rejects.toThrow("No idea of batch");
+    await expect(batch.ideasPick(env, b.id, [ideas[1]!.id, ideas[1]!.id])).rejects.toThrow("only once");
     expect((await batch.batchGet(env, b.id)).ideas.find((i: { id: string }) => i.id === ideas[1]!.id)!.picked).toBe(false);
     await expect(batch.ideasPick(env, b.id, [ideas[1]!.id])).resolves.toEqual({ batchId: b.id, picked: [ideas[1]!.id] });
     expect((await batch.batchGet(env, b.id)).ideas.filter((i: { picked: boolean }) => i.picked)).toHaveLength(2);
@@ -520,7 +523,7 @@ describe("nested tool input", () => {
     const nested = { type: "object", properties: { list: { type: "array", items: { type: "object", properties: { on: { type: "boolean", default: false } } } } } } as const;
     expect((validate(nested as any, { list: [{}] }) as any).list[0].on).toBe(false);
   });
-  it("accepts a good list, and takes no pick: the critic picks later with ideas_update", () => {
+  it("accepts a good list without a pick: the critic picks later with ideas_pick", () => {
     expect((validate(schema, { batchId: "11111111-1111-1111-1111-111111111111", ideas: [idea] }) as any).ideas[0]).toEqual(idea);
     expect(() => validate(schema, { batchId: "11111111-1111-1111-1111-111111111111", ideas: [{ ...idea, picked: true }] })).toThrow(
       "Unknown argument: ideas[0].picked.",

@@ -220,9 +220,13 @@ export async function ideasUpdate(env: Env, updates: { id: string; picked?: bool
 
 /** The critic's pick: set picked on ideas of one batch. It cannot unpick, write a prompt or touch another batch (the pick limit, 1 per stage, still holds). */
 export async function ideasPick(env: Env, batchId: string, ids: string[]) {
-  const res = await env.DB.batch(ids.map((id) => env.DB.prepare("UPDATE ideas SET picked = 1 WHERE id = ? AND batch_id = ?").bind(id, batchId)));
-  const missing = ids.filter((_, i) => res[i]?.meta.changes !== 1);
+  if (new Set(ids).size !== ids.length) throw new Error("Each idea id may appear only once.");
+  // Check every id first, so a wrong id never leaves the others picked.
+  const rows = await env.DB.prepare("SELECT id FROM ideas WHERE batch_id = ? AND id IN (SELECT value FROM json_each(?))").bind(batchId, JSON.stringify(ids)).all<{ id: string }>();
+  const found = new Set(rows.results.map((r) => r.id));
+  const missing = ids.filter((id) => !found.has(id));
   if (missing.length) throw new Error(`No idea of batch ${batchId} with id: ${missing.join(", ")}.`);
+  await env.DB.batch(ids.map((id) => env.DB.prepare("UPDATE ideas SET picked = 1 WHERE id = ? AND batch_id = ?").bind(id, batchId)));
   return { batchId, picked: ids };
 }
 
