@@ -177,6 +177,7 @@ describe("mcp handler", () => {
     const tools = readFileSync(new URL("../plugin/agents/art-director.md", import.meta.url), "utf8").match(/^tools: (.*)$/m)![1]!;
     expect(tools.split(", ")).toEqual(["Read", "Grep", "Glob", "Bash", "mcp__a11__batch_get", "mcp__a11__brand_get", "mcp__a11__canon_get", "mcp__a11__image_get", "mcp__a11__render_status"]);
     expect(text("final")).toContain("give the finished drafts to the art-director subagent to check");
+    expect(text("final")).toContain("When he picks one of the new drafts, ideas_update finalPrompt for that idea first");
   });
   it("prompt_get returns the same text as prompts/get, and refuses a missing argument", async () => {
     const call = async (args: unknown) =>
