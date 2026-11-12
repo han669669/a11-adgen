@@ -38,7 +38,8 @@ Run these on the live address for a production deploy. For a preview deploy, run
 | `POST /oauth/register` with a body over 8 KB | 413 |
 | `POST /oauth/register` with a `javascript:` redirect | 400 |
 | `spend_get`, `brand_list`, `batch_list` through the connector | Real data (OAuth path works) |
-| Worker plain values `MCP_TOKEN_SHA256`, `SIGNUP_CODE_SHA256` | Still present (`keep_vars`) |
+| Worker secrets `MCP_TOKEN_SHA256`, `SIGNUP_CODE_SHA256` | Present, type `secret_text` (settings API) |
+| Worker settings (`GET /accounts/{id}/workers/scripts/a11adgen/settings`) | `observability.logs.invocation_logs` is `false` |
 | Worker subdomain setting | `previews_enabled` is `false` |
 
 ## 3. Does it still do its job
