@@ -162,9 +162,13 @@ class FoodGrade(unittest.TestCase):
             food_grade.grade(self.picture(), [(0, 10, 40, 50)], self.ref(), (0, 0, 80, 40))
 
 
+FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+
+@unittest.skipUnless(os.path.isfile(FONT), "needs DejaVu Sans (on the Ubuntu CI runner)")
 class Headline(Tmp):
     # DejaVu Sans ships with Ubuntu (the CI runner) and this session; any TrueType file works.
-    FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    FONT = FONT
 
     def run_(self, *extra):
         src = self.save("in.png", np.full((500, 400, 3), 220))
@@ -211,6 +215,16 @@ class Headline(Tmp):
 
     def test_a_family_that_cannot_be_found_stops_with_a_clear_message(self):
         self.assertIn("is not on Google Fonts", exit_message(self.family_run, "--family", "No Such Brand Font"))
+
+    def test_non_latin_words_are_refused(self):
+        self.assertIn("only Latin-script", exit_message(self.run_, "--font", self.FONT, "--headline", "十种口味", "--area", "0,0,1,1"))
+
+    def test_a_negative_gap_is_refused(self):
+        self.assertIn("--gap must be 0 or more", exit_message(self.run_, "--font", self.FONT, "--headline", "Hi", "--area", "0,0,1,1", "--gap", "-1"))
+
+    def test_a_missing_picture_stops_with_a_clear_message(self):
+        out = os.path.join(self.dir.name, "o.jpg")
+        self.assertIn("cannot read the picture", exit_message(headline.main, ["--in", "/no/such.jpg", "--out", out, "--font", self.FONT, "--headline", "Hi", "--area", "0,0,1,1"]))
 
     def test_the_fallback_family_is_used_and_named(self):
         out, msg = self.family_run("--family", "No Such Brand Font", "--fallback", "DejaVu Sans")

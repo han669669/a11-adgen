@@ -515,6 +515,8 @@ describe("copy review", () => {
     const { env } = makeEnv();
     const { b, ideas } = await seed(env);
     const id = ideas[0]!.id;
+    await expect(submit(env, draft(b.id, id))).rejects.toThrow("has no subline");
+    await batch.ideasUpdate(env, [{ id, subline: "Gone by noon." }]);
     await expect(submit(env, draft(b.id, id))).rejects.toThrow("has not approved the words");
     await expect(submit(env, draft(b.id, "77777777-7777-7777-7777-777777777777"))).rejects.toThrow("A draft belongs to an idea of its batch");
 
@@ -526,7 +528,7 @@ describe("copy review", () => {
     expect(got.copy).toMatchObject({ subline: "Ten flavours, one cake.", ownerApproved: { headline: "Wait, there's ten?", subline: "Ten flavours, one cake.", ownerSaid: "yes this one" } });
 
     await batch.ideasUpdate(env, [{ id, subline: "Ten flavours." }]);
-    await expect(batch.copyApprovedCheck(env, b.id, id)).rejects.toThrow("changed after the owner approved");
+    await expect(submit(env, draft(b.id, id))).rejects.toThrow("changed after the owner approved");
     await batch.ideasUpdate(env, [{ id, copyApproved: "ok" }]);
     await expect(batch.copyApprovedCheck(env, b.id, id)).resolves.toBeUndefined();
   });

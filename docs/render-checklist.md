@@ -31,11 +31,11 @@ These are words for you to apply with judgement, not code rules (`docs/v1-lesson
 | F7 | **Text load and contrast.** Little text, large enough to read on a phone, in plain words. Every sticker and small line contrasts strongly with what is behind it. | Reason codes `textLoad`, `lowContrastSticker`. |
 | F8 | **Sameness across the batch.** The 3 ads differ in camera and layout (eye level wide; straight down; close crop that runs off one edge; a 35-degree turn; one real serving). Not the same backdrop and centred product three times. | B46: 32 of 32 finals used the one view of their reference photo. |
 
-## 3. Copy checks (headline, sticker, tagline)
+## 3. Copy checks (headline, sticker, subline)
 
-- Headline: one idea with a turn, 2 to 7 words (`blueprint.md` hard check 6), sentence case, no exclamation mark. A buyer's own words win (a Reddit title used word for word worked). An oddly specific true detail is good.
+- Headline: one idea with a turn, 3 to 5 words (the copy cap, `creative-playbook.md` §8; it replaces 2 to 7 words of `blueprint.md` hard check 6), sentence case, no exclamation mark. A buyer's own words win (a Reddit title used word for word worked). An oddly specific true detail is good.
 - No hype words (unlock, elevate, game-changer, "you deserve", "say goodbye to"). No urgency. No "you" diagnosis question ("Struggling with...?").
-- A short true tagline under the headline when the product page backs it ("Hand-packaged to order"). The owner felt ads without one were incomplete.
+- A short true subline under the headline, at most 6 words, and at most 10 words with the headline ("Hand-packaged to order"). Every ad has one: the owner felt ads without one were incomplete. The owner approves both as text before any draft (copy review, `creative-playbook.md` §8).
 - No filler sticker: no shelf life, no bare size, no flavour scale, no thin review count (fewer than 20 reviews is never proof).
 - tof: no price, saving or shipping sticker. bof: a real reason to buy now, with its condition kept ("free delivery from S$35", not "free delivery"). A price says what it buys (per jar, per box of 6).
 - Health and wellness: no health claim in the copy. Claims printed on the pack stay as printed.

@@ -24,9 +24,11 @@ takes --wght and --sub-wght on its weight axis. It stops with a clear message, a
 writes nothing, when the font or the picture is missing or the words cannot fit.
 """
 import argparse
+import math
 import os
 import re
 import sys
+import unicodedata
 import urllib.parse
 import urllib.request
 
@@ -93,6 +95,15 @@ def load_font(path, size, wght):
     return font
 
 
+def non_latin(text):
+    """The first letter that is not Latin script, or None. Wrapping is by spaces and Pillow gets no
+    direction or shaping, so right-to-left, CJK and other complex scripts are not supported yet."""
+    for ch in text:
+        if unicodedata.category(ch).startswith("L") and "LATIN" not in unicodedata.name(ch, ""):
+            return ch
+    return None
+
+
 def wrap(draw, words, font, width):
     """Greedy wrap; None when one word alone is wider than the box."""
     lines, cur = [], ""
@@ -155,6 +166,11 @@ def main(argv=None):
 
     if not a.headline.strip():
         sys.exit("the headline is empty")
+    bad = non_latin(a.headline + a.subline)
+    if bad:
+        sys.exit(f"only Latin-script words are supported (found {bad!r}): set non-Latin or right-to-left copy another way and tell the owner")
+    if not (math.isfinite(a.gap) and a.gap >= 0 and math.isfinite(a.sub_ratio) and a.sub_ratio > 0):
+        sys.exit("--gap must be 0 or more and --sub-ratio more than 0")
     try:
         x0, y0, x1, y1 = (float(v) for v in a.area.split(","))
     except ValueError:
@@ -174,7 +190,10 @@ def main(argv=None):
     else:
         sub_path, sub_note = head_path, None
 
-    im = Image.open(a.src, formats=FORMATS).convert("RGB")
+    try:
+        im = Image.open(a.src, formats=FORMATS).convert("RGB")
+    except OSError as e:
+        sys.exit(f"cannot read the picture {a.src}: {e}")
     W, H = im.size
     bx0, by0, bw, bh = x0 * W, y0 * H, (x1 - x0) * W, (y1 - y0) * H
     draw = ImageDraw.Draw(im)

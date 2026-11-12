@@ -254,11 +254,13 @@ export async function copyApprovedCheck(env: Env, batchId: string, ideaId: strin
   if (!row) throw new Error(`No idea ${ideaId} in batch ${batchId}. A draft belongs to an idea of its batch.`);
   const copy = JSON.parse(row.copy) as { subline?: string; ownerApproved?: { headline: string; subline: string } };
   const ok = copy.ownerApproved;
+  if (!copy.subline?.trim())
+    throw new Error(`Idea ${ideaId} has no subline. Every ad has one (the owner found ads without one incomplete): set it, show it to the owner, and save his approval.`);
   if (!ok)
     throw new Error(
       `The owner has not approved the words of idea ${ideaId}. Show him the headline and subline as text first (docs/creative-playbook.md §8, copy review), then save his words with ideas_update copyApproved.`,
     );
-  if (ok.headline !== row.headline || ok.subline !== (copy.subline ?? ""))
+  if (ok.headline !== row.headline || ok.subline !== copy.subline)
     throw new Error(`The words of idea ${ideaId} changed after the owner approved them. Show him the new words and save his approval again.`);
 }
 
