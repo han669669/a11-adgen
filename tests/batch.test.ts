@@ -652,6 +652,12 @@ describe("owner verdicts", () => {
     await expect(batch.batchUpdate(env, { id: other.id, ownerVerdicts: [{ stage: "draft", mark: "pass", ideaId: ideas[0]!.id, ownerSaid: "x" }] })).rejects.toThrow(/not an idea of this batch/);
     await expect(batch.batchUpdate(env, { id: "00000000-0000-4000-8000-000000000000", ownerVerdicts: [{ stage: "pack", mark: "fix", ownerSaid: "x" }] })).rejects.toThrow(/No batch/);
     expect(raw.prepare("SELECT COUNT(*) AS n FROM verdicts").get()).toEqual({ n: 0 });
+    // A refused verdict also keeps the batch row as it was: nothing is half saved.
+    const before = raw.prepare("SELECT notes, status, updated_at FROM batches WHERE id = ?").get(other.id);
+    await expect(
+      batch.batchUpdate(env, { id: other.id, notes: "new", status: "done", ownerVerdicts: [{ stage: "draft", mark: "pass", ideaId: ideas[0]!.id, ownerSaid: "x" }] }),
+    ).rejects.toThrow(/not an idea of this batch/);
+    expect(raw.prepare("SELECT notes, status, updated_at FROM batches WHERE id = ?").get(other.id)).toEqual(before);
   });
 
   it("checks ownerVerdicts on the MCP batch_update tool", () => {

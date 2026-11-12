@@ -160,12 +160,15 @@ export async function batchUpdate(
   if (input.notes !== undefined) (sets.push("notes = ?"), args.push(input.notes));
   const verdicts = input.ownerVerdicts ?? [];
   if (sets.length === 0 && verdicts.length === 0) throw new Error("Nothing to update.");
-  // The batch row is touched in every case, so an unknown batch id is refused before any verdict is saved.
-  const res = await env.DB.prepare(`UPDATE batches SET ${[...sets, "updated_at = ?"].join(", ")} WHERE id = ?`)
-    .bind(...args, now(), input.id)
-    .run();
-  if (res.meta.changes !== 1) throw new Error(`No batch with id ${input.id}.`);
-  if (verdicts.length) await env.DB.batch(await verdictInserts(env, input.id, verdicts));
+  // An unknown batch is refused, and every verdict is checked, before anything is written.
+  if (!(await env.DB.prepare("SELECT 1 FROM batches WHERE id = ?").bind(input.id).first())) throw new Error(`No batch with id ${input.id}.`);
+  const inserts = await verdictInserts(env, input.id, verdicts);
+  // One D1 batch is one transaction: the batch row and its verdicts are saved together or not at all.
+  const [res] = await env.DB.batch([
+    env.DB.prepare(`UPDATE batches SET ${[...sets, "updated_at = ?"].join(", ")} WHERE id = ?`).bind(...args, now(), input.id),
+    ...inserts,
+  ]);
+  if (res?.meta.changes !== 1) throw new Error(`No batch with id ${input.id}.`);
   return { id: input.id, updated: sets.map((s) => s.split(" ")[0]), verdictsSaved: verdicts.length };
 }
 
