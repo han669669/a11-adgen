@@ -2,7 +2,7 @@
 
 One row per ad the owner marked. Newest last. These feed the taste canon (`docs/blueprint.md` §4).
 
-As of 2026-11-12, new verdicts go to the database (`verdicts`, saved with `batch_update` `ownerVerdicts`, read with `taste_log`). The rows below were imported once with `scripts/backfill-verdicts.sql` (`docs/design/owner-verdicts.md` §2.5).
+As of 2026-11-12, new verdicts go to the database (`verdicts`, saved with `batch_update` `ownerVerdicts`, read with `taste_log`). The rows below are imported once into `verdicts` with `scripts/backfill-verdicts.sql`, after the build of step C is deployed (`docs/design/owner-verdicts.md` §2.5).
 
 | Date | Ad | Mark | Owner's words | Lesson |
 |---|---|---|---|---|
