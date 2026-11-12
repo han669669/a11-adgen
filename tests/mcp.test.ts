@@ -181,7 +181,7 @@ describe("mcp handler", () => {
     const { readFileSync } = await import("node:fs");
     const critic = readFileSync(new URL("../plugin/agents/critic.md", import.meta.url), "utf8");
     expect(critic.match(/^tools: (.*)$/m)![1]!.split(", ")).toEqual(["Read", "Grep", "Glob", "mcp__a11__canon_get", "mcp__a11__taste_log", "mcp__a11__batch_get", "mcp__a11__ideas_pick", "mcp__a11__drafts_rank", "mcp__a11__image_get", "mcp__a11__gold_get", "mcp__a11__gold_score"]);
-    expect(critic).toContain("Do not read `docs/taste-seed.md` §1, `docs/marks.md` or `taste_log` for this task");
+    expect(critic).toContain("Do not read `docs/taste-seed.md` §1, `docs/marks.md`, `docs/creative-playbook.md` §8 or `taste_log` for this task");
   });
   it("names the art-director subagent in the draft step and in the final check", async () => {
     const { PROMPTS } = await import("../worker/prompts");
