@@ -47,7 +47,7 @@ Three ads per batch: 1 tof, 1 mof, 1 bof (owner, 07-11-2026). The database allow
 
 ## 5. Process for each batch
 
-1. Research: the product page facts, buyer words (Reddit, reviews), and the Ad Library through Apify (the oldest active statics in the category; record how long each has run). Read the angle, never the look.
+1. Research: the product page facts and buyer words (Reddit, reviews). Skip the Ad Library through Apify (the oldest active statics in the category, and how long each has run) until its Phase 4 integration is built and the owner approves the paid step. Read the angle, never the look.
 2. Burst: at least 8 ideas per stage before you pick. Ideas cost nothing; drafts cost money.
 3. Kill: apply §2, and kill an idea that needs a `render-checklist.md` defect (D1 to D9) to work. Most ideas must die here. If fewer than the needed picks survive, write more ideas. Do not lower the bar.
 4. Looks: give each of the 3 picks its own look (§7.2): a different backdrop, light and camera per stage. Do not copy option B's look onto every ad.
@@ -75,7 +75,7 @@ Option B was made in 3 renders plus the logo in code. W46b used more steps and b
 
 Fill the parts in angle brackets. Keep the rest of the words.
 
-1. **Draft** (`render_submit` kind `draft`, 3 images, low; references: the packshot only):
+1. **Draft** (fallback only, for a product state the packshot cannot show, §5 step 5; the normal draft is one render per draft from a product-lock skeleton, §7.4) (`render_submit` kind `draft`, 3 images, low; references: the packshot only):
    > <Look opener: "Premium studio product photograph" for a studio look, "Real phone photo, honest and unposed" for a native look> for a static social ad. Image 1 is the exact product: <product name>. Keep its label, <the label's main elements>, <the cap or closure> and <the pack material> exactly as in the photo. <The kit's shape words (kit notes), with the product's real size.>
    >
    > Scene: <one or two sentences: where the product stands (which side of the frame, not centred unless the look says so), its state that carries the idea (open, almost empty, one missing), at most one other object at its true size>. <This stage's backdrop, light and camera (§7.2)>. No other objects. No hands.

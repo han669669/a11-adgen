@@ -351,7 +351,7 @@ export async function batchGet(env: Env, id: string) {
     env.DB.prepare("SELECT id, kind, title, url, data FROM subjects WHERE id = ?").bind(b.subject_id).first<Record<string, any>>(),
     env.DB.prepare("SELECT * FROM ideas WHERE batch_id = ? ORDER BY n LIMIT 60").bind(id).all<Record<string, any>>(),
     env.DB.prepare(
-      `SELECT id, idea, kind, status, image_keys, composed_key, error, usd_est, created_at FROM renders WHERE batch = ? ORDER BY created_at LIMIT ${MAX_BATCH_RENDERS}`,
+      `SELECT id, idea, kind, status, image_keys, composed_key, error, usd_est, created_at FROM renders WHERE batch = ? ORDER BY created_at, rowid LIMIT ${MAX_BATCH_RENDERS}`,
     ).bind(id).all<Record<string, any>>(),
     env.DB.prepare("SELECT render_key, idea_id, rank, reason FROM draft_ranks WHERE batch_id = ? LIMIT 200").bind(id).all<Record<string, any>>(),
     env.DB.prepare("SELECT render_key, idea_id, note, by_owner, final_render_id, created_at FROM picks WHERE batch_id = ? LIMIT 100").bind(id).all<Record<string, any>>(),
@@ -382,11 +382,11 @@ export async function batchGet(env: Env, id: string) {
       picked: i.picked === 1,
       finalPrompt: i.final_prompt,
       finalRefs: JSON.parse(i.final_refs),
+      // Submit order, then image order. Never rank order: the order must not show the critic's rank. rank and reason stay as fields; the board hides them until the owner picks.
       drafts: renders.results
         .filter((r) => r.idea === i.id && r.kind === "draft")
         .flatMap((r) => (r.image_keys ? (JSON.parse(r.image_keys) as string[]) : []))
-        .map((key) => ({ ...img(key), rank: rankBy.get(key)?.rank ?? null, reason: rankBy.get(key)?.reason ?? null, picked: pickBy.has(key) }))
-        .sort((x, y) => (x.rank ?? 99) - (y.rank ?? 99)),
+        .map((key) => ({ ...img(key), rank: rankBy.get(key)?.rank ?? null, reason: rankBy.get(key)?.reason ?? null, picked: pickBy.has(key) })),
       finals: renders.results
         .filter((r) => r.idea === i.id && r.kind === "final")
         .map((r) => ({
