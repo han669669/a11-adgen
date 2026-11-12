@@ -26,7 +26,7 @@ follow `AGENTS.md`, and update your row when done.
 | [003](003-harden-paid-render-path.md) | A paid render is never lost, charged twice or given the wrong logo | 2 | P1 | M | MED | none | DONE (2026-11-12) |
 | 004 | Security hardening (2 small changes). The plan file is not in this public repo (`AGENTS.md` section 9 rule 6); the owner and the coordinator hold it in the private project files | 2 | P2 | S | LOW | none | DONE (2026-11-12) |
 | [005](005-pack-copy-from-version.md) | `pack_publish` copies approved copy by itself | 1, 2 | P2 | M | LOW | none | DONE (2026-11-12) |
-| [006](006-save-owner-verdicts-design.md) | Design: every owner verdict saved as data that `learn` reads | 1 | P2 | S | LOW | none (the build after it needs the owner's yes) | TODO |
+| [006](006-save-owner-verdicts-design.md) | Design: every owner verdict saved as data that `learn` reads | 1 | P2 | S | LOW | none (the build after it needs the owner's yes) | DONE (2026-11-12): `docs/design/owner-verdicts.md`. The build waits for the owner's yes. |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line reason)
 
