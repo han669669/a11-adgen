@@ -1,7 +1,6 @@
 import type { Env } from "./env";
 import { mediaUrl } from "./fal";
-import { contentType, extFor, fetchHttpsImage, readCapped } from "./images";
-import { IMAGE_TYPES } from "./uploads";
+import { contentType, extFor, fetchHttpsImage, IMAGE_TYPES, readCapped } from "./images";
 
 export const SLUG = "^[a-z0-9][a-z0-9-]{1,40}$";
 

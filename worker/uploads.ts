@@ -1,5 +1,6 @@
 import { brandBySlug } from "./brand";
 import type { Env } from "./env";
+import { IMAGE_TYPES } from "./images";
 import { InputError } from "./schema";
 import { packByToken } from "./pack";
 import { type Work, XlsxError, isXlsx, newWork, xlsxToCsv } from "./xlsx";
@@ -20,12 +21,6 @@ const CSV_READ_MAX = 100_000;
 export type FileOutcome = { name: string; ok: true } | { name: string; ok: false; status: number; message: string; cause?: unknown };
 /** ok: at least one file was saved. files: one line per file, in the order sent (not set for a refusal of the whole post). */
 export type UploadResult = { ok: true; files: FileOutcome[] } | { ok: false; status: number; message: string; files?: FileOutcome[] };
-
-export const IMAGE_TYPES: { type: string; ext: string; is: (b: Uint8Array) => boolean }[] = [
-  { type: "image/png", ext: "png", is: (b) => b.length > 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((v, i) => b[i] === v) },
-  { type: "image/jpeg", ext: "jpg", is: (b) => b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
-  { type: "image/webp", ext: "webp", is: (b) => b.length > 12 && String.fromCharCode(...b.slice(0, 4)) === "RIFF" && String.fromCharCode(...b.slice(8, 12)) === "WEBP" },
-];
 
 const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const CHUNK = 1_048_576;

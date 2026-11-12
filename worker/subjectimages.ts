@@ -1,6 +1,5 @@
 import type { Env } from "./env";
-import { fetchHttpsImage, MAX_IMAGE_BYTES, readCapped } from "./images";
-import { IMAGE_TYPES } from "./uploads";
+import { fetchHttpsImage, IMAGE_TYPES, MAX_IMAGE_BYTES, readCapped } from "./images";
 
 /** Most images a subject keeps (the same as the subject_save schema). */
 export const SUBJECT_IMAGES_MAX = 6;

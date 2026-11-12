@@ -186,11 +186,14 @@ describe("media route", () => {
     const env = mediaEnv();
     Object.assign(env.MEDIA, { get: async () => ({ body: "x", size: 1, httpMetadata: { contentType: "text/html" } }) });
     expect((await call(env, `/m/${png}`)).headers.get("content-type")).toBe("image/png");
+    expect((await call(env, "/m/brands/11111111-2222-4333-8444-555555555555/ref2.webp")).headers.get("content-type")).toBe("image/webp");
   });
   it("answers HEAD with the same headers and no body (fal checks a reference with HEAD)", async () => {
     const r = await call(mediaEnv(), `/m/${KEY}`, { method: "HEAD" });
     expect(r.status).toBe(200);
     expect(r.headers.get("content-type")).toBe("image/jpeg");
+    expect(r.headers.get("content-length")).toBe("6");
+    expect(r.headers.get("cache-control")).toBe("private, max-age=3600");
     expect(r.headers.get("x-content-type-options")).toBe("nosniff");
     expect(r.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
     expect(await r.text()).toBe("");
