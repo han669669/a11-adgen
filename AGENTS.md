@@ -86,7 +86,7 @@ The account is on the Workers Free plan. Design for these limits (read 2026-11-0
 
 Deploys run through Cloudflare Workers Builds: a commit on `main` builds and deploys the Worker `a11adgen` (`docs/deploy.md`). A merge to `main` is thus a deploy. The connector upload is the fallback only; its steps live only in `docs/deploy.md` ("Manual deploy (fallback)"). Workers Builds does not cover D1 migrations or the web app files in R2 `app/`: these are manual (`docs/deploy.md`), and a live D1 migration needs the owner's explicit yes. Code that needs a new table or column merges only after its migration is live, or it must work without that table or column: a merge deploys the code at once, and the migration does not run by itself. There is no Cloudflare API token in the session (owner decision: use the Cloudflare connector). Bundle size: 372 KiB minified, 143 KiB gzip on 2026-11-11 (`npx wrangler deploy --dry-run --minify --outdir .wrangler/dry`). Keep it small enough for the fallback upload.
 
-The admin token (the static bearer token). The Worker keeps only its SHA-256 (`MCP_TOKEN_SHA256`, a plain var). The token is not in the repo and not on the Worker. Only the owner holds it. An agent must not ask for it, print it, log it or commit it. An agent has no copy, so it cannot call the admin routes alone. When one needs them (for example a web app upload), it tells the owner and the owner runs the step. The owner declined a secure credential form for agents on 2026-11-08, so the owner always runs these steps. What it is for:
+The admin token (the static bearer token). The Worker keeps only its SHA-256 (`MCP_TOKEN_SHA256`, a Worker secret since 2026-11-12). The token is not in the repo and not on the Worker. Only the owner holds it. An agent must not ask for it, print it, log it or commit it. An agent has no copy, so it cannot call the admin routes alone. When one needs them (for example a web app upload), it tells the owner and the owner runs the step. The owner declined a secure credential form for agents on 2026-11-08, so the owner always runs these steps. What it is for:
 
 | Use | Route | Used by |
 | --- | --- | --- |
@@ -142,8 +142,8 @@ Go ahead without asking: code, docs, branches, PRs, free local tests, read-only 
 | `FAL_KEY` | Worker secret | Phase 0, first render |
 | `EXA_API_KEY` | Worker secret | Phase 0, first search |
 | `ALLOWED_EMAILS` | Worker secret | Phase 1, auth |
-| `MCP_TOKEN_SHA256` | Plain var (a hash, not a secret) | Hash of the admin token. The owner makes and holds the token. See "The admin token" above |
-| `SIGNUP_CODE_SHA256` | Plain var (a hash, not a secret) | Hash of the set-up code for sign-up. The owner sets it in the dashboard. Not in `wrangler.jsonc`. |
+| `MCP_TOKEN_SHA256` | Worker secret (holds a hash only) | Hash of the admin token. The owner makes and holds the token. See "The admin token" above |
+| `SIGNUP_CODE_SHA256` | Worker secret (holds a hash only) | Hash of the set-up code for sign-up. The owner sets it in the dashboard. Not in `wrangler.jsonc`. |
 | `APIFY_TOKEN` | Worker secret | Only if the Meta Ad Library step is built |
 
 How the owner sets a Worker secret, without chat:
