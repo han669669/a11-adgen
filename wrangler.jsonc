@@ -7,12 +7,14 @@
   "workers_dev": true,
   // No public per-version URLs. Set on purpose: when this field is missing, Wrangler sends no value and Cloudflare's default (on) can apply. The app is served from the main address only.
   "preview_urls": false,
-  // The live Worker holds two plain values set outside this file: MCP_TOKEN_SHA256 and SIGNUP_CODE_SHA256 (hashes only).
-  // Without keep_vars, every deploy from this file would delete them, and /mcp would reject every token.
+  // keep_vars keeps a plain value that the owner sets in the dashboard (for example SPEND_CAP_USD) on the next deploy.
   "keep_vars": true,
   // A deploy stops, and changes nothing, if one of these secrets is missing on the Worker.
-  "secrets": { "required": ["FAL_KEY", "EXA_API_KEY"] },
-  "observability": { "enabled": true },
+  // MCP_TOKEN_SHA256 and SIGNUP_CODE_SHA256 are Worker secrets (since 2026-11-12); they hold hashes only.
+  "secrets": { "required": ["FAL_KEY", "EXA_API_KEY", "MCP_TOKEN_SHA256"] },
+  // No invocation logs: they keep the full request URL, and a pack link carries its secret token in the path (/c/<token>).
+  // console.error logs and uncaught errors are still kept. Request counts and CPU time stay in the Worker's metrics.
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
   "d1_databases": [
     {
       "binding": "DB",
@@ -28,5 +30,5 @@
     "SPEND_CAP_USD": "10.56",
     "PUBLIC_BASE_URL": "https://a11adgen.gamingcomputing.workers.dev"
   }
-  // Secrets (dashboard → Variables and Secrets): FAL_KEY, EXA_API_KEY. MCP_TOKEN_SHA256 holds only a hash.
+  // Secrets (dashboard → Variables and Secrets): FAL_KEY, EXA_API_KEY, ALLOWED_EMAILS, APIFY_TOKEN, MCP_TOKEN_SHA256, SIGNUP_CODE_SHA256.
 }
