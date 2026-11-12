@@ -11,13 +11,14 @@ import { fakeD1 } from "./helpers/d1";
 
 afterEach(() => vi.unstubAllGlobals());
 
-const img = (url: string, type = "image/png", size = 4, headers: Record<string, string> = {}) => ({
-  url,
-  ok: true,
-  status: 200,
-  headers: new Headers({ "content-type": type, ...headers }),
-  body: new Response(new Uint8Array(size)).body,
-});
+const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const JPEG = [0xff, 0xd8, 0xff];
+/** A fetched picture. Its first bytes are a real PNG or JPEG signature, taken from the type unless `sig` gives them. */
+const img = (url: string, type = "image/png", size = 16, headers: Record<string, string> = {}, sig = type.includes("jpeg") ? JPEG : type.includes("png") ? PNG : []) => {
+  const bytes = new Uint8Array(size);
+  bytes.set(sig);
+  return { url, ok: true, status: 200, headers: new Headers({ "content-type": type, ...headers }), body: new Response(bytes).body };
+};
 
 function makeEnv() {
   const saved = new Map<string, unknown>();
@@ -114,11 +115,24 @@ describe("brand kit", () => {
     expect(saved.size).toBe(0);
     expect(raw.prepare("SELECT COUNT(*) AS n FROM brands").get()).toEqual({ n: 0 });
   });
+  it("refuses a reference whose bytes are not a picture, whatever type the server says", async () => {
+    const { env, saved } = makeEnv();
+    vi.stubGlobal("fetch", async (u: string) => (u.endsWith(".jpg") ? img(u, "image/png", 16, {}, []) : img(u)));
+    await expect(brandSave(env, { slug: "wongi", name: "WonGi", kit })).rejects.toThrow("Reference 1 must be a PNG, JPEG or WebP file.");
+    expect(saved.size).toBe(0);
+  });
+  it("stores a reference by its real type when the server says another image type", async () => {
+    const { env, saved } = makeEnv();
+    vi.stubGlobal("fetch", async (u: string) => (u.endsWith(".jpg") ? img(u, "image/png", 16, {}, JPEG) : img(u)));
+    const out = await brandSave(env, { slug: "wongi", name: "WonGi", kit });
+    expect(out.kit.refs[0]!.key).toMatch(/\/ref1\.jpg$/);
+    expect([...saved.keys()].some((k) => k.endsWith("/ref1.jpg"))).toBe(true);
+  });
   it("refuses an image over the size limit, also with no Content-Length", async () => {
     const { env } = makeEnv();
     vi.stubGlobal("fetch", async (u: string) => img(u, "image/png", 9_000_000));
     await expect(brandSave(env, { slug: "wongi", name: "WonGi", kit })).rejects.toThrow("larger than");
-    vi.stubGlobal("fetch", async (u: string) => img(u, "image/png", 4, { "content-length": "9000000" }));
+    vi.stubGlobal("fetch", async (u: string) => img(u, "image/png", 16, { "content-length": "9000000" }));
     await expect(brandSave(env, { slug: "wongi", name: "WonGi", kit })).rejects.toThrow("larger than");
   });
   it("deletes the stored files when the database write fails", async () => {

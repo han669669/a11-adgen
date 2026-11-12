@@ -3,6 +3,7 @@
  * Hand-written so the Worker stays small and starts fast on the Workers Free plan (10 ms CPU).
  */
 import { toBase64 } from "./b64";
+import { readCapped, TooLargeError } from "./images";
 import type { Env } from "./env";
 import * as batch from "./batch";
 import * as canon from "./canon";
@@ -1071,17 +1072,30 @@ async function handleOne(env: Env, msg: RpcRequest): Promise<object | null> {
 }
 
 /** POST /mcp handler. */
+/** Largest MCP request body. The largest real call (an idea burst of 30 ideas) is far below it. */
+const MAX_RPC_BYTES = 1_000_000;
+
 export async function handleMcp(request: Request, env: Env): Promise<Response> {
   if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: { Allow: "POST" } });
+  // The size limit holds before the body is parsed, and when no Content-Length was sent.
+  const tooLarge = () => Response.json(rpcError(null, -32600, `Request too large: at most ${MAX_RPC_BYTES} bytes.`), { status: 413 });
+  if (Number(request.headers.get("content-length")) > MAX_RPC_BYTES) return tooLarge();
   let body: unknown;
   try {
-    body = await request.json();
-  } catch {
+    body = JSON.parse(new TextDecoder().decode(await readCapped(request, "The request", MAX_RPC_BYTES)));
+  } catch (e) {
+    if (e instanceof TooLargeError) return tooLarge();
     return Response.json(rpcError(null, -32700, "Parse error"), { status: 400 });
   }
   const batch = Array.isArray(body);
   const msgs = (batch ? body : [body]) as RpcRequest[];
-  const answers = (await Promise.all(msgs.map((m) => handleOne(env, m)))).filter((a) => a !== null);
+  if (batch && msgs.length > 10) return Response.json(rpcError(null, -32600, "Batch too large: at most 10 messages."), { status: 400 });
+  // In order, one at a time: a multi-step batch never runs half of its steps side by side.
+  const answers = [];
+  for (const m of msgs) {
+    const a = await handleOne(env, m);
+    if (a !== null) answers.push(a);
+  }
   if (answers.length === 0) return new Response(null, { status: 202 });
   return Response.json(batch ? answers : answers[0]);
 }

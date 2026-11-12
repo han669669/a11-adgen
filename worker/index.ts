@@ -136,10 +136,13 @@ export default {
       if (!MEDIA_KEY.test(key)) return new Response("Not found", { status: 404 });
       const obj = request.method === "HEAD" ? await env.MEDIA.head(key) : await env.MEDIA.get(key);
       if (!obj) return new Response("Not found", { status: 404 });
+      // The type comes from the key, never from stored metadata: this route serves pictures only.
       const headers = {
-        "content-type": obj.httpMetadata?.contentType ?? "image/jpeg",
+        "content-type": key.endsWith(".png") ? "image/png" : key.endsWith(".webp") ? "image/webp" : "image/jpeg",
         "content-length": String(obj.size),
         "cache-control": "private, max-age=3600",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "default-src 'none'; sandbox",
       };
       const body = "body" in obj ? (obj as R2ObjectBody).body : null;
       return new Response(request.method === "HEAD" ? null : body, { headers });

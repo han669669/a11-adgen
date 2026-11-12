@@ -3,6 +3,13 @@ import { isPublicHost } from "./urlsafety";
 /** Largest brand image the Worker reads (logo or reference photo). */
 export const MAX_IMAGE_BYTES = 8_000_000;
 
+/** The picture types the Worker stores, each with a check of the first bytes. */
+export const IMAGE_TYPES: { type: string; ext: string; is: (b: Uint8Array) => boolean }[] = [
+  { type: "image/png", ext: "png", is: (b) => b.length > 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((v, i) => b[i] === v) },
+  { type: "image/jpeg", ext: "jpg", is: (b) => b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+  { type: "image/webp", ext: "webp", is: (b) => b.length > 12 && String.fromCharCode(...b.slice(0, 4)) === "RIFF" && String.fromCharCode(...b.slice(8, 12)) === "WEBP" },
+];
+
 const IMAGE_REDIRECTS = 5;
 
 /**
