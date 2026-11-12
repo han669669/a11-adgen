@@ -1,6 +1,6 @@
 import type { Env } from "./env";
 import { pasteBack } from "./paste";
-import { PRICE, reserve, settle } from "./spend";
+import { NotBilledError, PRICE, reserve, settle } from "./spend";
 
 /** A batch needs about 20 renders; submit refuses more than this, so batch_get never cuts the list. */
 export const MAX_BATCH_RENDERS = 150;
@@ -30,7 +30,7 @@ export function estimate(kind: Kind, numImages: number, numRefs: number): number
 }
 
 function auth(env: Env) {
-  if (!env.FAL_KEY) throw new Error("FAL_KEY is not set on the Worker.");
+  if (!env.FAL_KEY) throw new NotBilledError("FAL_KEY is not set on the Worker.");
   return { Authorization: `Key ${env.FAL_KEY}` };
 }
 
@@ -80,7 +80,11 @@ export async function submit(env: Env, input: SubmitInput) {
       }),
       signal: AbortSignal.timeout(25_000),
     });
-    if (!res.ok) throw new Error(`fal submit failed: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
+    if (!res.ok) {
+      const message = `fal submit failed: HTTP ${res.status} ${(await res.text().catch(() => "")).slice(0, 300)}`;
+      // A 4xx refuses the job. After a 5xx it is not sure that the queue did not take it: it stays counted.
+      throw res.status >= 400 && res.status < 500 ? new NotBilledError(message) : new Error(message);
+    }
     const q = (await res.json()) as { request_id: string; status_url: string; response_url: string };
     accepted = true;
     // The job is billed from here. Each write is tried twice. A failure must never look like "fal did not take the job".
@@ -111,16 +115,12 @@ export async function submit(env: Env, input: SubmitInput) {
         id,
       );
     }
-    // The row is saved, so the render is safe. A spend row that stays 'reserved' is the only loss; say so.
-    const settled = await twice(() => settle(env, spendId, true)).then(() => true, () => false);
-    return {
-      id,
-      usdEstimate: usd,
-      status: "queued" as const,
-      ...(settled ? {} : { note: "The spend row was not settled: spend_get can show less than was spent. Tell the owner." }),
-    };
+    // The row is saved, so the render is safe. A spend row that cannot be settled stays 'reserved', and a reservation counts.
+    await twice(() => settle(env, spendId, true)).catch(() => {});
+    return { id, usdEstimate: usd, status: "queued" as const };
   } catch (e) {
-    if (!accepted) await settle(env, spendId, false);
+    // A timeout or an answer that cannot be read may still be billed: only a sure refusal gives the money back.
+    if (!accepted) await settle(env, spendId, !(e instanceof NotBilledError));
     throw e;
   }
 }
