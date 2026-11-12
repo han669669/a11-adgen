@@ -447,7 +447,9 @@ describe("batch flow", () => {
     const t = await claimSetup("a1a1a1a1-0000-4000-8000-000000000007");
     t.raw.exec("CREATE TRIGGER no_settle BEFORE UPDATE ON spend BEGIN SELECT RAISE(ABORT, 'settle refused'); END;");
     const r = await batch.finalRender(t.env, t.b.id, t.key);
-    expect(r).toMatchObject({ status: "queued", note: expect.stringContaining("spend row was not settled") });
+    expect(r).toMatchObject({ status: "queued" });
+    // The spend row stays reserved, and a reservation counts in the cap.
+    expect(t.raw.prepare("SELECT status FROM spend WHERE kind = 'final'").all()).toEqual([{ status: "reserved" }]);
     expect(t.fal.submits).toBe(1);
     expect(t.claimNow()).toBe(r.id);
     expect(t.raw.prepare("SELECT COUNT(*) AS n FROM renders WHERE kind = 'final'").get()).toEqual({ n: 1 });
