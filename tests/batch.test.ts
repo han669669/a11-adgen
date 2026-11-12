@@ -619,7 +619,8 @@ describe("owner verdicts", () => {
         { stage: "draft", mark: "pass", ideaId: ideas[1]!.id, ownerSaid: "none of these" },
         { stage: "final", mark: "fix", key: keys[0], ownerSaid: "logo a bit lower", notes: "v2" },
         { stage: "pack", mark: "approve", packVersion: 1, ownerSaid: "i approve of it" },
-        { stage: "pack", mark: "reject", ownerSaid: "the old copy was better" },
+        // Copy that is not published yet has no pack version (creative-playbook §6 step 6).
+        { stage: "pack", mark: "reject", ownerSaid: "the old copy was better", notes: "new draft copy, not published" },
       ],
     });
     expect(res).toMatchObject({ verdictsSaved: 4, updated: [] });
@@ -643,6 +644,8 @@ describe("owner verdicts", () => {
       [{ stage: "final", mark: "fix", ownerSaid: "x" }, /needs key/],
       [{ stage: "final", mark: "fix", key: "renders/11111111-1111-4111-8111-111111111111/1.jpg", ownerSaid: "x" }, /not a picture of this batch/],
       [{ stage: "final", mark: "fix", key: keys[0], ideaId: ideas[1]!.id, ownerSaid: "x" }, /picture of another idea/],
+      // The render is of this batch, but the key is not one of its saved pictures.
+      [{ stage: "final", mark: "fix", key: `renders/${RID}/9.jpg`, ownerSaid: "x" }, /not a picture of this batch/],
       [{ stage: "pack", mark: "approve", packVersion: 3, ownerSaid: "x" }, /no pack version 3/],
     ];
     for (const [v, msg] of bad) {

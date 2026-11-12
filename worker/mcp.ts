@@ -300,7 +300,7 @@ export const TOOLS: Tool[] = [
             properties: {
               stage: { type: "string", enum: ["draft", "final", "pack"] },
               mark: { type: "string", enum: ["pass", "fix", "approve", "reject"] },
-              ownerSaid: { type: "string", minLength: 1, maxLength: 600, description: "His exact words" },
+              ownerSaid: { type: "string", minLength: 1, maxLength: 600, pattern: "\\S", description: "His exact words" },
               ideaId: { type: "string", pattern: "^[0-9a-f-]{36}$", description: "Needed for stage 'draft'" },
               key: { type: "string", pattern: "^renders/[0-9a-f-]{36}/[A-Za-z0-9._-]{1,80}$", description: "The picture; needed for stage 'final'" },
               packVersion: { type: "integer", minimum: 1, description: "The pack version, when the pack exists" },
