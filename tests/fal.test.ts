@@ -118,6 +118,29 @@ describe("render submit", () => {
     expect(spendOf(env)).toEqual([{ status: "spent" }]);
   });
 
+  it("gives the spend back when the call was never sent (no FAL_KEY)", async () => {
+    const { env } = setup();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(submit({ ...env, SPEND_CAP_USD: "5.00", FAL_KEY: "" } as Env, input)).rejects.toThrow("FAL_KEY is not set");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(spendOf(env)).toEqual([{ status: "released" }]);
+  });
+
+  it("keeps the spend after a 5xx status: it is not sure that fal did not take the job", async () => {
+    const { env } = setup();
+    vi.stubGlobal("fetch", async () => new Response("bad gateway", { status: 502 }));
+    await expect(submit({ ...env, SPEND_CAP_USD: "5.00" } as Env, input)).rejects.toThrow("fal submit failed: HTTP 502");
+    expect(spendOf(env)).toEqual([{ status: "spent" }]);
+  });
+
+  it("gives the spend back for a refusal whose body cannot be read", async () => {
+    const { env } = setup();
+    vi.stubGlobal("fetch", async () => ({ ok: false, status: 422, text: async () => Promise.reject(new Error("stream broke")) }));
+    await expect(submit({ ...env, SPEND_CAP_USD: "5.00" } as Env, input)).rejects.toThrow("fal submit failed: HTTP 422");
+    expect(spendOf(env)).toEqual([{ status: "released" }]);
+  });
+
   it("gives the spend back when fal refuses the submit with an error status", async () => {
     const { env } = setup();
     vi.stubGlobal("fetch", async () => new Response("bad prompt", { status: 422 }));

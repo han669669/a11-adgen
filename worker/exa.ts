@@ -11,7 +11,12 @@ async function exaPost(env: Env, path: string, body: unknown): Promise<any> {
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(25_000),
   });
-  if (!res.ok) throw new NotBilledError(`Exa ${path} failed: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
+  if (!res.ok) {
+    const message = `Exa ${path} failed: HTTP ${res.status} ${(await res.text().catch(() => "")).slice(0, 300)}`;
+    // Exa's error page (read 2026-11-12): a 503 is "not processed and is not billed". A 4xx refuses the request.
+    // A 500 or a 504 (the request passed its deadline) may be billed: it stays counted.
+    throw res.status < 500 || res.status === 503 ? new NotBilledError(message) : new Error(message);
+  }
   return res.json();
 }
 

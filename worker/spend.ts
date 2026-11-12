@@ -26,7 +26,7 @@ const THIS_MONTH = `at >= strftime('%Y-%m-01T00:00:00.000Z', 'now')`;
 const COUNTED = `(${THIS_MONTH} AND status IN ('spent', 'reserved'))`;
 
 /**
- * The provider did not take the call (it answered with an error status, or the call was never sent), so it does not bill it.
+ * It is sure that the provider did not take the call (it refused the request, or the call was never sent), so it does not bill it.
  * Any other failure (a timeout, a broken connection, an answer that cannot be read) has an unknown outcome and stays counted.
  */
 export class NotBilledError extends Error {}

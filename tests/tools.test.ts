@@ -103,6 +103,18 @@ describe("tools without a test elsewhere", () => {
   });
 
   it.each([
+    [400, "released"],
+    [503, "released"],
+    [500, "spent"],
+    [504, "spent"],
+  ])("exa_search after HTTP %i leaves the spend %s (Exa says that only a 503 is not processed and not billed)", async (status, want) => {
+    const { env, raw } = makeEnv();
+    vi.stubGlobal("fetch", async () => ({ ok: false, status, text: async () => Promise.reject(new Error("stream broke")) }));
+    await expect(run(env, "exa_search", { query: "barley tea" })).rejects.toThrow(`HTTP ${status}`);
+    expect(raw.prepare("SELECT status FROM spend WHERE service = 'exa'").all()).toEqual([{ status: want }]);
+  });
+
+  it.each([
     ["times out", async () => Promise.reject(new DOMException("The operation timed out.", "TimeoutError"))],
     ["sends an answer that cannot be read", async () => new Response("<html>", { status: 200 })],
   ])("exa_search keeps the spend when Exa %s (Exa may still bill the call)", async (_what, fetchStub) => {

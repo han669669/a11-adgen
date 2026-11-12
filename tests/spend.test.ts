@@ -7,6 +7,12 @@ import { fakeD1 } from "./helpers/d1";
 const envWith = (cap: string) => ({ DB: fakeD1(), SPEND_CAP_USD: cap }) as unknown as Env;
 const raw = (env: Env) => (env.DB as unknown as { raw: DatabaseSync }).raw;
 
+/** 16 minutes ago, but never before the start of this UTC month: the cap counts one calendar month. */
+const sixteenMinutesAgo = () => {
+  const now = new Date();
+  return new Date(Math.max(now.getTime() - 16 * 60_000, Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))).toISOString();
+};
+
 describe("spend cap", () => {
   it("allows a reservation that lands exactly on the cap", async () => {
     const env = envWith("1.00");
@@ -29,7 +35,7 @@ describe("spend cap", () => {
 
   it("keeps counting a reservation that was never settled: the provider may have billed it", async () => {
     const env = envWith("1.00");
-    const old = new Date(Date.now() - 16 * 60_000).toISOString();
+    const old = sixteenMinutesAgo();
     raw(env).prepare("INSERT INTO spend (at, service, kind, ref, usd_est) VALUES (?, 'fal', 'final', 'cut off', 0.9)").run(old);
     await expect(reserve(env, "fal", "draft", "new", 0.5)).rejects.toBeInstanceOf(BudgetError);
     expect((await totals(env)).totalUsd).toBeCloseTo(0.9, 4);
@@ -37,7 +43,7 @@ describe("spend cap", () => {
 
   it("keeps counting a settled spend, however old", async () => {
     const env = envWith("1.00");
-    const old = new Date(Date.now() - 16 * 60_000).toISOString();
+    const old = sixteenMinutesAgo();
     raw(env).prepare("INSERT INTO spend (at, service, kind, ref, usd_est, status) VALUES (?, 'fal', 'final', 'old', 0.9, 'spent')").run(old);
     await expect(reserve(env, "fal", "draft", "new", 0.5)).rejects.toBeInstanceOf(BudgetError);
   });
