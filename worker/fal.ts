@@ -47,6 +47,13 @@ export interface SubmitInput {
   id?: string;
 }
 
+/** fal took the job (it is billed) but the render row was not saved. The caller must not start the job again. */
+export class AcceptedError extends Error {
+  constructor(message: string, readonly renderId: string) {
+    super(message);
+  }
+}
+
 export async function submit(env: Env, input: SubmitInput) {
   const size = SIZES[input.kind];
   const id = input.id ?? crypto.randomUUID();
@@ -76,17 +83,42 @@ export async function submit(env: Env, input: SubmitInput) {
     if (!res.ok) throw new Error(`fal submit failed: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
     const q = (await res.json()) as { request_id: string; status_url: string; response_url: string };
     accepted = true;
-    await settle(env, spendId, true);
-    await env.DB.prepare(
-      `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images,
-        fal_request_id, status_url, response_url, usd_est, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(id, input.batch, input.idea, input.kind, prompt, JSON.stringify(input.referenceUrls),
-        size.width, size.height, size.quality, input.numImages,
-        q.request_id, q.status_url, q.response_url, usd, now, now)
-      .run();
-    return { id, usdEstimate: usd, status: "queued" as const };
+    // The job is billed from here. Each write is tried twice. A failure must never look like "fal did not take the job".
+    const twice = async (write: () => Promise<unknown>) => {
+      try {
+        await write();
+      } catch {
+        await write();
+      }
+    };
+    try {
+      await twice(() =>
+        env.DB.prepare(
+          `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images,
+            fal_request_id, status_url, response_url, usd_est, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+          .bind(id, input.batch, input.idea, input.kind, prompt, JSON.stringify(input.referenceUrls),
+            size.width, size.height, size.quality, input.numImages,
+            q.request_id, q.status_url, q.response_url, usd, now, now)
+          .run(),
+      );
+    } catch (e) {
+      // Keep the spend if we can; the caller must not submit again.
+      await twice(() => settle(env, spendId, true)).catch(() => {});
+      throw new AcceptedError(
+        `fal accepted render ${id} (request ${q.request_id}) but the row was not saved: ${(e as Error).message}. Do not submit again; tell the owner.`,
+        id,
+      );
+    }
+    // The row is saved, so the render is safe. A spend row that stays 'reserved' is the only loss; say so.
+    const settled = await twice(() => settle(env, spendId, true)).then(() => true, () => false);
+    return {
+      id,
+      usdEstimate: usd,
+      status: "queued" as const,
+      ...(settled ? {} : { note: "The spend row was not settled: spend_get can show less than was spent. Tell the owner." }),
+    };
   } catch (e) {
     if (!accepted) await settle(env, spendId, false);
     throw e;
@@ -104,11 +136,15 @@ interface RenderRow {
   usd_est: number;
 }
 
-/** Check a render. When fal is done, copy the images to R2 once and return their keys. */
-export async function check(env: Env, id: string) {
-  const row = await env.DB.prepare(
+function read(env: Env, id: string) {
+  return env.DB.prepare(
     "SELECT id, status, status_url, response_url, image_keys, error, kind, usd_est FROM renders WHERE id = ?",
   ).bind(id).first<RenderRow>();
+}
+
+/** Check a render. When fal is done, copy the images to R2 once and return their keys. */
+export async function check(env: Env, id: string) {
+  const row = await read(env, id);
   if (!row) throw new Error(`No render with id ${id}.`);
   if (row.status !== "queued") return view(env, row);
 
@@ -131,7 +167,11 @@ export async function check(env: Env, id: string) {
   const keys: string[] = [];
   for (const [i, img] of images.entries()) {
     const file = await fetch(img.url, { signal: AbortSignal.timeout(15_000) });
-    if (!file.ok) continue;
+    if (!file.ok) {
+      // A temporary error from the image host: stay queued, the next poll downloads again (R2 puts repeat safely).
+      if (transient(file.status)) return { id, status: "queued", note: `image download HTTP ${file.status}; poll again.` };
+      continue;
+    }
     const key = `renders/${id}/${i + 1}.jpg`;
     const raw = await file.arrayBuffer();
     // A food_fix result keeps the original outside its boxes (paste.ts). When the paste fails, the render fails:
@@ -153,9 +193,11 @@ export async function check(env: Env, id: string) {
   const status = keys.length > 0 && keys.length === images.length ? "done" : "failed";
   const error =
     images.length === 0 ? "fal returned no images" : keys.length === images.length ? null : `saved ${keys.length} of ${images.length} images`;
-  await env.DB.prepare("UPDATE renders SET status = ?, image_keys = ?, error = ?, updated_at = ? WHERE id = ?")
+  // Only a queued row takes the result: a late poll must not overwrite what another poll finished.
+  const res = await env.DB.prepare("UPDATE renders SET status = ?, image_keys = ?, error = ?, updated_at = ? WHERE id = ? AND status = 'queued'")
     .bind(status, JSON.stringify(keys), error, new Date().toISOString(), id)
     .run();
+  if (res.meta.changes !== 1) return view(env, (await read(env, id)) ?? row);
   return view(env, { ...row, status, error, image_keys: JSON.stringify(keys) });
 }
 
@@ -164,9 +206,11 @@ export function transient(httpStatus: number): boolean {
 }
 
 async function fail(env: Env, row: RenderRow, error: string) {
-  await env.DB.prepare("UPDATE renders SET status = 'failed', error = ?, updated_at = ? WHERE id = ?")
+  const res = await env.DB.prepare("UPDATE renders SET status = 'failed', error = ?, updated_at = ? WHERE id = ? AND status = 'queued'")
     .bind(error, new Date().toISOString(), row.id)
     .run();
+  // Another poll finished the render first: give its state, never a false failure.
+  if (res.meta.changes !== 1) return view(env, (await read(env, row.id)) ?? row);
   return view(env, { ...row, status: "failed", error });
 }
 

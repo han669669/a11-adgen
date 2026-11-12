@@ -852,12 +852,12 @@ export const TOOLS: Tool[] = [
       if (a.brandSlug) {
         // A render of a batch uses the kit version the batch was made with, so a later kit save cannot change it.
         const brand = await brandBySlug(env, a.brandSlug);
-        const pinned = await env.DB.prepare(
-          "SELECT b.kit_version FROM renders r JOIN batches b ON b.id = r.batch WHERE r.id = ? AND b.brand_id = ?",
-        )
-          .bind(String(a.key).split("/")[1], brand.id)
-          .first<{ kit_version: number }>();
-        const kit = await latestKit(env, brand.id, pinned?.kit_version);
+        const owner = await env.DB.prepare("SELECT b.brand_id, b.kit_version FROM renders r JOIN batches b ON b.id = r.batch WHERE r.id = ?")
+          .bind(String(a.key).split("/")[1])
+          .first<{ brand_id: string; kit_version: number }>();
+        // Another brand's logo must never go on a final. A render in no batch (a free-form batch id) uses the latest kit.
+        if (owner && owner.brand_id !== brand.id) throw new Error(`${a.key} is a render of a batch of another brand, not of ${a.brandSlug}. Check the key and the brand.`);
+        const kit = await latestKit(env, brand.id, owner?.kit_version);
         if (!kit) throw new Error(`Brand ${a.brandSlug} has no kit.`);
         logoKey = kit.kit.logo.key;
         place = kit.kit.placement;
