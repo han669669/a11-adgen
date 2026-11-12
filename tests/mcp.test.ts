@@ -175,7 +175,8 @@ describe("mcp handler", () => {
     // The art director has no paid tool and no tool that picks or ranks.
     const { readFileSync } = await import("node:fs");
     const tools = readFileSync(new URL("../plugin/agents/art-director.md", import.meta.url), "utf8").match(/^tools: (.*)$/m)![1]!;
-    for (const t of ["render_submit", "final_render", "picks_save", "drafts_rank", "compose_final"]) expect(tools).not.toContain(t);
+    expect(tools.split(", ")).toEqual(["Read", "Grep", "Glob", "Bash", "mcp__a11__batch_get", "mcp__a11__brand_get", "mcp__a11__canon_get", "mcp__a11__image_get", "mcp__a11__render_status"]);
+    expect(text("final")).toContain("give the finished drafts to the art-director subagent to check");
   });
   it("prompt_get returns the same text as prompts/get, and refuses a missing argument", async () => {
     const call = async (args: unknown) =>
