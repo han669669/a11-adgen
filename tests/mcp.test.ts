@@ -159,10 +159,28 @@ describe("mcp handler", () => {
     // Every tool a subagent is told to call is in its tools line.
     const text = (f: string) => readFileSync(new URL(f, dir), "utf8");
     const toolsLine = (f: string) => text(f).match(/^tools: (.*)$/m)![1]!;
-    for (const [f, tool] of [["critic.md", "drafts_rank"], ["critic.md", "taste_log"], ["critic.md", "gold_score"], ["writer.md", "batch_get"], ["art-director.md", "brand_get"], ["art-director.md", "batch_get"]]) {
+    for (const [f, tool] of [["critic.md", "drafts_rank"], ["critic.md", "taste_log"], ["critic.md", "ideas_update"], ["critic.md", "gold_score"], ["writer.md", "batch_get"], ["art-director.md", "brand_get"], ["art-director.md", "batch_get"]]) {
       expect(text(f!)).toContain(tool!);
       expect(toolsLine(f!)).toContain(`mcp__a11__${tool}`);
     }
+  });
+  it("gives the idea pick, the draft rank and the gold test to the critic in a fresh context", async () => {
+    const { PROMPTS } = await import("../worker/prompts");
+    const text = (name: string) => PROMPTS.find((p) => p.name === name)!.text({ brand: "wongi", batchId: "b1", title: "t", label: "W1", note: "n" });
+    for (const name of ["batch", "redesign"]) {
+      expect(text(name)).toContain("ideas_save the whole burst with no idea picked. Then give only the batch id to the critic subagent in a fresh context");
+      expect(text(name)).toContain("give only the batch id to the critic subagent in a fresh context: it reads taste_log, looks at each draft");
+      expect(text(name)).not.toContain("marking the 3 picks");
+      expect(text(name)).not.toContain("then drafts_rank blind");
+    }
+    expect(text("final")).toContain("the critic subagent ranks them blind in a fresh context");
+    for (const name of ["gold-test", "learn"]) expect(text(name)).toContain("Run it in the critic subagent in a fresh context, never in the session that wants the change");
+    expect(text("gold-test")).toContain("does not read docs/taste-seed.md §1 or docs/marks.md");
+    // The critic judges: it has no paid tool and no tool that writes ideas, prompts or verdicts.
+    const { readFileSync } = await import("node:fs");
+    const critic = readFileSync(new URL("../plugin/agents/critic.md", import.meta.url), "utf8");
+    expect(critic.match(/^tools: (.*)$/m)![1]!.split(", ")).toEqual(["Read", "Grep", "Glob", "mcp__a11__canon_get", "mcp__a11__taste_log", "mcp__a11__batch_get", "mcp__a11__ideas_update", "mcp__a11__drafts_rank", "mcp__a11__image_get", "mcp__a11__gold_get", "mcp__a11__gold_score"]);
+    expect(critic).toContain("Do not read `docs/taste-seed.md` §1, `docs/marks.md` or `taste_log` for this task");
   });
   it("names the art-director subagent in the draft step and in the final check", async () => {
     const { PROMPTS } = await import("../worker/prompts");
