@@ -144,8 +144,33 @@ describe("pack_publish", () => {
       const old = t.content(1);
       old.ads.forEach((x) => (x.name = x.name.replace("_b01_", "_")));
       t.raw.prepare("UPDATE packs SET content = ? WHERE version = 1").run(JSON.stringify(old));
-      await pack.packPublish(t.env, { batchId: t.b.id, copyFromVersion: 1, ads: [{ renderId: t.finals[0]! }] });
-      expect(textOf(t.content(2).ads[0]!)).toEqual(textOf(old.ads[0]!));
+      // The second idea: a match that ignored the ad key and took the first source ad would fail here.
+      await pack.packPublish(t.env, { batchId: t.b.id, copyFromVersion: 1, ads: [{ renderId: t.finals[1]! }] });
+      expect(textOf(t.content(2).ads[0]!)).toEqual(textOf(old.ads[1]!));
+      expect(textOf(old.ads[1]!)).not.toEqual(textOf(old.ads[0]!));
+    });
+
+    it("publishes nothing when the source version is revoked while the publish runs", async () => {
+      const t = await v1();
+      const db = t.env.DB as unknown as { prepare: (sql: string) => unknown };
+      const prepare = db.prepare.bind(db);
+      // The revoke lands after the source was read and just before the new pack is saved.
+      db.prepare = (sql) => {
+        if (sql.startsWith("SELECT MAX(version)")) t.raw.prepare("UPDATE packs SET revoked_at = 'now' WHERE version = 1").run();
+        return prepare(sql);
+      };
+      await expect(pack.packPublish(t.env, { batchId: t.b.id, copyFromVersion: 1, ads: [{ renderId: t.finals[0]! }] })).rejects.toThrow("is revoked");
+      expect(t.count()).toBe(1);
+    });
+
+    it("refuses an ad with no Meta text and no copyFromVersion before it reads the database", async () => {
+      const t = await v1();
+      const db = t.env.DB as unknown as { prepare: (sql: string) => unknown };
+      let reads = 0;
+      const prepare = db.prepare.bind(db);
+      db.prepare = (sql) => (reads++, prepare(sql));
+      await expect(pack.packPublish(t.env, { batchId: t.b.id, ads: [{ renderId: t.finals[0]! }] })).rejects.toThrow("Give the Meta text for each ad");
+      expect(reads).toBe(0);
     });
 
     it("refuses an ad that gives text together with copyFromVersion", async () => {

@@ -86,6 +86,15 @@ export async function packPublish(
   env: Env,
   a: { batchId: string; ads: PackAdInput[]; launchPlan?: string; healthProduct?: boolean; copyFromVersion?: number; at?: Date },
 ) {
+  // Before any database work: each ad has all of its Meta text, or copyFromVersion gives it. Never a mix.
+  for (const ad of a.ads) {
+    const given = TEXT_FIELDS.filter((f) => ad[f] !== undefined);
+    if (a.copyFromVersion !== undefined && given.length)
+      throw new InputError(`Give the Meta text or copyFromVersion for an ad, not both (render ${ad.renderId} has ${given.join(", ")}).`);
+    const missing = TEXT_FIELDS.filter((f) => ad[f] === undefined);
+    if (a.copyFromVersion === undefined && missing.length)
+      throw new InputError(`Render ${ad.renderId} has no ${missing.join(", ")}. Give the Meta text for each ad, or give copyFromVersion to copy approved text.`);
+  }
   const b = await env.DB.prepare(
     `SELECT b.id, b.label, b.subject_id, b.brand_id, b.created_at, br.slug, br.name FROM batches b JOIN brands br ON br.id = b.brand_id WHERE b.id = ?`,
   ).bind(a.batchId).first<{ id: string; label: string; subject_id: string; brand_id: string; created_at: string; slug: string; name: string }>();
@@ -122,16 +131,12 @@ export async function packPublish(
     if (seenIdeas.has(r.idea_id)) throw new InputError("Two ads are for the same idea. Send one final per idea.");
     seenIdeas.add(r.idea_id);
     ideaNumbers.push(r.n);
-    const given = TEXT_FIELDS.filter((f) => ad[f] !== undefined);
     let copy: Pick<PackAd, (typeof TEXT_FIELDS)[number]>;
     if (source) {
-      if (given.length) throw new InputError(`Give the Meta text or copyFromVersion for an ad, not both (render ${ad.renderId} has ${given.join(", ")}).`);
       const from = sourceAds.get(adKey(adName(week, b.slug, batchNo, r.format, r.n, 0)));
       if (!from) throw new InputError(`Pack version ${a.copyFromVersion} has no ad for the ${r.format} idea ${r.n}. Copy from a version that holds this idea, or give the Meta text for every ad without copyFromVersion.`);
       copy = { primaryTexts: from.primaryTexts, headlines: from.headlines, description: from.description, cta: from.cta, why: from.why };
     } else {
-      const missing = TEXT_FIELDS.filter((f) => ad[f] === undefined);
-      if (missing.length) throw new InputError(`Render ${ad.renderId} has no ${missing.join(", ")}. Give the Meta text for each ad, or give copyFromVersion to copy approved text.`);
       copy = { primaryTexts: ad.primaryTexts!, headlines: ad.headlines!, description: ad.description!, cta: ad.cta!, why: ad.why! };
     }
     const texts = [...copy.primaryTexts, ...copy.headlines, copy.description];
@@ -164,8 +169,15 @@ export async function packPublish(
     const version = ((await env.DB.prepare("SELECT MAX(version) AS v FROM packs WHERE batch_id = ?").bind(a.batchId).first<{ v: number | null }>())?.v ?? 0) + 1;
     const named = { ...content, ads: ads.map((x, i) => ({ ...x, name: adName(week, b.slug, batchNo, x.stage, ideaNumbers[i]!, version) })) };
     try {
-      await env.DB.prepare("INSERT INTO packs (id, batch_id, version, token_hash, title, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .bind(id, a.batchId, version, await sha256Hex(token), `${b.name} ${b.label} v${version}`, JSON.stringify(named), now()).run();
+      // One statement: with copyFromVersion the pack is saved only while its source is still live (a revoke can come in between).
+      const saved = await env.DB.prepare(
+        `INSERT INTO packs (id, batch_id, version, token_hash, title, content, created_at) SELECT ?, ?, ?, ?, ?, ?, ?
+         WHERE ? IS NULL OR EXISTS (SELECT 1 FROM packs WHERE batch_id = ? AND version = ? AND revoked_at IS NULL)`,
+      )
+        .bind(id, a.batchId, version, await sha256Hex(token), `${b.name} ${b.label} v${version}`, JSON.stringify(named), now(),
+          a.copyFromVersion ?? null, a.batchId, a.copyFromVersion ?? null)
+        .run();
+      if (saved.meta.changes !== 1) throw new InputError(`Pack version ${a.copyFromVersion} is revoked. Copy from a version that is live. Nothing was published.`);
     } catch (e) {
       if (attempt < 4 && /UNIQUE/i.test(String(e))) continue;
       throw e;
