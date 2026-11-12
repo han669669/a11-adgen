@@ -84,6 +84,46 @@ describe("mcp handler", () => {
     const j: any = await (await post({ jsonrpc: "2.0", id: 9, method: "prompts/get", params: { name: "gold-test", arguments: { note: "x".repeat(201) } } })).json();
     expect(j.error.message).toMatch(/too long \(at most 200/);
   });
+  it("refuses a batch of more than 10 messages", async () => {
+    const r = await post(Array.from({ length: 11 }, (_, i) => ({ jsonrpc: "2.0", id: i, method: "ping" })));
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as any).error).toMatchObject({ code: -32600, message: "Batch too large: at most 10 messages." });
+  });
+  it("runs a batch one message at a time, in the order sent", async () => {
+    // The first tool is slow. If the messages ran side by side, the second would start before the first ends.
+    const log: string[] = [];
+    const probe = (name: string, ms: number) => ({
+      name,
+      description: "test probe",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      run: async () => {
+        log.push(`${name} start`);
+        await new Promise((r) => setTimeout(r, ms));
+        log.push(`${name} end`);
+        return { content: [{ type: "text", text: name }] };
+      },
+    });
+    const added = [probe("probe_slow", 30), probe("probe_fast", 0)] as unknown as typeof TOOLS;
+    TOOLS.push(...added);
+    try {
+      const r = await post([
+        { jsonrpc: "2.0", id: "a", method: "tools/call", params: { name: "probe_slow", arguments: {} } },
+        { jsonrpc: "2.0", id: "b", method: "tools/call", params: { name: "probe_fast", arguments: {} } },
+      ]);
+      expect(((await r.json()) as any[]).map((a) => a.id)).toEqual(["a", "b"]);
+      expect(log).toEqual(["probe_slow start", "probe_slow end", "probe_fast start", "probe_fast end"]);
+    } finally {
+      TOOLS.splice(TOOLS.length - added.length, added.length);
+    }
+  });
+  it("refuses a body of more than 1 MB, by its declared size and by its real size", async () => {
+    const big = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping", params: { pad: "x".repeat(1_000_001) } });
+    const req = (headers: Record<string, string>) => new Request("https://x/mcp", { method: "POST", headers, body: big });
+    for (const r of [await handleMcp(req({ "content-length": String(big.length) }), {} as Env), await handleMcp(req({}), {} as Env)]) {
+      expect(r.status).toBe(413);
+      expect(((await r.json()) as any).error.message).toBe("Request too large: at most 1000000 bytes.");
+    }
+  });
   it("names only tools that exist in every prompt", async () => {
     const { PROMPTS } = await import("../worker/prompts");
     const known = new Set(TOOLS.map((t) => t.name));
