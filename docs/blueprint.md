@@ -122,7 +122,7 @@ Status on 2026-11-11: checks 1 and 9 are built in code. Check 10 is built as the
 3. The logo reads the brand name.
 4. No CTA button painted in the image.
 5. Text inside the 4:5 frame with a margin.
-6. Headline 7 words or fewer.
+6. Headline 8 words or fewer, and 6 or fewer most of the time (owner, 12-11-2026; the copy length guide, `creative-playbook.md` §8).
 7. No price or saving on the top-of-funnel (`tof`) ad.
 8. Race, ethnicity and religion words blocked unless the owner allows them.
 9. Spend cap per batch and per month.
