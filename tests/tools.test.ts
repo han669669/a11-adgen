@@ -107,6 +107,7 @@ describe("tools without a test elsewhere", () => {
     [503, "released"],
     [500, "spent"],
     [504, "spent"],
+    [302, "spent"],
   ])("exa_search after HTTP %i leaves the spend %s (Exa says that only a 503 is not processed and not billed)", async (status, want) => {
     const { env, raw } = makeEnv();
     vi.stubGlobal("fetch", async () => ({ ok: false, status, text: async () => Promise.reject(new Error("stream broke")) }));

@@ -83,7 +83,7 @@ export async function submit(env: Env, input: SubmitInput) {
     if (!res.ok) {
       const message = `fal submit failed: HTTP ${res.status} ${(await res.text().catch(() => "")).slice(0, 300)}`;
       // A 4xx refuses the job. After a 5xx it is not sure that the queue did not take it: it stays counted.
-      throw res.status < 500 ? new NotBilledError(message) : new Error(message);
+      throw res.status >= 400 && res.status < 500 ? new NotBilledError(message) : new Error(message);
     }
     const q = (await res.json()) as { request_id: string; status_url: string; response_url: string };
     accepted = true;

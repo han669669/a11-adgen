@@ -134,6 +134,13 @@ describe("render submit", () => {
     expect(spendOf(env)).toEqual([{ status: "spent" }]);
   });
 
+  it("keeps the spend after an unexpected 3xx status: only a 4xx is a sure refusal", async () => {
+    const { env } = setup();
+    vi.stubGlobal("fetch", async () => new Response("moved", { status: 307 }));
+    await expect(submit({ ...env, SPEND_CAP_USD: "5.00" } as Env, input)).rejects.toThrow("fal submit failed: HTTP 307");
+    expect(spendOf(env)).toEqual([{ status: "spent" }]);
+  });
+
   it("gives the spend back for a refusal whose body cannot be read", async () => {
     const { env } = setup();
     vi.stubGlobal("fetch", async () => ({ ok: false, status: 422, text: async () => Promise.reject(new Error("stream broke")) }));
