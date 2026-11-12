@@ -23,6 +23,9 @@ import sys
 import numpy as np
 from PIL import Image, ImageDraw
 
+# Open only the formats we use; Pillow refuses any other file type.
+FORMATS = ["JPEG", "PNG", "WEBP"]
+
 PAD = 4  # px of packshot kept around the silhouette, so the edge is not cut
 
 
@@ -61,7 +64,7 @@ def alpha(size, scale, square_top=False):
 
 def alpha_from_png(path, box, size, packshot_size=None):
     """The product's own silhouette from a mask file (made by `cutout`), cropped like the piece and resized to it."""
-    m = Image.open(path).convert("L")
+    m = Image.open(path, formats=FORMATS).convert("L")
     if packshot_size is not None and m.size != packshot_size:
         sys.exit(f"{path} is {m.size[0]}x{m.size[1]} but the packshot is {packshot_size[0]}x{packshot_size[1]}: make the mask from this packshot with `cutout`.")
     return m.crop(box).resize(size, Image.LANCZOS)
@@ -82,7 +85,7 @@ def cutout(a):
     edges = {e.strip() for e in a.edges.split(",")}
     if not edges <= {"top", "bottom", "left", "right"}:
         sys.exit("--edges takes top, bottom, left, right, separated by commas")
-    im = Image.open(a.packshot).convert("RGB")
+    im = Image.open(a.packshot, formats=FORMATS).convert("RGB")
     arr = np.asarray(im).astype(int)
     H, W = arr.shape[:2]
     mx, mn = arr.max(axis=2), arr.min(axis=2)
@@ -147,7 +150,7 @@ def cut(pack, box, band_top=None):
 
 
 def skeleton(a):
-    pack = Image.open(a.packshot).convert("RGB")
+    pack = Image.open(a.packshot, formats=FORMATS).convert("RGB")
     W, H = ints(a.size, 2)
     x0, y0, x1, y1 = ints(a.box, 4)
     check_box((x0, y0, x1, y1), pack.size)
@@ -168,8 +171,8 @@ def skeleton(a):
 
 
 def swap(a):
-    pack = Image.open(a.packshot).convert("RGB")
-    scene = Image.open(a.scene).convert("RGB")
+    pack = Image.open(a.packshot, formats=FORMATS).convert("RGB")
+    scene = Image.open(a.scene, formats=FORMATS).convert("RGB")
     x0, y0, x1, y1 = ints(a.box, 4)
     check_box((x0, y0, x1, y1), pack.size)
     ox0, ox1, otop, obase = ints(a.old, 4)  # the old product in the scene: x0,x1,top,base (one product per call)
@@ -221,7 +224,7 @@ def swap(a):
 
 def pad45(a):
     """Pad a square packshot to 4:5 (the model edits 4:5 only) by repeating its edge rows, so its pixels keep their x and shift down."""
-    im = np.asarray(Image.open(a.packshot).convert("RGB"))
+    im = np.asarray(Image.open(a.packshot, formats=FORMATS).convert("RGB"))
     h, w = im.shape[:2]
     extra = round(w * 5 / 4) - h
     if extra < 0 or extra % 2:
@@ -248,8 +251,8 @@ def open_source(a):
     """Build the source for an OPEN product from a model edit of the padded packshot (cap removed, same framing).
     The model gives the open neck at the packshot's own camera angle. Everything from --real-from down is the real photo again
     (the cut hides inside the label's solid top band), and one strip of repeated threads is added so the neck reaches its true height."""
-    pad = Image.open(a.padded).convert("RGB")
-    edit = Image.open(a.edit).convert("RGB").resize(pad.size, Image.LANCZOS)
+    pad = Image.open(a.padded, formats=FORMATS).convert("RGB")
+    edit = Image.open(a.edit, formats=FORMATS).convert("RGB").resize(pad.size, Image.LANCZOS)
     E, P = np.asarray(edit).copy(), np.asarray(pad)
     E[a.real_from:] = P[a.real_from:]
     s0, s1 = ints(a.strip, 2)
@@ -305,9 +308,9 @@ def vary_food(a):
     slight width change), joined along minimum-difference seams. The left and right glass edges, the label, the cap and the
     horizontal glass highlights stay where they are, because the strips keep their height. Copy 1 is the photo unchanged."""
     import random
-    pack = np.asarray(Image.open(a.packshot).convert("RGB")).copy()
+    pack = np.asarray(Image.open(a.packshot, formats=FORMATS).convert("RGB")).copy()
     # more kernels to draw from: other photos of the same pack with the same framing (e.g. another flavour). This step does not grade them: grade each to match first (food_grade.py)
-    extras = [np.asarray(Image.open(e).convert("RGB")) for e in (a.extra_src or [])]
+    extras = [np.asarray(Image.open(e, formats=FORMATS).convert("RGB")) for e in (a.extra_src or [])]
     for e in extras:
         if e.shape != pack.shape:
             sys.exit("--extra-src must be the same size and framing as --packshot")
@@ -370,7 +373,7 @@ def relight(a):
     from the light), a soft fall-off at the edges, bounce light from the floor colour on the lower part, and a contact shadow
     where the pack meets the floor. Run it on the composite before the blend pass. The direction is the side the light comes from."""
     from PIL import ImageFilter
-    scene = Image.open(a.scene).convert("RGB")
+    scene = Image.open(a.scene, formats=FORMATS).convert("RGB")
     arr = np.asarray(scene).astype(float)
     H, W = arr.shape[:2]
     x0, x1, top, base = ints(a.box, 4)
