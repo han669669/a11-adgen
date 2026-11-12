@@ -159,7 +159,7 @@ describe("mcp handler", () => {
     // Every tool a subagent is told to call is in its tools line.
     const text = (f: string) => readFileSync(new URL(f, dir), "utf8");
     const toolsLine = (f: string) => text(f).match(/^tools: (.*)$/m)![1]!;
-    for (const [f, tool] of [["critic.md", "drafts_rank"], ["critic.md", "taste_log"], ["critic.md", "ideas_update"], ["critic.md", "gold_score"], ["writer.md", "batch_get"], ["art-director.md", "brand_get"], ["art-director.md", "batch_get"]]) {
+    for (const [f, tool] of [["critic.md", "drafts_rank"], ["critic.md", "taste_log"], ["critic.md", "ideas_pick"], ["critic.md", "gold_score"], ["writer.md", "batch_get"], ["art-director.md", "brand_get"], ["art-director.md", "batch_get"]]) {
       expect(text(f!)).toContain(tool!);
       expect(toolsLine(f!)).toContain(`mcp__a11__${tool}`);
     }
@@ -180,7 +180,7 @@ describe("mcp handler", () => {
     // The critic judges: it has no paid tool and no tool that writes ideas, prompts or verdicts.
     const { readFileSync } = await import("node:fs");
     const critic = readFileSync(new URL("../plugin/agents/critic.md", import.meta.url), "utf8");
-    expect(critic.match(/^tools: (.*)$/m)![1]!.split(", ")).toEqual(["Read", "Grep", "Glob", "mcp__a11__canon_get", "mcp__a11__taste_log", "mcp__a11__batch_get", "mcp__a11__ideas_update", "mcp__a11__drafts_rank", "mcp__a11__image_get", "mcp__a11__gold_get", "mcp__a11__gold_score"]);
+    expect(critic.match(/^tools: (.*)$/m)![1]!.split(", ")).toEqual(["Read", "Grep", "Glob", "mcp__a11__canon_get", "mcp__a11__taste_log", "mcp__a11__batch_get", "mcp__a11__ideas_pick", "mcp__a11__drafts_rank", "mcp__a11__image_get", "mcp__a11__gold_get", "mcp__a11__gold_score"]);
     expect(critic).toContain("Do not read `docs/taste-seed.md` §1, `docs/marks.md` or `taste_log` for this task");
   });
   it("names the art-director subagent in the draft step and in the final check", async () => {

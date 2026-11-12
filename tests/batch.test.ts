@@ -313,6 +313,19 @@ describe("batch flow", () => {
     await batch.ideasUpdate(env, [{ id: ideas[0]!.id, picked: true }]); // already picked: no change in count
   });
 
+  it("lets the critic pick only ideas of the given batch, and never unpick", async () => {
+    const { env } = makeEnv();
+    const { subject, b, ideas } = await seed(env); // seed: one tof picked, one bof not picked
+    const other = await batch.batchCreate(env, { brandSlug: "wongi", subjectId: subject.id, label: "other" });
+    await expect(batch.ideasPick(env, other.id, [ideas[1]!.id])).rejects.toThrow("No idea of batch");
+    expect((await batch.batchGet(env, b.id)).ideas.find((i: { id: string }) => i.id === ideas[1]!.id)!.picked).toBe(false);
+    await expect(batch.ideasPick(env, b.id, [ideas[1]!.id])).resolves.toEqual({ batchId: b.id, picked: [ideas[1]!.id] });
+    expect((await batch.batchGet(env, b.id)).ideas.filter((i: { picked: boolean }) => i.picked)).toHaveLength(2);
+    const [tof2] = await batch.ideasSave(env, b.id, [{ format: "tof", insight: "x", visual: "x", headline: "x" }]);
+    await expect(batch.ideasPick(env, b.id, [tof2!.id])).rejects.toThrow("Pick limit");
+    expect(TOOLS.find((t) => t.name === "ideas_pick")!.inputSchema.properties).not.toHaveProperty("picked");
+  });
+
   it("starts only one final when Render is tapped twice at once", async () => {
     const { env, raw } = makeEnv();
     const { b, ideas } = await seed(env);
