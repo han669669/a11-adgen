@@ -176,12 +176,12 @@ describe("mcp handler", () => {
     expect(text("final")).toContain("the critic subagent ranks them blind in a fresh context");
     for (const name of ["gold-test", "learn"]) expect(text(name)).toContain("Run it in the critic subagent in a fresh context, never in the session that wants the change");
     for (const name of ["gold-test", "learn"]) expect(text(name)).toContain("At no point of the run does it read docs/taste-seed.md §1, docs/marks.md or taste_log, even when AGENTS.md");
-    for (const name of ["batch", "redesign"]) expect(text(name)).toContain("read creative-playbook §2, docs/taste-seed.md §2 (the owner gate), canon_get and taste_log, then batch_get");
+    for (const name of ["batch", "redesign"]) expect(text(name)).toContain("read creative-playbook §2 and §8 (the copy standard, which the painted headline and subline follow too), docs/taste-seed.md §2 (the owner gate), canon_get and taste_log, then batch_get");
     // The critic judges: it has no paid tool and no tool that writes ideas, prompts or verdicts.
     const { readFileSync } = await import("node:fs");
     const critic = readFileSync(new URL("../plugin/agents/critic.md", import.meta.url), "utf8");
     expect(critic.match(/^tools: (.*)$/m)![1]!.split(", ")).toEqual(["Read", "Grep", "Glob", "mcp__a11__canon_get", "mcp__a11__taste_log", "mcp__a11__batch_get", "mcp__a11__ideas_pick", "mcp__a11__drafts_rank", "mcp__a11__image_get", "mcp__a11__gold_get", "mcp__a11__gold_score"]);
-    expect(critic).toContain("Do not read `docs/taste-seed.md` §1, `docs/marks.md` or `taste_log` for this task");
+    expect(critic).toContain("Do not read `docs/taste-seed.md` §1, `docs/marks.md`, `docs/creative-playbook.md` §8 or `taste_log` for this task");
   });
   it("names the art-director subagent in the draft step and in the final check", async () => {
     const { PROMPTS } = await import("../worker/prompts");
