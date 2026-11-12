@@ -1,6 +1,6 @@
 """Input checks of the Python scripts, on synthetic pictures. Run: python3 -m unittest discover -s scripts -p "test_*.py"
 
-Needs the packages in scripts/requirements.txt. No real photo, no network.
+Needs Python 3.12 or newer and the packages in scripts/requirements.txt. No real photo, no network. CI runs it (.github/workflows/check.yml).
 """
 import contextlib
 import importlib.util
@@ -75,6 +75,11 @@ class BoxPrint(Tmp):
         msg = exit_message(self.box(band=[[1000, 1000], [1100, 1000], 3]).ink_alpha, 0)
         self.assertIn("leaves no part of the block box", msg)
 
+    def test_a_band_only_in_the_crop_padding_stops_with_a_clear_message(self):
+        # The crop has 12 px of padding around the box; a band at y 30 (above the box top at 40) touches only that padding.
+        msg = exit_message(self.box(band=[[40, 30], [160, 30], 3]).ink_alpha, 0)
+        self.assertIn("leaves no part of the block box", msg)
+
     def test_an_xmin_right_of_the_block_stops_with_a_clear_message(self):
         msg = exit_message(self.box(xmin=500).ink_alpha, 0)
         self.assertIn("leaves no part of the block box", msg)
@@ -127,7 +132,10 @@ class FoodGrade(unittest.TestCase):
         src = self.picture()
         out, _ = food_grade.grade(src, [(0, 10, 40, 50)], self.ref(), (0, 0, 40, 40))
         a, b = np.asarray(src).astype(int), np.asarray(out).astype(int)
-        self.assertGreater(np.abs(b[20:40, 5:35] - a[20:40, 5:35]).sum(), 0)  # the kernels moved toward the reference
+        want = np.array([210, 140, 50])  # the reference kernels
+        before = np.abs(a[20:40, 5:35] - want).sum(axis=-1).mean()
+        after = np.abs(b[20:40, 5:35] - want).sum(axis=-1).mean()
+        self.assertLess(after, before / 2)  # the kernels moved toward the reference
         np.testing.assert_array_equal(b[:, 60:], a[:, 60:])  # the backdrop beside them did not change
 
     def test_a_region_outside_the_picture_is_refused(self):

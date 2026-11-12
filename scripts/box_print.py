@@ -120,7 +120,8 @@ class Box:
             m = cv2.GaussianBlur(m.astype(np.float32) / 255, (0, 0), 1.2 * K)
         if "xmin" in b:
             m[:, :max(0, int((b["xmin"] - cx0) * K))] = 0  # an xmin left of the crop cuts nothing (a negative slice would cut almost all)
-        if not (m > 0.5).any():
+        in_box = m[max(0, (y0 - cy0) * K):max(0, (y1 - cy0) * K), max(0, (x0 - cx0) * K):max(0, (x1 - cx0) * K)]  # the block box, without the crop padding
+        if not (in_box > 0.5).any():
             sys.exit(f"Block {i}: its band or xmin leaves no part of the block box {list(b['box'])}. Check them in the config.")
         d0 = d0 * m
         ref = np.percentile(d0[m > 0.5], 99.5)
