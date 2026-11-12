@@ -1,5 +1,5 @@
-# Tested with these versions on Python 3.13 (2026-11-12); numpy 2.5 needs Python 3.12 or newer.
+# Tested with these versions on Python 3.13 (pillow 13.0 on 2026-11-12); numpy 2.5 needs Python 3.12 or newer.
 # Install: python3 -m pip install -r scripts/requirements.txt
 numpy==2.5.3
-pillow==12.3.0
+pillow==13.0.0
 opencv-python-headless==5.0.0.93

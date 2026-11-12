@@ -16,6 +16,9 @@ Use the graded packshot as the --packshot of product_lock.py. Defaults (the W46c
 import numpy as np
 from PIL import Image
 
+# Open only the formats we use; Pillow refuses any other file type.
+FORMATS = ["JPEG", "PNG", "WEBP"]
+
 M = np.array([[0.4124564, 0.3575761, 0.1804375], [0.2126729, 0.7151522, 0.0721750], [0.0193339, 0.1191920, 0.9503041]])
 WP = np.array([0.95047, 1.0, 1.08883])
 BG_STRIP, BG_GAP = 30, 5  # the backdrop is sampled in a strip from 30 to 5 px beside a region
@@ -110,7 +113,7 @@ def main():
     p.add_argument("--out", required=True)
     a = p.parse_args()
     box = lambda s: tuple(int(float(v)) for v in s.split(","))
-    out, (s_mu, t_mu) = grade(Image.open(a.src), [box(r) for r in a.region], Image.open(a.ref), box(a.ref_box), a.strength, a.sd_boost, a.contrast, a.clarity, tuple(int(v) for v in a.ref_bg.split(",")), a.dist, a.sat_min)
+    out, (s_mu, t_mu) = grade(Image.open(a.src, formats=FORMATS), [box(r) for r in a.region], Image.open(a.ref, formats=FORMATS), box(a.ref_box), a.strength, a.sd_boost, a.contrast, a.clarity, tuple(int(v) for v in a.ref_bg.split(",")), a.dist, a.sat_min)
     out.save(a.out, quality=95)
     print(f"{a.out}: Lab mean of the kernels {s_mu.round(1).tolist()} -> {t_mu.round(1).tolist()}")
 
