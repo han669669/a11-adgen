@@ -294,7 +294,10 @@ export async function finalRender(env: Env, batchId: string, key: string) {
       "SELECT id FROM renders WHERE batch = ? AND idea = ? AND kind = 'final' AND created_at >= ? ORDER BY created_at LIMIT 1",
     ).bind(batchId, pick.idea_id, claimedAt).first<{ id: string }>();
     if (made) {
-      await env.DB.prepare("UPDATE picks SET final_render_id = ? WHERE render_key = ? AND final_render_id = ?").bind(made.id, key, stale).run();
+      await env.DB.batch([
+        env.DB.prepare("UPDATE picks SET final_render_id = ? WHERE render_key = ? AND final_render_id = ?").bind(made.id, key, stale),
+        env.DB.prepare("UPDATE batches SET status = 'finals', updated_at = ? WHERE id = ? AND status IN ('drafts', 'board')").bind(now(), batchId),
+      ]);
       return { id: made.id, status: "already started" };
     }
   }
@@ -313,9 +316,15 @@ export async function finalRender(env: Env, batchId: string, key: string) {
   } catch (e) {
     // fal took the job (billed) but its row was not saved: keep the pick closed for ever, so no second final is paid.
     // Any other error: fal did not take the job, so free the pick and the owner can tap Render again.
-    await env.DB.prepare("UPDATE picks SET final_render_id = ? WHERE render_key = ? AND final_render_id = ?")
-      .bind(e instanceof fal.AcceptedError ? `accepted:${e.renderId}` : null, key, claim)
-      .run();
+    const mark = () =>
+      env.DB.prepare("UPDATE picks SET final_render_id = ? WHERE render_key = ? AND final_render_id = ?")
+        .bind(e instanceof fal.AcceptedError ? `accepted:${e.renderId}` : null, key, claim)
+        .run();
+    // Try the write twice. If both fail after fal took the job, say so: the claim then goes stale and could be paid again.
+    await mark().catch(mark).catch((w) => {
+      if (e instanceof fal.AcceptedError)
+        throw new fal.AcceptedError(`${e.message} The pick was not closed (${(w as Error).message}): do not tap Render for it.`, e.renderId);
+    });
     throw e;
   }
   await env.DB.batch([

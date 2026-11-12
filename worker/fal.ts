@@ -83,31 +83,42 @@ export async function submit(env: Env, input: SubmitInput) {
     if (!res.ok) throw new Error(`fal submit failed: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
     const q = (await res.json()) as { request_id: string; status_url: string; response_url: string };
     accepted = true;
-    await settle(env, spendId, true);
-    const insert = () =>
-      env.DB.prepare(
-        `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images,
-          fal_request_id, status_url, response_url, usd_est, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-        .bind(id, input.batch, input.idea, input.kind, prompt, JSON.stringify(input.referenceUrls),
-          size.width, size.height, size.quality, input.numImages,
-          q.request_id, q.status_url, q.response_url, usd, now, now)
-        .run();
-    try {
-      await insert();
-    } catch {
-      // The job is billed. Try the row once more; then tell the caller that it must not submit again.
+    // The job is billed from here. Each write is tried twice. A failure must never look like "fal did not take the job".
+    const twice = async (write: () => Promise<unknown>) => {
       try {
-        await insert();
-      } catch (e) {
-        throw new AcceptedError(
-          `fal accepted render ${id} (request ${q.request_id}) but the row was not saved: ${(e as Error).message}. Do not submit again; tell the owner.`,
-          id,
-        );
+        await write();
+      } catch {
+        await write();
       }
+    };
+    try {
+      await twice(() =>
+        env.DB.prepare(
+          `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images,
+            fal_request_id, status_url, response_url, usd_est, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+          .bind(id, input.batch, input.idea, input.kind, prompt, JSON.stringify(input.referenceUrls),
+            size.width, size.height, size.quality, input.numImages,
+            q.request_id, q.status_url, q.response_url, usd, now, now)
+          .run(),
+      );
+    } catch (e) {
+      // Keep the spend if we can; the caller must not submit again.
+      await twice(() => settle(env, spendId, true)).catch(() => {});
+      throw new AcceptedError(
+        `fal accepted render ${id} (request ${q.request_id}) but the row was not saved: ${(e as Error).message}. Do not submit again; tell the owner.`,
+        id,
+      );
     }
-    return { id, usdEstimate: usd, status: "queued" as const };
+    // The row is saved, so the render is safe. A spend row that stays 'reserved' is the only loss; say so.
+    const settled = await twice(() => settle(env, spendId, true)).then(() => true, () => false);
+    return {
+      id,
+      usdEstimate: usd,
+      status: "queued" as const,
+      ...(settled ? {} : { note: "The spend row was not settled: spend_get can show less than was spent. Tell the owner." }),
+    };
   } catch (e) {
     if (!accepted) await settle(env, spendId, false);
     throw e;

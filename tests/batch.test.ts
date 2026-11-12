@@ -358,9 +358,11 @@ describe("batch flow", () => {
          VALUES ('made-1', ?, ?, 'final', 'queued', 'p', '[]', 1536, 1920, 'high', 1, 0.06, ?, ?)`,
       )
       .run(t.b.id, t.ideas[0]!.id, ago(170_000), ago(170_000));
+    t.raw.prepare("UPDATE batches SET status = 'board' WHERE id = ?").run(t.b.id);
     expect(await batch.finalRender(t.env, t.b.id, t.key)).toEqual({ id: "made-1", status: "already started" });
     expect(t.fal.submits).toBe(0);
     expect(t.claimNow()).toBe("made-1");
+    expect(t.raw.prepare("SELECT status FROM batches WHERE id = ?").get(t.b.id)).toEqual({ status: "finals" });
   });
 
   it("keeps a final claim that is 10 seconds old", async () => {
@@ -398,6 +400,39 @@ describe("batch flow", () => {
     }
     expect(t.fal.submits).toBe(1);
     expect((await picksGet(t.env, t.b.id)).picks[0]!.firstFinalId).toBeNull();
+  });
+
+  it("closes the pick when the first write of the accepted mark fails", async () => {
+    const t = await claimSetup("a1a1a1a1-0000-4000-8000-000000000006");
+    t.raw.exec("CREATE TRIGGER no_insert BEFORE INSERT ON renders BEGIN SELECT RAISE(ABORT, 'insert refused'); END;");
+    const db = t.env.DB as unknown as { prepare: (sql: string) => { bind: (...v: unknown[]) => { run: () => Promise<unknown> } } };
+    const prepare = db.prepare.bind(db);
+    let failed = 0;
+    db.prepare = (sql) => {
+      const stmt = prepare(sql);
+      if (!sql.endsWith("WHERE render_key = ? AND final_render_id = ?")) return stmt;
+      const bind = stmt.bind.bind(stmt);
+      stmt.bind = (...v) => {
+        const bound = bind(...v);
+        const run = bound.run.bind(bound);
+        bound.run = async () => (failed++ === 0 ? Promise.reject(new Error("D1 is busy")) : run());
+        return bound;
+      };
+      return stmt;
+    };
+    await expect(batch.finalRender(t.env, t.b.id, t.key)).rejects.toThrow("Do not submit again");
+    expect(failed).toBe(2);
+    expect(t.claimNow()).toMatch(/^accepted:[0-9a-f-]{36}$/);
+  });
+
+  it("keeps the final and the pick when fal accepted the job but the spend row cannot be settled", async () => {
+    const t = await claimSetup("a1a1a1a1-0000-4000-8000-000000000007");
+    t.raw.exec("CREATE TRIGGER no_settle BEFORE UPDATE ON spend BEGIN SELECT RAISE(ABORT, 'settle refused'); END;");
+    const r = await batch.finalRender(t.env, t.b.id, t.key);
+    expect(r).toMatchObject({ status: "queued", note: expect.stringContaining("spend row was not settled") });
+    expect(t.fal.submits).toBe(1);
+    expect(t.claimNow()).toBe(r.id);
+    expect(t.raw.prepare("SELECT COUNT(*) AS n FROM renders WHERE kind = 'final'").get()).toEqual({ n: 1 });
   });
 
   it("does not block 'board' on a draft render that has no images", async () => {
@@ -516,8 +551,32 @@ describe("compose_final with brandSlug", () => {
       .run(renderId, b.id, ideas[0]!.id, JSON.stringify([`renders/${renderId}/1.jpg`]));
     const tool = TOOLS.find((t) => t.name === "compose_final")!;
     await expect(tool.run(env, validate(tool.inputSchema, { key: `renders/${renderId}/1.jpg`, brandSlug: "other" }))).rejects.toThrow(
-      "is not a render of a batch of brand other",
+      "is a render of a batch of another brand, not of other",
     );
     expect(raw.prepare("SELECT composed_key FROM renders WHERE id = ?").get(renderId)).toEqual({ composed_key: null });
+  });
+
+  it("uses the latest kit for a render that is in no batch (a free-form batch id)", async () => {
+    const { env, raw } = makeEnv();
+    await seed(env);
+    await brandSave(env, { slug: "wongi", name: "WonGi", kit, note: "v2" });
+    const latestLogo = (await brandGet(env, "wongi")).kit!.kit.logo.key;
+    const renderId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+    raw
+      .prepare(
+        `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, image_keys, usd_est, created_at, updated_at)
+         VALUES (?, 'phase0-test', 'x', 'final', 'done', 'p', '[]', 1536, 1920, 'high', 1, ?, 0.06, 'now', 'now')`,
+      )
+      .run(renderId, JSON.stringify([`renders/${renderId}/1.jpg`]));
+    const asked: string[] = [];
+    (env.MEDIA as unknown as { get: (k: string) => Promise<unknown> }).get = async (k: string) => (asked.push(k), { body: k });
+    (env.IMAGES as unknown as { input: () => unknown }).input = () => {
+      const self = { transform: () => self, draw: () => self, output: async () => ({ response: () => new Response("jpg") }) };
+      return self;
+    };
+    const tool = TOOLS.find((t) => t.name === "compose_final")!;
+    const res = await tool.run(env, validate(tool.inputSchema, { key: `renders/${renderId}/1.jpg`, brandSlug: "wongi" }));
+    expect(res.isError).toBeUndefined();
+    expect(asked).toContain(latestLogo);
   });
 });
