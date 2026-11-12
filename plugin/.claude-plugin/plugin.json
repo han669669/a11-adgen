@@ -1,7 +1,7 @@
 {
   "name": "a11",
   "description": "a11 Studio static ads: subagents (writer, critic, art-director), short commands (/a11:brand, /a11:batch, /a11:redesign, /a11:final, /a11:pack, /a11:learn, /a11:results, /a11:gold-test) and the a11adgen MCP server.",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "author": {
     "name": "a11 Studio"
   },
