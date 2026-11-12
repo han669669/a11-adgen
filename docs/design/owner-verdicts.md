@@ -2,7 +2,7 @@
 
 This document uses ASD-STE100 Simplified Technical English with British spelling.
 
-Status: design only (plan `plans/006-save-owner-verdicts-design.md`, written 2026-11-12 at commit `48c65f2`). No code and no migration exist for it. The build needs the owner's yes, because it needs one live D1 migration.
+Status: design only (plan `plans/006-save-owner-verdicts-design.md`, written 2026-11-12 at commit `48c65f2`). The owner approved the build on 2026-11-12. It needs one live D1 migration.
 
 Goal 1: the tool learns the owner's taste. Today it keeps one kind of verdict (the draft he picked). This design keeps the others.
 
@@ -32,9 +32,9 @@ One new table, `verdicts`. One new optional input on one existing tool. No new t
 CREATE TABLE verdicts (
   id TEXT PRIMARY KEY,                    -- a UUID; the backfill uses fixed ids, so a second run adds nothing
   batch_id TEXT REFERENCES batches(id),   -- NULL only for an ad that was made in no batch (the Phase 0 ads)
-  idea_id TEXT,                           -- the idea, when the verdict is about one idea
+  idea_id TEXT,                           -- the idea, when the verdict is about one idea (it must be an idea of batch_id)
   render_key TEXT,                        -- the draft or final picture, when the verdict is about one picture
-  pack_id TEXT REFERENCES packs(id),      -- the pack version, for a verdict on pack copy
+  pack_id TEXT REFERENCES packs(id),      -- the pack version, for a verdict on the copy of a published pack
   stage TEXT NOT NULL CHECK (stage IN ('draft', 'final', 'pack')),
   mark TEXT CHECK (mark IN ('pass', 'fix', 'approve', 'reject')),
   source_mark TEXT,                       -- backfill only: the Mark cell of docs/marks.md, as written
@@ -42,20 +42,27 @@ CREATE TABLE verdicts (
   notes TEXT,                             -- evidence that is not his words: a measured ratio, a version label
   created_at TEXT NOT NULL,
   CHECK (mark IS NOT NULL OR source_mark IS NOT NULL),
-  CHECK (stage <> 'pack' OR pack_id IS NOT NULL)
+  -- Each stage has its own marks: 'pass' is only for the 3 drafts of an idea, 'approve' and 'reject' are not for a draft.
+  CHECK (mark IS NULL
+    OR (stage = 'draft' AND mark IN ('pass', 'fix'))
+    OR (stage IN ('final', 'pack') AND mark IN ('fix', 'approve', 'reject'))),
+  CHECK (stage <> 'pack' OR batch_id IS NOT NULL),
+  FOREIGN KEY (idea_id, batch_id) REFERENCES ideas(id, batch_id)   -- the same composite key as picks and draft_ranks
 );
 CREATE INDEX verdicts_recent ON verdicts (created_at);
 CREATE INDEX verdicts_batch ON verdicts (batch_id, created_at);
 ```
 
+`packs` has no unique `(id, batch_id)` pair, so the table cannot hold a composite key for the pack. The code checks that the pack is a pack of the batch (2.2), as it does for `render_key`.
+
 The four marks:
 
 | Mark | Meaning |
 |---|---|
-| `pass` | He chose none of it (a full pass on the 3 drafts of an idea). |
-| `fix` | He keeps it and asks for a change. |
-| `approve` | He approves it as it is. |
-| `reject` | He refuses it. |
+| `pass` | He chose none of it (a full pass on the 3 drafts of an idea). Stage `draft` only. |
+| `fix` | He keeps it and asks for a change. All stages. |
+| `approve` | He approves it as it is. Stages `final` and `pack`. |
+| `reject` | He refuses it. Stages `final` and `pack`. |
 
 Why `picks` is not extended: a `picks` row is one chosen draft. Its key is the draft's picture, and each row starts one paid final (`final_render_id`). A full pass has no chosen draft. A verdict on pack copy has no picture. A final can get many notes. A second kind of row in `picks` would put the paid-final guard at risk.
 
@@ -75,13 +82,14 @@ Bounded read path: `taste_log` reads `ORDER BY created_at DESC LIMIT ?` on the `
 Rules in code:
 
 - `ideaId` must be an idea of this batch. `key` must be a render of this batch. `packVersion` must be a pack of this batch.
-- Stage `pack` needs `packVersion`. Stage `draft` with mark `pass` needs `ideaId`.
-- The tool only adds rows. It does not change or delete a row. To correct a verdict, save a new one.
+- The mark must be a mark of the stage (the table in 2.1). The database refuses a wrong pair too.
+- Stage `draft` needs `ideaId`. Stage `final` needs `key` (the final picture). Stage `pack` takes `packVersion` when the pack is published; without it the verdict is about the copy that was shown for this batch before a pack existed.
+- The tool only adds rows. It does not change or delete a row. To correct a verdict, save a new one. The newest verdict about a picture (or, with no picture, about an idea and stage, or a pack version) is his current view; the `learn` prompt says so.
 - The tool description says: save the owner's words only when he said them; never write a verdict for him. This is the same rule as `picks_save` (`ownerSaid`).
 
 `batch_update` is the tool that takes the full-pass line today, and every verdict belongs to one batch. Thus no new tool is necessary.
 
-Known limit: copy that the owner rejects before the first pack of a batch exists has no pack version. That verdict is not saved. It is rare: the `pack` prompt shows new copy next to approved copy, and the first pack has none.
+The first pack of a batch: the owner approves the copy before `pack_publish` makes version 1. The `pack` prompt saves that approval after `pack_publish`, with the new version. Copy that he rejects before a pack exists is saved with no `packVersion`.
 
 ### 2.3 Read path
 
@@ -108,22 +116,22 @@ Known limit: copy that the owner rejects before the first pack of a batch exists
 |---|---|
 | `final` step 1 | "If he passed on all 3 drafts of an idea, make no pick for it. Save his words with batch_update ownerVerdicts (stage 'draft', mark 'pass', the ideaId, ownerSaid = his exact words), make 3 new drafts for that idea (new skeletons, one render_submit each), rank them blind, show him the new drafts and wait. Go on below only with ideas that have a pick." |
 | `final` step 7 | "Show the owner the finals (the repaired pictures for a boxed product). Each time he says something about a final, save it at once with batch_update ownerVerdicts (stage 'final', key = that final, mark 'fix' when he asks for a change, 'reject' when he refuses it, 'approve' when he approves it, ownerSaid = his exact words). Save only what he said. When he gave notes, tell him to type /a11:learn. When he approves the finals, tell him to type /a11:pack." |
-| `pack` step 4 (one sentence added at the end) | "When he approves or rejects the copy of a pack version, save it with batch_update ownerVerdicts (stage 'pack', packVersion = that version, mark 'approve' or 'reject', ownerSaid = his exact words)." |
-| `learn` step 1 | "taste_log (his picks, and his verdicts: full passes, notes on finals, approvals and pack copy, each with his exact words) and canon_get." |
+| `pack` step 4 (one sentence added at the end) | "Each time he approves, rejects or asks for a change to pack copy, save it with batch_update ownerVerdicts (stage 'pack', mark 'approve', 'reject' or 'fix', ownerSaid = his exact words; packVersion = the pack version when one exists). When he approved copy before the pack existed, save the approval after pack_publish, with the new version." |
+| `learn` step 1 | "taste_log (his picks, and his verdicts: full passes, notes on finals, approvals and pack copy, each with his exact words; when two verdicts are about the same picture, the newest is his current view) and canon_get." |
 
-`docs/creative-playbook.md` line 55 and `plugin/commands/learn.md` get the same facts. The sentence "the pass goes into the batch notes" is removed.
+The `final` prompt changes on top of the text that is on `main` at build time (the art-director wiring changes the same step). `docs/creative-playbook.md` step 6, `plugin/commands/learn.md` and `AGENTS.md` decision D2 get the same facts: the sentence "A pass on all 3 drafts goes in the batch notes" becomes "A pass on all 3 drafts, a note on a final and a verdict on pack copy go in `verdicts`, and `taste_log` returns them".
 
 ### 2.5 Backfill (once)
 
 `docs/marks.md` stays as history. A header line says that new verdicts go to the database.
 
-Source: 14 dated rows (counted on 2026-11-12). Result: 24 `verdicts` rows. A row for one ad gives one verdict row. A row for a set (tof, mof, bof) gives three.
+Source: 14 dated rows (counted on 2026-11-12). Result: 21 `verdicts` rows from 11 of them. A row for one ad gives one verdict row. A row for a set (tof, mof, bof) gives three. Rows 3 to 5 are not imported: they are the W46c draft picks, and `picks.note` holds the same words already (read from the live database on 2026-11-12, read-only), so `taste_log` would show them twice.
 
 | # | Source row | Verdict rows | Stage | Mark (source mark is kept on every row) |
 |---|---|---|---|---|
-| 1 | P0 WonGi Pop Barley, Hook | 1 | `final` | "Usable" → `approve` |
+| 1 | P0 WonGi Pop Barley, Hook | 1 | `final` | "Usable" → `fix` (his words name a logo fault and a food fault) |
 | 2 | P0 WonGi, version B | 1 | `final` | "Usable, preferred over A" → `approve` |
-| 3 to 5 | W46c tof, mof, bof (draft picks) | 3 | `draft` | "Picked, fixes asked" → `fix`. The pick itself is in `picks` already and is not copied. |
+| 3 to 5 | W46c tof, mof, bof (draft picks) | 0 | | Not imported. The pick and his words are in `picks` already. |
 | 6 | W46c tof v2 | 1 | `final` | "Not usable, fixes asked" → `reject` |
 | 7, 8 | W46c mof v2, bof v2 | 2 | `final` | "Container right, fixes asked" → `fix` |
 | 9 | P0 WonGi version B again | 1 | `final` | "Corrected: not a product-truth bar" → no clear match. `mark` stays NULL; `source_mark` holds the label. |
@@ -137,10 +145,11 @@ Rules of the backfill:
 
 - `owner_said` is the "Owner's words" cell, as written. For a set, each of the 3 rows holds the words that are about that ad, and the words about the whole set.
 - `notes` holds the version label ("v2", "v5 set") and that ad's own evidence from the "Lesson" cell (for example "height ÷ width 2.46 against the real 2.65").
-- `render_key` is set when `docs/marks.md` gives a key. The set rows give no key: `render_key` stays NULL and `idea_id` is the W46c idea of that stage.
-- `batch_id` is the W46c batch for rows 3 to 8 and 10 to 14. It is NULL for rows 1, 2 and 9: the Phase 0 renders are in no batch (read from the live database on 2026-11-12, read-only).
+- `render_key` is set when `docs/marks.md` gives a key. The set rows give no key: `render_key` stays NULL and `idea_id` is the W46c idea of that stage. The rule "stage `final` needs a key" is a rule of the tool for new verdicts; these old rows have none to give.
+- `batch_id` is the W46c batch for rows 6 to 8 and 10 to 14. It is NULL for rows 1, 2 and 9: the Phase 0 renders are in no batch (read from the live database on 2026-11-12, read-only).
 - `created_at` is the date in the row (2026-11-07), with the row number as the second, so the order stays.
-- The import is one SQL file, `scripts/backfill-verdicts.sql`: 24 `INSERT OR IGNORE` statements with fixed ids (`marks-01`, `marks-03-tof`, ...). A second run adds no row. It is not a migration, so the test database does not get these rows.
+- The import is one SQL file, `scripts/backfill-verdicts.sql`: 21 `INSERT ... ON CONFLICT(id) DO NOTHING` statements with fixed ids (`marks-01`, `marks-10-tof`, ...). A second run adds no row, and a row that breaks a CHECK fails with an error (`INSERT OR IGNORE` would drop it silently). It is not a migration, so the test database does not get these rows.
+- The file holds no database id. Each W46c row finds its batch by the label (`W46c WonGi Pop Barley (house recipe)`, one batch has it) and its idea by the stage of the picked idea (one picked idea for each stage), with `INSERT ... SELECT`. If the batch is not found, the row is not added, and the count of 21 shows it.
 
 ### 2.6 Deploy order and tests
 
@@ -151,7 +160,7 @@ A merge to `main` deploys the Worker at once. `AGENTS.md` section 7: code that n
 | A | Pull request 1: `migrations/0014_verdicts.sql` only. | `npm run check` (the test database applies every migration). A test inserts one row of each stage and shows that the two CHECK rules refuse a bad row. |
 | B | The owner says yes. The migration runs on the live database as `docs/deploy.md` step 3 says. | Read back: `SELECT name FROM d1_migrations` shows `0014_verdicts.sql`; `SELECT COUNT(*) FROM verdicts` gives 0. |
 | C | Pull request 2: the write path, the read path, the prompts and the docs. | Tests: each rule of 2.2 refuses the bad input; `taste_log` returns verdicts newest first and obeys the limit; the prompt text names only real tools. |
-| D | The backfill file runs once on the live database (the owner's yes covers it). | The file runs twice on the test database and gives 24 rows. Live read back: 24 rows; `taste_log` shows them. |
+| D | The backfill file runs once on the live database (the owner's yes covers it). | A test seeds a batch with the W46c label and one picked idea for each stage, runs the file twice and gets 21 rows; on a database with no such batch it gets the 3 Phase 0 rows only. Live read back: 21 rows; `taste_log` shows them. |
 
 ### 2.7 What this design does not do
 
@@ -171,7 +180,7 @@ Rejected, because: notes are one free-text field that each `batch_update` replac
 
 | Item | Value |
 |---|---|
-| Files | `migrations/0014_verdicts.sql`, `scripts/backfill-verdicts.sql`, `worker/batch.ts` (`batchUpdate`, `tasteLog`), `worker/mcp.ts` (`batch_update` schema, `taste_log` and `batch_update` descriptions), `worker/prompts.ts` (4 sentences), `plugin/commands/learn.md`, `docs/creative-playbook.md`, `docs/marks.md` (header line), `docs/decisions.md`, `tests/batch.test.ts`, `tests/mcp.test.ts` |
+| Files | `migrations/0014_verdicts.sql`, `scripts/backfill-verdicts.sql`, `worker/batch.ts` (`batchUpdate`, `tasteLog`), `worker/mcp.ts` (`batch_update` schema, `taste_log` and `batch_update` descriptions), `worker/prompts.ts` (4 sentences), `plugin/commands/learn.md`, `docs/creative-playbook.md`, `AGENTS.md` (decision D2), `docs/marks.md` (header line), `docs/decisions.md`, `tests/batch.test.ts`, `tests/mcp.test.ts` |
 | New tests | About 10 |
 | Effort | M (2 pull requests and 2 live steps) |
 | Cost | US$0. No new tool, no new binding, no new dependency. |
@@ -183,7 +192,7 @@ Result: the design is ready. Today only your draft picks are kept; your notes on
 
 - The build adds one table (`verdicts`) and saves your exact words each time you judge a draft, a final or pack copy.
 - `learn` then reads them. Nothing changes in how you work.
-- It needs one live D1 migration and one import of the 14 old rows of `docs/marks.md` (24 verdicts).
+- It needs one live D1 migration and one import of the old rows of `docs/marks.md` (21 verdicts; the 3 draft picks of W46c are in `picks` already).
 - Recommendation: yes.
 
-Do you approve the build, with the live migration and the one-time import?
+The owner approved the build, with the live migration and the one-time import, on 2026-11-12.
