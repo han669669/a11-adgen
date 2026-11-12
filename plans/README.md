@@ -49,7 +49,6 @@ the private project files. The numbers F4, F7, F8, F11, F16 and F17 are theirs.
 
 | # | Finding | Evidence | Effort | Note |
 |---|---------|----------|--------|------|
-| F1 | The critic's independence is weaker than its file claims. `canon_get` and `taste_log` are required context for its judgement and must stay. The gaps are: `docs/taste-seed.md` quotes gold-set ads with their marks, so a gold run can see answers; the draft rank runs in the main session, not in the critic; and the gold test for a canon change is run by the session that wants the change | `plugin/agents/critic.md:3-13`, `worker/prompts.ts:28,57,97` | M | Changes how the taste loop works: the owner should choose. See "Direction". |
 | F2 | The art-director subagent is named by no prompt, and lacks the tools for its own checks | `plugin/agents/art-director.md:3-4`, `worker/prompts.ts` | S | Wire it in or delete it: the owner's call. |
 | F3 | Gates that are prose only: the 0.04 gold floor (`gold_score` compares with the last run, not with the "before" run), a rank for every draft before status `board`, the 3% product shape rule | `worker/canon.ts:271`, `worker/batch.ts:82-98`, `docs/creative-playbook.md:117` | M | Each is a true/false fact, so it fits the 15-check budget. Needs a decision row per check. |
 | F5 | `results_save` runs one text search over all the brand's packs for each row (up to 60) | `worker/results.ts:41-52` | S | Matters only when real results exist. |
@@ -60,6 +59,8 @@ the private project files. The numbers F4, F7, F8, F11, F16 and F17 are theirs.
 | F13 | No `engines` field or `.nvmrc`, but tests need Node 22 (`node:sqlite`); Node 22 support ends in April 2027 | `package.json`, `.github/workflows/check.yml:24` | S | |
 | F14 | Workers Builds runs `typecheck` and `test` only, CI runs the full `npm run check`, and the ruleset requires neither | `docs/deploy.md:14,21` | S | Setting change in Cloudflare or GitHub: the owner's account. |
 | F15 | Batch labels W46, W46b, W46c and W47 were typed for batches that ran in ISO week 45; their ad names say W45 and W46 | `docs/marks.md:9-20`, `docs/decisions.md` | S | Labels are free text. `batch_create` could suggest the Singapore ISO week. |
+
+Done since the audit: F1 (2026-11-12). The critic picks the ideas, ranks the drafts and runs the gold test in a fresh context (`docs/decisions.md`).
 
 ## Direction (options for the owner; not ranked against the bugs)
 

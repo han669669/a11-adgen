@@ -13,7 +13,7 @@ Claude Code is the brain. Cloudflare is the hands. The owner picks 1 draft per i
 | Part | Job |
 |---|---|
 | **Claude Code + a11 plugin** (owner's laptop, owner's Claude plan) | All thinking: fact sheet, research, insights, ideas, copy, art direction, critique, image checks. Claude sees images that MCP tools return. |
-| **MCP server** (Worker route `/mcp`, OAuth 2.1) | 46 tools (2026-11-11) and 8 prompts. Each MCP prompt shows in Claude Code as a slash command. Prompts and the taste canon live on the server, so one update reaches every session. |
+| **MCP server** (Worker route `/mcp`, OAuth 2.1) | 47 tools (2026-11-12) and 8 prompts. Each MCP prompt shows in Claude Code as a slash command. Prompts and the taste canon live on the server, so one update reaches every session. |
 | **API + web app** (Worker `a11adgen`, static assets) | Brand kits, products, the batch board, the one human step, settings, spend. |
 | **Client portal** (token link, no login) | View, comment, download the pack, upload results. |
 | **D1** `a11adgen-db` | Brands, kit versions, products, facts, research, ideas, drafts, picks, canon, swipe file, results, spend. |
@@ -62,7 +62,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | **Swipe file**: real ads + why they work | Owner picks, client winners, v1 Used ads | Writer, as examples (never copy words or objects) | Top 3 per brand and per format. |
 | **Results ledger**: one row per ad per report | Client screenshots and CSVs | Iteration mix (step 5), week report | Winner = above the client's baseline CTR with enough impressions. |
 
-**Gold set.** v1 marks and notes on 264 ads (D5) become a frozen test set. Before a canon or prompt change ships, the critic re-ranks the gold set. Balanced accuracy on the owner's marks must not fall by 0.04 or more; a smaller move is noise (`docs/decisions.md`, 2026-11-08). It runs in Claude Code, so it costs no API money.
+**Gold set.** v1 marks and notes on 264 ads (D5) become a frozen test set. Before a canon or prompt change ships, the critic re-ranks the gold set in a fresh context, never in the session that wants the change, without `docs/taste-seed.md` §1, `docs/marks.md` or `taste_log` (they quote marked ads and the owner's words). Balanced accuracy on the owner's marks must not fall by 0.04 or more; a smaller move is noise (`docs/decisions.md`, 2026-11-08). It runs in Claude Code, so it costs no API money.
 
 **Signal check.** With one human step, the owner's pick is the main taste signal. The critic's rank is blind (the owner sees it only after he picks), so it cannot become a rubber stamp. `picks_save` and `taste_log` log how often his pick is the critic's rank 1. A low change rate with good client results is the target. A low change rate with bad results means the board hides the bad drafts; then show more.
 
@@ -86,7 +86,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 | Brand | `brand_extract` (built: fetch-based), `brand_get`, `brand_list`, `brand_save` (each save makes a new kit version) |
 | Subject | `subject_save`, `facts_save`; redesign images are kept under `subjects/` and shown by `image_get`. `exa_contents` reads product-page text |
 | Research | `exa_search`, `exa_contents`, a Meta Ad Library tool (later; paid, asks first) |
-| Ideas | `ideas_save` (field `picked` marks the critic's 3), `ideas_update`, `drafts_rank` |
+| Ideas | `ideas_save` (the whole burst, none picked), `ideas_pick` (the critic picks its 3; it cannot unpick or write a prompt), `ideas_update` (the final prompt), `drafts_rank` (the critic's blind rank) |
 | Images | `render_submit` (drafts), `final_render`, `food_fix`, `region_fix`, `render_status`, `compose_final`, `image_get` (returns the image) |
 | Human step | `picks_save` (saves the owner's draft picks with his own words; the board saves the same picks) |
 | Memory | `taste_log` (his picks and passes with the critic's rank), `canon_get`, `canon_update`, `swipe_add`, `swipe_search`, `gold_import`, `gold_get`, `gold_score`, `gold_runs` (all built in Phase 2a), `picks_get` (built 09-11-2026: picks with their finals, pack versions and next step), `baseline_save`, `results_save`, `results_get` (built in Phase 3b: the results ledger), `comments_get` (built in Phase 3b: the client's comments), `uploads_get`, `uploads_done` (built in Phase 3b: the client's results files) |

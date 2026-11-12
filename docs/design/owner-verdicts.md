@@ -2,7 +2,7 @@
 
 This document uses ASD-STE100 Simplified Technical English with British spelling.
 
-Status: being built (plan `plans/006-save-owner-verdicts-design.md`, written 2026-11-12 at commit `48c65f2`). The owner approved the build on 2026-11-12. Step A (PR #72) is merged and step B is done: migration 0014 is on the live database since 2026-11-12. Do not run it again. Step C is the next pull request; step D (the backfill) runs once after it merges.
+Status: built (plan `plans/006-save-owner-verdicts-design.md`, written 2026-11-12 at commit `48c65f2`). The owner approved the build on 2026-11-12. Step A (PR #72) is merged and step B is done: migration 0014 is on the live database since 2026-11-12. Do not run it again. Step C (PR #73) is merged. Step D is done: the backfill ran once on the live database on 2026-11-12 and gave 21 rows; a second run added none. Do not run it again.
 
 Goal 1: the tool learns the owner's taste. Today it keeps one kind of verdict (the draft he picked). This design keeps the others.
 
