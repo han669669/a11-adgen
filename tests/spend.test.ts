@@ -27,11 +27,12 @@ describe("spend cap", () => {
     expect((await totals(env)).totalUsd).toBeCloseTo(0.8, 4);
   });
 
-  it("stops counting a reservation that was never settled after 15 minutes", async () => {
+  it("keeps counting a reservation that was never settled: the provider may have billed it", async () => {
     const env = envWith("1.00");
     const old = new Date(Date.now() - 16 * 60_000).toISOString();
-    raw(env).prepare("INSERT INTO spend (at, service, kind, ref, usd_est) VALUES (?, 'fal', 'final', 'stale', 0.9)").run(old);
-    await expect(reserve(env, "fal", "draft", "new", 0.5)).resolves.toBeGreaterThan(0);
+    raw(env).prepare("INSERT INTO spend (at, service, kind, ref, usd_est) VALUES (?, 'fal', 'final', 'cut off', 0.9)").run(old);
+    await expect(reserve(env, "fal", "draft", "new", 0.5)).rejects.toBeInstanceOf(BudgetError);
+    expect((await totals(env)).totalUsd).toBeCloseTo(0.9, 4);
   });
 
   it("keeps counting a settled spend, however old", async () => {

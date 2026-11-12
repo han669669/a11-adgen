@@ -1,17 +1,17 @@
 import type { Env } from "./env";
-import { PRICE, reserve, settle } from "./spend";
+import { NotBilledError, PRICE, reserve, settle } from "./spend";
 
 const EXA = "https://api.exa.ai";
 
 async function exaPost(env: Env, path: string, body: unknown): Promise<any> {
-  if (!env.EXA_API_KEY) throw new Error("EXA_API_KEY is not set on the Worker.");
+  if (!env.EXA_API_KEY) throw new NotBilledError("EXA_API_KEY is not set on the Worker.");
   const res = await fetch(`${EXA}${path}`, {
     method: "POST",
     headers: { "x-api-key": env.EXA_API_KEY, "content-type": "application/json" },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(25_000),
   });
-  if (!res.ok) throw new Error(`Exa ${path} failed: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
+  if (!res.ok) throw new NotBilledError(`Exa ${path} failed: HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
   return res.json();
 }
 
@@ -43,7 +43,8 @@ export async function search(env: Env, input: SearchInput) {
       highlights: r.highlights ?? [],
     }));
   } catch (e) {
-    await settle(env, spendId, false);
+    // A timeout or an answer that cannot be read may still be billed: only a sure refusal gives the money back.
+    await settle(env, spendId, !(e instanceof NotBilledError));
     throw e;
   }
 }
@@ -60,7 +61,8 @@ export async function contents(env: Env, urls: string[], maxCharacters: number) 
       image: r.image ?? null,
     }));
   } catch (e) {
-    await settle(env, spendId, false);
+    // A timeout or an answer that cannot be read may still be billed: only a sure refusal gives the money back.
+    await settle(env, spendId, !(e instanceof NotBilledError));
     throw e;
   }
 }

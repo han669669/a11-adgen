@@ -105,6 +105,26 @@ describe("render check", () => {
 });
 
 describe("render submit", () => {
+  const input = { batch: "b", idea: "i", kind: "draft" as const, prompt: "p".repeat(40), referenceUrls: ["https://a/1.jpg"], numImages: 1 };
+  const spendOf = (env: Env) => (env.DB as unknown as { raw: DatabaseSync }).raw.prepare("SELECT status FROM spend").all();
+
+  it.each([
+    ["times out", async () => Promise.reject(new DOMException("The operation timed out.", "TimeoutError"))],
+    ["sends an answer that cannot be read", async () => new Response("<html>", { status: 200 })],
+  ])("keeps the spend when the submit %s (fal may still bill the job)", async (_what, fetchStub) => {
+    const { env } = setup();
+    vi.stubGlobal("fetch", fetchStub);
+    await expect(submit({ ...env, SPEND_CAP_USD: "5.00" } as Env, input)).rejects.toThrow();
+    expect(spendOf(env)).toEqual([{ status: "spent" }]);
+  });
+
+  it("gives the spend back when fal refuses the submit with an error status", async () => {
+    const { env } = setup();
+    vi.stubGlobal("fetch", async () => new Response("bad prompt", { status: 422 }));
+    await expect(submit({ ...env, SPEND_CAP_USD: "5.00" } as Env, input)).rejects.toThrow("fal submit failed: HTTP 422");
+    expect(spendOf(env)).toEqual([{ status: "released" }]);
+  });
+
   it("says that fal accepted the job when the render row cannot be saved, and keeps the spend", async () => {
     const { env } = setup();
     const raw = (env.DB as unknown as { raw: DatabaseSync }).raw;

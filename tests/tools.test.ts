@@ -101,6 +101,19 @@ describe("tools without a test elsewhere", () => {
     const rows = raw.prepare("SELECT status FROM spend WHERE service = 'exa'").all() as { status: string }[];
     expect(rows.map((r) => r.status)).toEqual(["released"]);
   });
+
+  it.each([
+    ["times out", async () => Promise.reject(new DOMException("The operation timed out.", "TimeoutError"))],
+    ["sends an answer that cannot be read", async () => new Response("<html>", { status: 200 })],
+  ])("exa_search keeps the spend when Exa %s (Exa may still bill the call)", async (_what, fetchStub) => {
+    const { env, raw } = makeEnv();
+    vi.stubGlobal("fetch", fetchStub);
+    await expect(run(env, "exa_search", { query: "barley tea" })).rejects.toThrow();
+    expect(raw.prepare("SELECT status FROM spend WHERE service = 'exa'").all()).toEqual([{ status: "spent" }]);
+    vi.stubGlobal("fetch", fetchStub);
+    await expect(run(env, "exa_contents", { urls: ["https://r.example/t"] })).rejects.toThrow();
+    expect(raw.prepare("SELECT status FROM spend WHERE service = 'exa' AND kind = 'contents'").all()).toEqual([{ status: "spent" }]);
+  });
 });
 
 describe("tool coverage", () => {
