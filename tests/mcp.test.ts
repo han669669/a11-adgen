@@ -175,7 +175,8 @@ describe("mcp handler", () => {
     }
     expect(text("final")).toContain("the critic subagent ranks them blind in a fresh context");
     for (const name of ["gold-test", "learn"]) expect(text(name)).toContain("Run it in the critic subagent in a fresh context, never in the session that wants the change");
-    expect(text("gold-test")).toContain("does not read docs/taste-seed.md §1 or docs/marks.md");
+    for (const name of ["gold-test", "learn"]) expect(text(name)).toContain("At no point of the run does it read docs/taste-seed.md §1, docs/marks.md or taste_log, even when AGENTS.md");
+    for (const name of ["batch", "redesign"]) expect(text(name)).toContain("read creative-playbook §2, docs/taste-seed.md §2 (the owner gate), canon_get and taste_log, then batch_get");
     // The critic judges: it has no paid tool and no tool that writes ideas, prompts or verdicts.
     const { readFileSync } = await import("node:fs");
     const critic = readFileSync(new URL("../plugin/agents/critic.md", import.meta.url), "utf8");

@@ -319,7 +319,7 @@ export const TOOLS: Tool[] = [
   {
     name: "ideas_save",
     description:
-      "Save ideas for a batch (the burst). Each idea = insight + visual idea + headline + funnel stage (format: tof, mof or bof). Read docs/creative-playbook.md first. Save the whole burst with picked false: the critic subagent picks 3 later with ideas_update (1 tof, 1 mof, 1 bof). Returns the idea ids (use them as render_submit's idea).",
+      "Save ideas for a batch (the burst). Each idea = insight + visual idea + headline + funnel stage (format: tof, mof or bof). Read docs/creative-playbook.md first. Every idea is saved not picked (this tool takes no pick): the critic subagent picks 3 later with ideas_update (1 tof, 1 mof, 1 bof). Returns the idea ids (use them as render_submit's idea).",
     inputSchema: {
       type: "object",
       properties: {
@@ -348,7 +348,6 @@ export const TOOLS: Tool[] = [
                 },
                 additionalProperties: false,
               },
-              picked: { type: "boolean", default: false },
             },
             required: ["format", "insight", "visual", "headline"],
             additionalProperties: false,

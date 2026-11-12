@@ -503,9 +503,15 @@ describe("monthly spend cap", () => {
 describe("nested tool input", () => {
   const schema = TOOLS.find((t) => t.name === "ideas_save")!.inputSchema;
   const idea = { format: "tof", insight: "insight", visual: "visual", headline: "H" };
-  it("fills nested defaults and accepts a good list", () => {
-    const out = validate(schema, { batchId: "11111111-1111-1111-1111-111111111111", ideas: [idea] }) as any;
-    expect(out.ideas[0].picked).toBe(false);
+  it("fills nested defaults", () => {
+    const nested = { type: "object", properties: { list: { type: "array", items: { type: "object", properties: { on: { type: "boolean", default: false } } } } } } as const;
+    expect((validate(nested as any, { list: [{}] }) as any).list[0].on).toBe(false);
+  });
+  it("accepts a good list, and takes no pick: the critic picks later with ideas_update", () => {
+    expect((validate(schema, { batchId: "11111111-1111-1111-1111-111111111111", ideas: [idea] }) as any).ideas[0]).toEqual(idea);
+    expect(() => validate(schema, { batchId: "11111111-1111-1111-1111-111111111111", ideas: [{ ...idea, picked: true }] })).toThrow(
+      "Unknown argument: ideas[0].picked.",
+    );
   });
   it("refuses an unknown nested key with its path", () => {
     expect(() => validate(schema, { batchId: "11111111-1111-1111-1111-111111111111", ideas: [{ ...idea, colour: "red" }] })).toThrow(
@@ -524,8 +530,9 @@ describe("nested tool input", () => {
     );
   });
   it("refuses a wrong nested type", () => {
-    expect(() => validate(schema, { batchId: "11111111-1111-1111-1111-111111111111", ideas: [{ ...idea, picked: "yes" }] })).toThrow(
-      "ideas[0].picked must be true or false.",
+    const s3 = TOOLS.find((t) => t.name === "ideas_update")!.inputSchema;
+    expect(() => validate(s3, { updates: [{ id: "11111111-1111-1111-1111-111111111111", picked: "yes" }] })).toThrow(
+      "updates[0].picked must be true or false.",
     );
   });
 });
