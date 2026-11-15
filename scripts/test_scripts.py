@@ -29,6 +29,7 @@ box_print = load("box_print")
 product_lock = load("product_lock")
 food_grade = load("food_grade")
 headline = load("headline")
+photo_finish = load("photo_finish")
 
 
 def exit_message(fn, *args):
@@ -314,6 +315,72 @@ class Headline(Tmp):
 
     def test_a_leading_out_of_range_is_refused(self):
         self.assertIn("--leading must be", exit_message(self.run_, "--font", self.FONT, "--headline", "Hi", "--area", "0,0,1,1", "--leading", "0.3"))
+
+
+class PhotoFinish(Tmp):
+    def grey(self, v, size=(96, 128)):
+        return Image.fromarray(np.full((size[1], size[0], 3), v, np.uint8))
+
+    def test_strength_zero_changes_nothing(self):
+        rng = np.random.default_rng(3)
+        img = Image.fromarray(rng.integers(0, 256, (64, 48, 3), dtype=np.uint8))
+        out = np.asarray(photo_finish.finish(img, strength=0, seed=1)).astype(int)
+        self.assertLessEqual(int(np.abs(out - np.asarray(img).astype(int)).max()), 1)
+
+    def test_the_same_seed_gives_the_same_grain(self):
+        img = self.grey(128)
+        a = np.asarray(photo_finish.finish(img, seed=7))
+        b = np.asarray(photo_finish.finish(img, seed=7))
+        c = np.asarray(photo_finish.finish(img, seed=8))
+        self.assertTrue((a == b).all())
+        self.assertFalse((a == c).all())
+
+    def test_grain_is_stronger_in_the_midtones_than_in_deep_shadow(self):
+        only_grain = ("tone", "soften", "halation", "lens")
+        mid = np.asarray(photo_finish.finish(self.grey(128), skip=only_grain, seed=1).convert("L")).astype(float)
+        dark = np.asarray(photo_finish.finish(self.grey(8), skip=only_grain, seed=1).convert("L")).astype(float)
+        self.assertGreater(mid.std(), 0.5)
+        self.assertGreater(mid.std(), dark.std() * 1.8)
+
+    def test_tone_keeps_white_below_clipping_and_lifts_black(self):
+        tone_only = ("soften", "halation", "lens", "grain")
+        white = np.asarray(photo_finish.finish(self.grey(255), skip=tone_only))
+        black = np.asarray(photo_finish.finish(self.grey(0), skip=tone_only))
+        self.assertLess(int(white.max()), 252)
+        self.assertGreater(int(black.min()), 1)
+        grey = np.asarray(photo_finish.finish(self.grey(100), skip=tone_only)).astype(int)
+        self.assertLessEqual(int(np.ptp(grey, axis=2).max()), 1)  # a grey stays grey
+
+    def test_vignette_darkens_the_corners_not_the_centre(self):
+        out = np.asarray(photo_finish.finish(self.grey(180, (200, 250)), skip=("tone", "soften", "halation", "grain")).convert("L")).astype(int)
+        self.assertLess(out[2, 2], out[125, 100] - 5)
+        self.assertGreaterEqual(out[125, 100], 179)
+
+    def test_a_sharp_box_is_not_softened(self):
+        a = np.full((128, 96, 3), 230, np.uint8)
+        a[:, 47:49] = 20  # a thin dark line top to bottom
+        img = Image.fromarray(a)
+        steps = ("tone", "halation", "lens", "grain")
+        big = {"soften_px": 24, "soften_mix": 1}  # sizes scale with the width: make the blur visible on a 96 px picture
+        soft = np.asarray(photo_finish.finish(img, skip=steps, params=big).convert("L")).astype(int)
+        kept = np.asarray(photo_finish.finish(img, skip=steps, sharp_boxes=[(0.3, 0.3, 0.7, 0.7)], params=big).convert("L")).astype(int)
+        self.assertGreater(soft[64, 48], kept[64, 48] + 10)  # the line got lighter (softer) without the box
+        self.assertLessEqual(abs(kept[64, 48] - 20), 2)
+
+    def test_the_command_writes_a_jpeg_of_the_same_size(self):
+        src = self.save("in.png", np.full((80, 64, 3), 150))
+        out = os.path.join(self.dir.name, "out.jpg")
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            photo_finish.main(["--in", src, "--out", out, "--seed", "1", "--sharp", "0.3,0.0,0.7,0.2"])
+        self.assertEqual(Image.open(out).size, (64, 80))
+        self.assertIn("sharp 1", buf.getvalue())
+
+    def test_bad_input_stops_with_a_clear_message(self):
+        out = os.path.join(self.dir.name, "o.jpg")
+        self.assertIn("no picture at", exit_message(photo_finish.main, ["--in", "/no/such.jpg", "--out", out]))
+        src = self.save("in.png", np.full((8, 8, 3), 150))
+        self.assertIn("--sharp needs", exit_message(photo_finish.main, ["--in", src, "--out", out, "--sharp", "0.5,0.5,0.2,0.9"]))
+        self.assertIn("--strength must be", exit_message(photo_finish.main, ["--in", src, "--out", out, "--strength", "3"]))
 
 
 if __name__ == "__main__":
