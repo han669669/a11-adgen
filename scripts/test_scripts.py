@@ -96,6 +96,19 @@ class BoxPrint(Tmp):
         self.assertEqual(H.shape, (3, 3))
 
 
+    def test_the_plain_face_next_to_a_pale_backdrop_is_not_cleaned(self):
+        # W46 Sonnet run: the face beside the box edge read as print (dark against the backdrop) and was inpainted pale.
+        g = np.full((120, 200), 170, np.float32)  # the box face
+        g[:, 150:] = 240  # a pale backdrop right of the box edge
+        g[58:64, 100:140] = 60  # the render's own print, ending 10 px before the edge
+        amap = np.zeros_like(g)
+        amap[58:64, 100:140] = 1
+        dark, kill = box_print.print_mask(g, amap)
+        self.assertTrue(dark[60, 120] > 0, "the print must be found")
+        self.assertEqual(int(kill[75, 146]), 0, "the plain face next to the edge must stay")
+        self.assertEqual(int(dark[50, 145]), 0)
+
+
 class ProductLock(Tmp):
     def setUp(self):
         super().setUp()
@@ -230,6 +243,26 @@ class Headline(Tmp):
     def test_the_fallback_family_is_used_and_named(self):
         out, msg = self.family_run("--family", "No Such Brand Font", "--fallback", "DejaVu Sans")
         self.assertIn("FALLBACK: the headline font 'No Such Brand Font'", msg)
+
+    def test_capitals_forced_breaks_and_an_accent_word(self):
+        out, msg = self.run_("--font", self.FONT, "--headline", "Wait, there’s | ten?", "--case", "upper", "--leading", "0.97", "--align", "center",
+                             "--accent", "ten?", "--accent-color", "FA363A", "--area", "0.05,0.2,0.95,0.6")
+        self.assertNotIn("in 1 line(s)", msg)  # the " | " forces a break
+        a = np.asarray(Image.open(out).convert("RGB")).astype(int)
+        red = (a[..., 0] > 180) & (a[..., 1] < 110) & (a[..., 2] < 110)
+        self.assertTrue(red.any(), "the accent word was not set in the accent colour")
+        ys, _ = np.where(red)
+        dark = (a.sum(2) < 150)
+        dys, _ = np.where(dark)
+        self.assertGreater(ys.min(), dys.min(), "the accent word belongs on the second line")
+        self.assertIn("text top 20.0%", msg)
+
+    def test_an_accent_needs_a_colour_and_a_word_of_the_headline(self):
+        self.assertIn("--accent needs --accent-color", exit_message(self.run_, "--font", self.FONT, "--headline", "Hi there", "--area", "0,0,1,1", "--accent", "hi"))
+        self.assertIn("not in the headline", exit_message(self.run_, "--font", self.FONT, "--headline", "Hi there", "--area", "0,0,1,1", "--accent", "bye", "--accent-color", "FF0000"))
+
+    def test_a_leading_out_of_range_is_refused(self):
+        self.assertIn("--leading must be", exit_message(self.run_, "--font", self.FONT, "--headline", "Hi", "--area", "0,0,1,1", "--leading", "0.3"))
 
 
 if __name__ == "__main__":

@@ -282,6 +282,24 @@ def refine(H, box, gF, pg, pad=40):
     return corr @ H
 
 
+INK_REL = 0.82  # a print pixel is darker than this share of the plain box face's grey
+
+
+def print_mask(gF, amap):
+    """(dark, kill): the render's own print near the new ink, and the area to clean before the ink goes back.
+    darkness() compares each pixel with a wide closing. Next to a box edge on a pale backdrop that closing takes the backdrop's
+    brightness, so the plain face there reads as dark and was inpainted into a pale smear (W46 Sonnet run, 15-11-2026: mof1, bof1
+    and bof3, at the end of "ASIAN-INSPIRED CHEESECAKES"). A print pixel must also be clearly darker than the plain face itself."""
+    dF, _ = darkness(gF)
+    ink = (amap > 0.02).astype(np.uint8) * 255
+    near = cv2.dilate(ink, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25)))
+    plain = (near > 0) & (ink == 0)
+    face = float(np.median(gF[plain])) if plain.any() else float(np.median(gF))
+    dark = cv2.bitwise_and((((dF > 14) & (gF < INK_REL * face)).astype(np.uint8) * 255), near)
+    kill = cv2.dilate(np.maximum(dark, ink), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
+    return dark, kill
+
+
 def run(cfg, src, dst, debug=None):
     bx = Box(cfg)
     F = cv2.imread(src)
@@ -314,10 +332,7 @@ def run(cfg, src, dst, debug=None):
             if abs(got - want) > 1.0:
                 sys.exit(f"The typeset stems tilt {got:.1f} degrees, not the packshot's {want:.1f}. Check the band and the block box. Nothing was written.")
         amap = np.maximum(amap, a2)
-    dF, _ = darkness(gF)
-    near = cv2.dilate((amap > 0.02).astype(np.uint8) * 255, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25)))
-    dark = cv2.bitwise_and(((dF > 14).astype(np.uint8) * 255), near)
-    kill = cv2.dilate(np.maximum(dark, (amap > 0.02).astype(np.uint8) * 255), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
+    dark, kill = print_mask(gF, amap)
     clean = cv2.inpaint(F, kill, 7, cv2.INPAINT_TELEA).astype(np.float32)
     if not (dark > 0).any():
         sys.exit("No print found on the render near the registered blocks. Check the config boxes and the render.")
@@ -329,7 +344,7 @@ def run(cfg, src, dst, debug=None):
     if not cv2.imwrite(dst, res, [cv2.IMWRITE_JPEG_QUALITY, 95]):
         sys.exit(f"Cannot write the output: {dst}")
     if debug:
-        cv2.imwrite(debug, np.hstack([cv2.cvtColor(near, cv2.COLOR_GRAY2BGR), cv2.cvtColor(kill, cv2.COLOR_GRAY2BGR)]))
+        cv2.imwrite(debug, np.hstack([cv2.cvtColor(dark, cv2.COLOR_GRAY2BGR), cv2.cvtColor(kill, cv2.COLOR_GRAY2BGR)]))
     print(dst, "ink BGR", inkc.round(1).tolist())
 
 

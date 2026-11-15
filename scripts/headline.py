@@ -8,6 +8,20 @@ python3 scripts/headline.py --in draft.jpg --out draft-text.jpg --family "Oswald
     --headline "S$58.90 ends the debate." --subline "Ten flavours, one cake." \
     --area 0.50,0.18,0.95,0.45 [--wght 600] [--sub-wght 400] [--color 000000] [--align left]
 
+The display style that the owner approved (W47 v3 pack, owner 16-11-2026: the sentence-case
+SemiBold set "simply really really ugly and ill fitting"): the headline in capitals at the family's
+heaviest weight with tight leading, stacked in the empty side of the picture, and a bold subline:
+
+python3 scripts/headline.py ... --wght 700 --sub-wght 700 --case upper --leading 0.98 \
+    --area 0.50,0.17,0.95,0.43 --accent "TEN?" --accent-color FA363A
+
+--case upper sets the headline in capitals (--sub-case upper, the subline). --leading is the step
+between headline lines, x the font size (capitals have no descenders, so 0.95 to 1.0 is right; keep
+1.05 for mixed case). --align center centres each line in the area. --accent names one or more
+headline words (matched without case) that are set in --accent-color, the kit's accent colour.
+A " | " in the headline forces a line break there (the words stay the approved words), so a line can
+end on the idea, as in "WAIT, | THERE'S TEN?".
+
 The font, for every brand: give --family with the brand kit's font name (brand_get kit.fonts; the
 first one is the headline font unless the kit notes say otherwise). The script gets that family at
 the weight from Google Fonts and keeps the file in --cache. A brand font that is not on Google Fonts
@@ -106,9 +120,14 @@ def non_latin(text):
 
 
 def wrap(draw, words, font, width):
-    """Greedy wrap; None when one word alone is wider than the box."""
+    """Greedy wrap; None when one word alone is wider than the box. A "|" word forces a line break."""
     lines, cur = [], ""
     for w in words:
+        if w == "|":
+            if cur:
+                lines.append(cur)
+            cur = ""
+            continue
         test = f"{cur} {w}".strip()
         if draw.textlength(test, font=font) <= width:
             cur = test
@@ -117,19 +136,28 @@ def wrap(draw, words, font, width):
         else:
             lines.append(cur)
             cur = w
-    lines.append(cur)
+    if cur:
+        lines.append(cur)
     return lines
 
 
-def layout(draw, path, sub_path, headline, subline, box_w, box_h, wght, sub_wght, sub_ratio, gap):
-    """The largest size that fits: (head font, head lines, sub font, sub lines, line height, sub height)."""
+def cap_height(font):
+    """Height of a capital above the baseline, in pixels."""
+    box = font.getbbox("H", anchor="ls")
+    return -box[1]
+
+
+def layout(draw, path, sub_path, headline, subline, box_w, box_h, wght, sub_wght, sub_ratio, gap, leading=1.05, caps=False):
+    """The largest size that fits: (head font, head lines, sub font, sub lines, line height, sub height).
+    With caps, the block is measured from the top of the capitals (no space is kept for accents or ascenders)."""
     for size in range(int(box_h), 7, -1):
         hf = load_font(path, size, wght)
         hl = wrap(draw, headline.split(), hf, box_w)
         if not hl or len(hl) > MAX_LINES:
             continue
-        lh = int(size * 1.05)
-        total, sf, sl, sh = lh * len(hl), None, [], 0
+        lh = int(size * leading)
+        first = cap_height(hf) if caps else int(size * 1.05)
+        total, sf, sl, sh = first + lh * (len(hl) - 1), None, [], 0
         if subline:
             sf = load_font(sub_path, max(8, int(size * sub_ratio)), sub_wght)
             sl = wrap(draw, subline.split(), sf, box_w)
@@ -162,16 +190,34 @@ def main(argv=None):
     p.add_argument("--sub-ratio", type=float, default=0.42)
     p.add_argument("--gap", type=float, default=0.25, help="space above the subline, x headline size")
     p.add_argument("--color", default="000000")
-    p.add_argument("--align", choices=["left", "right"], default="left")
+    p.add_argument("--align", choices=["left", "right", "center"], default="left")
+    p.add_argument("--case", choices=["asis", "upper"], default="asis", help="upper: the headline in capitals")
+    p.add_argument("--sub-case", choices=["asis", "upper"], default="asis", help="upper: the subline in capitals")
+    p.add_argument("--leading", type=float, default=1.05, help="step between headline lines, x the font size")
+    p.add_argument("--accent", default="", help="headline words set in --accent-color (matched without case)")
+    p.add_argument("--accent-color", default="", help="the kit's accent colour, hex")
     a = p.parse_args(argv)
 
-    if not a.headline.strip():
+    a.headline = a.headline.replace("|", " | ")
+    if not a.headline.replace("|", "").strip():
         sys.exit("the headline is empty")
     bad = non_latin(a.headline + a.subline)
     if bad:
         sys.exit(f"only Latin-script words are supported (found {bad!r}): set non-Latin or right-to-left copy another way and tell the owner")
     if not (math.isfinite(a.gap) and a.gap >= 0 and math.isfinite(a.sub_ratio) and a.sub_ratio > 0):
         sys.exit("--gap must be 0 or more and --sub-ratio more than 0")
+    if not (math.isfinite(a.leading) and 0.8 <= a.leading <= 2):
+        sys.exit("--leading must be from 0.8 to 2")
+    if a.case == "upper":
+        a.headline = a.headline.upper()
+    if a.sub_case == "upper":
+        a.subline = a.subline.upper()
+    accent = {w.casefold() for w in a.accent.split()}
+    if accent and not a.accent_color:
+        sys.exit("--accent needs --accent-color")
+    missing = accent - {w.casefold() for w in a.headline.split() if w != "|"}
+    if missing:
+        sys.exit(f"--accent words not in the headline: {' '.join(sorted(missing))}")
     try:
         x0, y0, x1, y1 = (float(v) for v in a.area.split(","))
     except ValueError:
@@ -182,6 +228,10 @@ def main(argv=None):
         color = tuple(int(a.color.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
     except ValueError:
         sys.exit(f"--color must be a hex colour such as 000000, got {a.color!r}")
+    try:
+        accent_color = tuple(int(a.accent_color.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)) if accent else color
+    except ValueError:
+        sys.exit(f"--accent-color must be a hex colour such as FA363A, got {a.accent_color!r}")
 
     head_path, note = resolve(a.font, a.family, a.fallback, a.wght, a.cache, "headline")
     if a.sub_font or a.sub_family:
@@ -198,20 +248,31 @@ def main(argv=None):
     W, H = im.size
     bx0, by0, bw, bh = x0 * W, y0 * H, (x1 - x0) * W, (y1 - y0) * H
     draw = ImageDraw.Draw(im)
-    fit = layout(draw, head_path, sub_path, a.headline, a.subline, bw, bh, a.wght, a.sub_wght, a.sub_ratio, a.gap)
+    caps = a.case == "upper"
+    fit = layout(draw, head_path, sub_path, a.headline, a.subline, bw, bh, a.wght, a.sub_wght, a.sub_ratio, a.gap, a.leading, caps)
     if fit is None:
         sys.exit(f"the words do not fit the area {a.area} in at most {MAX_LINES} headline lines and 2 subline lines; make the area larger or the copy shorter")
     hf, hl, sf, sl, lh, sh = fit
 
-    def put(lines, font, step, y):
+    def put(lines, font, step, y, anchor="la", marked=frozenset()):
         for line in lines:
-            x = bx0 if a.align == "left" else bx0 + bw - draw.textlength(line, font=font)
-            draw.text((x, y), line, font=font, fill=color, anchor="la")
+            w = draw.textlength(line, font=font)
+            x = bx0 if a.align == "left" else bx0 + bw - w if a.align == "right" else bx0 + (bw - w) / 2
+            if marked:  # word by word, so the accent words take their own colour; the spaces keep the line's own width
+                words = line.split(" ")
+                for i, word in enumerate(words):
+                    draw.text((x, y), word, font=font, fill=accent_color if word.casefold() in marked else color, anchor=anchor)
+                    x += draw.textlength(word + (" " if i < len(words) - 1 else ""), font=font)
+            else:
+                draw.text((x, y), line, font=font, fill=color, anchor=anchor)
             y += step
         return y
 
     top = by0
-    y = put(hl, hf, lh, top)
+    if caps:  # baselines: the first one a cap height under the area top
+        y = put(hl, hf, lh, top + cap_height(hf), "ls", accent) - lh
+    else:
+        y = put(hl, hf, lh, top, "la", accent)
     if sl:
         y = put(sl, sf, sh, y + int(hf.size * a.gap))
     im.save(a.out, quality=95)
