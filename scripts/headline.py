@@ -12,8 +12,8 @@ The display style that the owner approved (W47 v3 pack, owner 16-11-2026: the se
 SemiBold set "simply really really ugly and ill fitting"): the headline in capitals at the family's
 heaviest weight with tight leading, stacked in the empty side of the picture, and a bold subline:
 
-python3 scripts/headline.py ... --wght 700 --sub-wght 700 --case upper --leading 0.98 \
-    --area 0.50,0.17,0.95,0.43 --accent "TEN?" --accent-color FA363A
+python3 scripts/headline.py ... --wght 700 --sub-wght 600 --case upper --leading 1.0 \
+    --area 0.50,0.17,0.95,0.43 --accent "TEN?" --accent-color DD4430
 
 --case upper sets the headline in capitals (--sub-case upper, the subline). --leading is the step
 between headline lines, x the font size (capitals have no descenders, so 0.95 to 1.0 is right; keep
@@ -141,22 +141,36 @@ def wrap(draw, words, font, width):
     return lines
 
 
-def cap_height(font):
-    """Height of a capital above the baseline, in pixels."""
-    box = font.getbbox("H", anchor="ls")
-    return -box[1]
+def cap_height(font, line="H"):
+    """Height above the baseline of the tallest glyph of the line (at least a capital H), in pixels: an accented
+    capital such as É reaches higher than H, so the block is measured from the real top of its first line."""
+    return max(-font.getbbox("H", anchor="ls")[1], -font.getbbox(line, anchor="ls")[1])
+
+
+def stub(lines):
+    """True when a line of a stacked headline is one short word ("FOR", "A"): a stub line reads as a mistake."""
+    return len(lines) > 1 and any(len(re.sub(r"[^\w$]", "", ln)) <= 3 and " " not in ln for ln in lines)
 
 
 def layout(draw, path, sub_path, headline, subline, box_w, box_h, wght, sub_wght, sub_ratio, gap, leading=1.05, caps=False):
     """The largest size that fits: (head font, head lines, sub font, sub lines, line height, sub height).
-    With caps, the block is measured from the top of the capitals (no space is kept for accents or ascenders)."""
+    With caps, the block is measured from the top of the capitals (no space is kept for accents or ascenders).
+    A size whose wrap leaves a stub line is skipped when a smaller size avoids it."""
+    for avoid_stub in (True, False):
+        fit = _layout(draw, path, sub_path, headline, subline, box_w, box_h, wght, sub_wght, sub_ratio, gap, leading, caps, avoid_stub)
+        if fit:
+            return fit
+    return None
+
+
+def _layout(draw, path, sub_path, headline, subline, box_w, box_h, wght, sub_wght, sub_ratio, gap, leading, caps, avoid_stub):
     for size in range(int(box_h), 7, -1):
         hf = load_font(path, size, wght)
         hl = wrap(draw, headline.split(), hf, box_w)
-        if not hl or len(hl) > MAX_LINES:
+        if not hl or len(hl) > MAX_LINES or (avoid_stub and stub(hl)):
             continue
         lh = int(size * leading)
-        first = cap_height(hf) if caps else int(size * 1.05)
+        first = cap_height(hf, hl[0]) if caps else lh
         total, sf, sl, sh = first + lh * (len(hl) - 1), None, [], 0
         if subline:
             sf = load_font(sub_path, max(8, int(size * sub_ratio)), sub_wght)
@@ -196,6 +210,9 @@ def main(argv=None):
     p.add_argument("--leading", type=float, default=1.05, help="step between headline lines, x the font size")
     p.add_argument("--accent", default="", help="headline words set in --accent-color (matched without case)")
     p.add_argument("--accent-color", default="", help="the kit's accent colour, hex")
+    p.add_argument("--logo", help="drafts only: the kit logo (PNG) drawn at the top centre as a preview; compose_final places the real one on finals")
+    p.add_argument("--logo-width", type=float, default=0.25, help="logo width, x the picture width")
+    p.add_argument("--logo-top", type=float, default=0.045, help="logo top, x the picture height")
     a = p.parse_args(argv)
 
     a.headline = a.headline.replace("|", " | ")
@@ -228,10 +245,9 @@ def main(argv=None):
         color = tuple(int(a.color.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
     except ValueError:
         sys.exit(f"--color must be a hex colour such as 000000, got {a.color!r}")
-    try:
-        accent_color = tuple(int(a.accent_color.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)) if accent else color
-    except ValueError:
-        sys.exit(f"--accent-color must be a hex colour such as FA363A, got {a.accent_color!r}")
+    if accent and not re.fullmatch(r"#?[0-9A-Fa-f]{6}", a.accent_color):
+        sys.exit(f"--accent-color must be a hex colour such as DD4430, got {a.accent_color!r}")
+    accent_color = tuple(int(a.accent_color.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)) if accent else color
 
     head_path, note = resolve(a.font, a.family, a.fallback, a.wght, a.cache, "headline")
     if a.sub_font or a.sub_family:
@@ -270,11 +286,24 @@ def main(argv=None):
 
     top = by0
     if caps:  # baselines: the first one a cap height under the area top
-        y = put(hl, hf, lh, top + cap_height(hf), "ls", accent) - lh
+        y = put(hl, hf, lh, top + cap_height(hf, hl[0]), "ls", accent) - lh
     else:
         y = put(hl, hf, lh, top, "la", accent)
     if sl:
         y = put(sl, sf, sh, y + int(hf.size * a.gap))
+    if a.logo:
+        if not (0 < a.logo_width <= 1 and 0 <= a.logo_top < 1):
+            sys.exit("--logo-width must be more than 0 and at most 1, --logo-top from 0 to less than 1")
+        try:
+            logo = Image.open(a.logo, formats=["PNG"]).convert("RGBA")
+        except OSError as e:
+            sys.exit(f"cannot read the logo {a.logo}: {e}")
+        lw = max(1, int(W * a.logo_width))
+        logo = logo.resize((lw, max(1, round(logo.height * lw / logo.width))), Image.LANCZOS)
+        ly = int(H * a.logo_top)
+        im.paste(logo, ((W - lw) // 2, ly), logo)
+        if ly + logo.height > top:
+            print(f"WARNING: the logo bottom ({100 * (ly + logo.height) / H:.1f}%) is under the text top ({100 * top / H:.1f}%): move the area down")
     im.save(a.out, quality=95)
     for n in (note, sub_note):
         if n:
