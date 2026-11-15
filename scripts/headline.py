@@ -285,13 +285,8 @@ def main(argv=None):
         return y
 
     top = by0
-    if caps:  # baselines: the first one a cap height under the area top
-        y = put(hl, hf, lh, top + cap_height(hf, hl[0]), "ls", accent) - lh
-    else:
-        y = put(hl, hf, lh, top, "la", accent)
-    if sl:
-        y = put(sl, sf, sh, y + int(hf.size * a.gap))
-    if a.logo:
+    logo = None
+    if a.logo:  # checked before any drawing: a logo that reaches the text stops the script
         if not (0 < a.logo_width <= 1 and 0 <= a.logo_top < 1):
             sys.exit("--logo-width must be more than 0 and at most 1, --logo-top from 0 to less than 1")
         try:
@@ -301,9 +296,16 @@ def main(argv=None):
         lw = max(1, int(W * a.logo_width))
         logo = logo.resize((lw, max(1, round(logo.height * lw / logo.width))), Image.LANCZOS)
         ly = int(H * a.logo_top)
-        im.paste(logo, ((W - lw) // 2, ly), logo)
         if ly + logo.height > top:
-            print(f"WARNING: the logo bottom ({100 * (ly + logo.height) / H:.1f}%) is under the text top ({100 * top / H:.1f}%): move the area down")
+            sys.exit(f"the logo bottom ({100 * (ly + logo.height) / H:.1f}%) is under the text top ({100 * top / H:.1f}%): move the area down or make the logo smaller")
+    if caps:  # baselines: the first one a cap height under the area top
+        y = put(hl, hf, lh, top + cap_height(hf, hl[0]), "ls", accent) - lh
+    else:
+        y = put(hl, hf, lh, top, "la", accent)
+    if sl:
+        y = put(sl, sf, sh, y + int(hf.size * a.gap))
+    if logo:
+        im.paste(logo, ((W - logo.width) // 2, ly), logo)
     im.save(a.out, quality=95)
     for n in (note, sub_note):
         if n:

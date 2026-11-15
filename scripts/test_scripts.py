@@ -65,6 +65,11 @@ class BoxPrint(Tmp):
     def box(self, **block):
         return box_print.Box({"packshot": self.packshot(), "face": [0, 0, 200, 120], "blocks": [{"box": [40, 40, 160, 80], **block}]})
 
+    def test_an_ink_rel_out_of_range_is_refused(self):
+        for bad in (0, 1.5, -0.2, float("nan"), "0.8", True):
+            self.assertIn("ink_rel must be", exit_message(lambda: self.box(ink_rel=bad)))
+        self.box(ink_rel=1)  # the top of the range passes
+
     def test_xmin_left_of_the_crop_cuts_nothing(self):
         # P1: the crop starts at x 28 (40 - 12). An xmin of 5 is left of it and must keep the whole block.
         plain, _ = self.box().ink_alpha(0)
@@ -300,6 +305,12 @@ class Headline(Tmp):
         self.assertLess(int(a[int(500 * 0.045) + 5, 200]), 60)  # the logo's middle
         self.assertGreater(int(a[int(500 * 0.045) + 5, 20]), 180)  # the backdrop beside it
         self.assertNotIn("WARNING", msg)
+
+    def test_a_logo_that_reaches_the_text_is_refused_before_drawing(self):
+        logo = os.path.join(self.dir.name, "logo.png")
+        Image.new("RGBA", (100, 100), (0, 0, 0, 255)).save(logo)
+        msg = exit_message(self.run_, "--font", self.FONT, "--headline", "Hi", "--area", "0.1,0.1,0.9,0.5", "--logo", logo, "--logo-width", "0.5")
+        self.assertIn("the logo bottom", msg)
 
     def test_a_leading_out_of_range_is_refused(self):
         self.assertIn("--leading must be", exit_message(self.run_, "--font", self.FONT, "--headline", "Hi", "--area", "0,0,1,1", "--leading", "0.3"))

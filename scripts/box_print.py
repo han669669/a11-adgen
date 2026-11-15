@@ -35,6 +35,7 @@ The config is one JSON file per product (keep it next to the brand's kit notes):
 """
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -72,6 +73,9 @@ class Box:
         for i, b in enumerate(self.blocks):
             if "typeset" in b and "band" not in b:
                 sys.exit(f"Block {i} has typeset but no band. A typeset block needs band.")
+            r = b.get("ink_rel")
+            if r is not None and not (isinstance(r, (int, float)) and not isinstance(r, bool) and math.isfinite(r) and 0 < r <= 1):
+                sys.exit(f"Block {i} has ink_rel {r!r}. ink_rel must be a number more than 0 and at most 1.")
 
     def register(self, F):
         """Homography from the packshot to the render, from SIFT matches on the printed face only."""
