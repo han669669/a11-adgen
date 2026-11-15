@@ -22,6 +22,8 @@ The config is one JSON file per product (keep it next to the brand's kit notes):
   blocks     a list of print blocks, each with:
     box      x0,y0,x1,y1 of the block in the packshot (pixels)
     thr      [lo, hi, blur]: the ink threshold. Default [0.40, 0.60, 0.6]. Condensed caps need a tighter cut: [0.50, 0.66, 0.42]
+    ink_rel  (optional) the render's old print is cleaned only where it is darker than this share of the block's plain face grey.
+             Default 0.82. Raise it (for example 0.9) for faint print whose smear is left under the new ink
     xmin     (optional) ignore ink left of this packshot x (the box's own edge line)
     band     [[x,y],[x,y],half_width]: the centre line of a line of text, so a box edge under it is not read as ink.
              Optional, but required when the block has typeset
@@ -33,6 +35,7 @@ The config is one JSON file per product (keep it next to the brand's kit notes):
 """
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -70,6 +73,9 @@ class Box:
         for i, b in enumerate(self.blocks):
             if "typeset" in b and "band" not in b:
                 sys.exit(f"Block {i} has typeset but no band. A typeset block needs band.")
+            r = b.get("ink_rel")
+            if r is not None and not (isinstance(r, (int, float)) and not isinstance(r, bool) and math.isfinite(r) and 0 < r <= 1):
+                sys.exit(f"Block {i} has ink_rel {r!r}. ink_rel must be a number more than 0 and at most 1.")
 
     def register(self, F):
         """Homography from the packshot to the render, from SIFT matches on the printed face only."""
@@ -282,6 +288,32 @@ def refine(H, box, gF, pg, pad=40):
     return corr @ H
 
 
+INK_REL = 0.82  # default: a print pixel is darker than this share of the plain box face's grey (block key "ink_rel")
+
+
+def print_mask(gF, amaps, rels=None):
+    """(dark, kill): the render's own print near the new ink, and the area to clean before the ink goes back.
+    amaps holds one ink map per print block, rels the block's ink_rel (default INK_REL).
+    darkness() compares each pixel with a wide closing. Next to a box edge on a pale backdrop that closing takes the backdrop's
+    brightness, so the plain face there reads as dark and was inpainted into a pale smear (W46 Sonnet run, 15-11-2026: mof1, bof1
+    and bof3, at the end of "ASIAN-INSPIRED CHEESECAKES"). A print pixel must also be clearly darker than the plain face of its own
+    block (each block has its own face grey, so a block in shade is judged against its own face)."""
+    dF, _ = darkness(gF)
+    se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25))
+    dark = np.zeros(gF.shape, np.uint8)
+    ink_all = np.zeros(gF.shape, np.uint8)
+    for j, amap in enumerate(amaps):
+        rel = INK_REL if rels is None or rels[j] is None else rels[j]
+        ink = (amap > 0.02).astype(np.uint8) * 255
+        near = cv2.dilate(ink, se)
+        plain = (near > 0) & (ink == 0)
+        face = float(np.median(gF[plain])) if plain.any() else float(np.median(gF))
+        dark = np.maximum(dark, cv2.bitwise_and((((dF > 14) & (gF < rel * face)).astype(np.uint8) * 255), near))
+        ink_all = np.maximum(ink_all, ink)
+    kill = cv2.dilate(np.maximum(dark, ink_all), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
+    return dark, kill
+
+
 def run(cfg, src, dst, debug=None):
     bx = Box(cfg)
     F = cv2.imread(src)
@@ -294,6 +326,7 @@ def run(cfg, src, dst, debug=None):
     gF = cv2.cvtColor(F, cv2.COLOR_BGR2GRAY).astype(np.float32)
     pg = cv2.cvtColor(bx.pack, cv2.COLOR_BGR2GRAY).astype(np.float32)
     amap = np.zeros((h, w), np.float32)
+    amaps = []
     for i, b in enumerate(bx.blocks):
         H = refine(H0, b["box"], gF, pg)
         a, (ox, oy) = bx.ink_alpha(i)
@@ -314,10 +347,8 @@ def run(cfg, src, dst, debug=None):
             if abs(got - want) > 1.0:
                 sys.exit(f"The typeset stems tilt {got:.1f} degrees, not the packshot's {want:.1f}. Check the band and the block box. Nothing was written.")
         amap = np.maximum(amap, a2)
-    dF, _ = darkness(gF)
-    near = cv2.dilate((amap > 0.02).astype(np.uint8) * 255, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25)))
-    dark = cv2.bitwise_and(((dF > 14).astype(np.uint8) * 255), near)
-    kill = cv2.dilate(np.maximum(dark, (amap > 0.02).astype(np.uint8) * 255), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
+        amaps.append(a2)
+    dark, kill = print_mask(gF, amaps, [b.get("ink_rel") for b in bx.blocks])
     clean = cv2.inpaint(F, kill, 7, cv2.INPAINT_TELEA).astype(np.float32)
     if not (dark > 0).any():
         sys.exit("No print found on the render near the registered blocks. Check the config boxes and the render.")
@@ -329,7 +360,7 @@ def run(cfg, src, dst, debug=None):
     if not cv2.imwrite(dst, res, [cv2.IMWRITE_JPEG_QUALITY, 95]):
         sys.exit(f"Cannot write the output: {dst}")
     if debug:
-        cv2.imwrite(debug, np.hstack([cv2.cvtColor(near, cv2.COLOR_GRAY2BGR), cv2.cvtColor(kill, cv2.COLOR_GRAY2BGR)]))
+        cv2.imwrite(debug, np.hstack([cv2.cvtColor(dark, cv2.COLOR_GRAY2BGR), cv2.cvtColor(kill, cv2.COLOR_GRAY2BGR)]))
     print(dst, "ink BGR", inkc.round(1).tolist())
 
 

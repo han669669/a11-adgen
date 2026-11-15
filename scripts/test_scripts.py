@@ -65,6 +65,11 @@ class BoxPrint(Tmp):
     def box(self, **block):
         return box_print.Box({"packshot": self.packshot(), "face": [0, 0, 200, 120], "blocks": [{"box": [40, 40, 160, 80], **block}]})
 
+    def test_an_ink_rel_out_of_range_is_refused(self):
+        for bad in (0, 1.5, -0.2, float("nan"), "0.8", True):
+            self.assertIn("ink_rel must be", exit_message(lambda: self.box(ink_rel=bad)))
+        self.box(ink_rel=1)  # the top of the range passes
+
     def test_xmin_left_of_the_crop_cuts_nothing(self):
         # P1: the crop starts at x 28 (40 - 12). An xmin of 5 is left of it and must keep the whole block.
         plain, _ = self.box().ink_alpha(0)
@@ -94,6 +99,34 @@ class BoxPrint(Tmp):
             H = box_print.refine(np.eye(3), [40, 40, 160, 80], flat, flat)
         self.assertIn("WARNING: block [40, 40, 160, 80]: the local fit is weak", out.getvalue())
         self.assertEqual(H.shape, (3, 3))
+
+
+    def test_the_plain_face_next_to_a_pale_backdrop_is_not_cleaned(self):
+        # W46 Sonnet run: the face beside the box edge read as print (dark against the backdrop) and was inpainted pale.
+        g = np.full((120, 200), 170, np.float32)  # the box face
+        g[:, 150:] = 240  # a pale backdrop right of the box edge
+        g[58:64, 100:140] = 60  # the render's own print, ending 10 px before the edge
+        amap = np.zeros_like(g)
+        amap[58:64, 100:140] = 1
+        dark, kill = box_print.print_mask(g, [amap])
+        self.assertTrue(dark[60, 120] > 0, "the print must be found")
+        self.assertEqual(int(kill[75, 146]), 0, "the plain face next to the edge must stay")
+        self.assertEqual(int(dark[50, 145]), 0)
+
+    def test_each_block_is_judged_against_its_own_face(self):
+        # Two blocks: one on a light face, one on a face in shade. Print in the shaded block is lighter than 0.82 of the
+        # light face but darker than 0.82 of its own face, so it must still be found.
+        g = np.full((120, 300), 200, np.float32)
+        g[:, 150:] = 110  # the face in shade
+        g[58:64, 40:100] = 60
+        g[58:64, 190:250] = 80
+        a1, a2 = np.zeros_like(g), np.zeros_like(g)
+        a1[58:64, 40:100] = 1
+        a2[58:64, 190:250] = 1
+        dark, _ = box_print.print_mask(g, [a1, a2])
+        self.assertTrue(dark[60, 70] > 0 and dark[60, 220] > 0)
+        dark, _ = box_print.print_mask(g, [a1, a2], [None, 0.5])  # a block's ink_rel overrides the default
+        self.assertEqual(int(dark[60, 220]), 0)
 
 
 class ProductLock(Tmp):
@@ -230,6 +263,57 @@ class Headline(Tmp):
     def test_the_fallback_family_is_used_and_named(self):
         out, msg = self.family_run("--family", "No Such Brand Font", "--fallback", "DejaVu Sans")
         self.assertIn("FALLBACK: the headline font 'No Such Brand Font'", msg)
+
+    def test_capitals_forced_breaks_and_an_accent_word(self):
+        out, msg = self.run_("--font", self.FONT, "--headline", "Wait, there’s | ten?", "--case", "upper", "--leading", "0.97", "--align", "center",
+                             "--accent", "ten?", "--accent-color", "FA363A", "--area", "0.05,0.2,0.95,0.6")
+        self.assertNotIn("in 1 line(s)", msg)  # the " | " forces a break
+        a = np.asarray(Image.open(out).convert("RGB")).astype(int)
+        red = (a[..., 0] > 180) & (a[..., 1] < 110) & (a[..., 2] < 110)
+        self.assertTrue(red.any(), "the accent word was not set in the accent colour")
+        ys, _ = np.where(red)
+        dark = (a.sum(2) < 150)
+        dys, _ = np.where(dark)
+        self.assertGreater(ys.min(), dys.min(), "the accent word belongs on the second line")
+        self.assertIn("text top 20.0%", msg)
+
+    def test_a_stub_line_is_avoided_when_a_smaller_size_fixes_it(self):
+        self.assertTrue(headline.stub(["10 FLAVOURS", "FOR", "S$58.90."]))
+        self.assertFalse(headline.stub(["CHOOSING", "IS THE", "HARD PART."]))
+        self.assertFalse(headline.stub(["HI"]))
+        out, msg = self.run_("--font", self.FONT, "--headline", "Ten flavours | for S$58.90.", "--case", "upper", "--area", "0.5,0.2,0.95,0.6")
+        self.assertIn("in 2 line(s)", msg)
+
+    def test_an_accent_needs_a_colour_and_a_word_of_the_headline(self):
+        self.assertIn("--accent needs --accent-color", exit_message(self.run_, "--font", self.FONT, "--headline", "Hi there", "--area", "0,0,1,1", "--accent", "hi"))
+        self.assertIn("not in the headline", exit_message(self.run_, "--font", self.FONT, "--headline", "Hi there", "--area", "0,0,1,1", "--accent", "bye", "--accent-color", "FF0000"))
+
+    def test_a_bad_accent_colour_is_refused(self):
+        self.assertIn("--accent-color must be a hex colour", exit_message(self.run_, "--font", self.FONT, "--headline", "Hi there", "--area", "0,0,1,1", "--accent", "hi", "--accent-color", "FF00000"))
+
+    def test_an_accented_capital_stays_inside_the_area(self):
+        out, msg = self.run_("--font", self.FONT, "--headline", "Élan", "--case", "upper", "--area", "0.1,0.3,0.9,0.5")
+        a = np.asarray(Image.open(out).convert("L"))
+        ys, _ = np.where(a < 100)
+        self.assertGreaterEqual(ys.min(), 0.3 * 500 - 2)
+
+    def test_the_logo_preview_is_drawn_at_the_top_centre(self):
+        logo = os.path.join(self.dir.name, "logo.png")
+        Image.new("RGBA", (100, 40), (0, 0, 0, 255)).save(logo)
+        out, msg = self.run_("--font", self.FONT, "--headline", "Hi", "--area", "0.1,0.3,0.9,0.5", "--logo", logo)
+        a = np.asarray(Image.open(out).convert("L"))
+        self.assertLess(int(a[int(500 * 0.045) + 5, 200]), 60)  # the logo's middle
+        self.assertGreater(int(a[int(500 * 0.045) + 5, 20]), 180)  # the backdrop beside it
+        self.assertNotIn("WARNING", msg)
+
+    def test_a_logo_that_reaches_the_text_is_refused_before_drawing(self):
+        logo = os.path.join(self.dir.name, "logo.png")
+        Image.new("RGBA", (100, 100), (0, 0, 0, 255)).save(logo)
+        msg = exit_message(self.run_, "--font", self.FONT, "--headline", "Hi", "--area", "0.1,0.1,0.9,0.5", "--logo", logo, "--logo-width", "0.5")
+        self.assertIn("the logo bottom", msg)
+
+    def test_a_leading_out_of_range_is_refused(self):
+        self.assertIn("--leading must be", exit_message(self.run_, "--font", self.FONT, "--headline", "Hi", "--area", "0,0,1,1", "--leading", "0.3"))
 
 
 if __name__ == "__main__":
