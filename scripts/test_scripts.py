@@ -162,6 +162,100 @@ class ProductLock(Tmp):
             product_lock.skeleton(a)
 
 
+class LayoutReprint(Tmp):
+    """layout places products from a plan; reprint fits the packshot face back onto a render made from it."""
+
+    def setUp(self):
+        super().setUp()
+        a = np.full((260, 160, 3), 245, np.uint8)        # pale backdrop
+        a[20:240, 30:130] = 232                           # the carton (box 30,20,130,240)
+        for y in (80, 120, 160):                          # the print: dark bars and a red badge on the face
+            a[y:y + 12, 45:115] = 25
+        a[200:225, 50:90] = (200, 40, 40)
+        self.pack = self.save("pack.png", a)
+        self.box, self.face = "30,20,130,240", "34,40,126,236"
+
+    def plan(self, **over):
+        import json
+        plan = {"size": [400, 500], "bg": "#B4A08C",
+                "shapes": [{"rect": [0, 0.8, 1, 1], "fill": "#8C6440"}],
+                "products": [{"cx": 0.28, "base": 0.8, "height": 0.4, "side": "up", "rot": -0.5},
+                             {"cx": 0.70, "base": 0.8, "height": 0.4, "side": "R", "rot": 1.0}]}
+        plan.update(over)
+        path = os.path.join(self.dir.name, f"plan{len(os.listdir(self.dir.name))}.json")
+        with open(path, "w") as f:
+            json.dump(plan, f)
+        return path
+
+    def ns(self, **kw):
+        base = dict(packshot=self.pack, box=self.box, alpha=None, plan=self.plan(), out=os.path.join(self.dir.name, "out.png"))
+        base.update(kw)
+        return types.SimpleNamespace(**base)
+
+    def rp(self, render, **kw):
+        a = dict(face=self.face, render=render, debug=None, min_score=0.8, search_scale=0.08, search_rot=1.5, search_px=70, light_px=14)
+        a.update(kw)
+        return self.ns(out=os.path.join(self.dir.name, "rp.png"), **a)
+
+    def test_layout_places_each_product_with_its_side(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            product_lock.layout(self.ns())
+        sk = np.asarray(Image.open(os.path.join(self.dir.name, "out.png")).convert("L")).astype(int)
+        self.assertGreater(sk[272:282, 100:120].mean() - sk[100:150, 15:45].mean(), 50, "the upright carton's pale paper over the backdrop")
+        self.assertLess(sk[300:400, 90:140].min(), 60, "the upright carton's dark print bars")
+        self.assertGreater(sk[440:460, 10:20].mean(), 80)
+        self.assertLess(abs(int(sk[480, 5]) - 0x6a), 25, "the floor shape under the products")
+
+    def test_reprint_restores_smeared_print_under_the_render_light(self):
+        import cv2
+        with contextlib.redirect_stdout(io.StringIO()):
+            product_lock.layout(self.ns())
+        sk = np.asarray(Image.open(os.path.join(self.dir.name, "out.png")).convert("RGB")).astype(np.float32)
+        light = np.linspace(0.75, 1.0, sk.shape[1])[None, :, None]   # a window light across the picture
+        ideal = sk * light
+        render = ideal.copy()
+        smear = cv2.GaussianBlur(render, (0, 0), 4)                  # the model smears the print; the carton edges stay
+        for (y0, y1, x0, x1) in ((230, 380, 85, 140), (320, 385, 190, 380)):
+            render[y0:y1, x0:x1] = smear[y0:y1, x0:x1]
+        rpath = self.save("render.png", render.clip(0, 255))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            product_lock.reprint(self.rp(rpath))
+        self.assertIn("real print on 2 of 2 products", out.getvalue())
+        got = np.asarray(Image.open(os.path.join(self.dir.name, "rp.png")).convert("RGB")).astype(np.float32)
+        for (y0, y1, x0, x1) in ((230, 380, 85, 140), (320, 385, 190, 380)):
+            before = np.abs(render[y0:y1, x0:x1] - ideal[y0:y1, x0:x1]).mean()
+            after = np.abs(got[y0:y1, x0:x1] - ideal[y0:y1, x0:x1]).mean()
+            self.assertLess(after, before * 0.5, f"print in {(y0, y1, x0, x1)} is not restored: {before:.1f} -> {after:.1f}")
+        np.testing.assert_allclose(got[10:60, 10:390], render[10:60, 10:390], atol=2)  # away from the products nothing changes
+
+    def test_layout_lets_a_product_bleed_off_the_edge(self):
+        # A lying carton cut by the left and top frame edges (the playbook asks for a box end past the edge).
+        plan = self.plan(products=[{"cx": 0.02, "base": 0.1, "height": 0.4, "side": "R"}])
+        with contextlib.redirect_stdout(io.StringIO()):
+            product_lock.layout(self.ns(plan=plan))
+        sk = np.asarray(Image.open(os.path.join(self.dir.name, "out.png")).convert("L"))
+        self.assertGreater(int(sk[20, 25]), 200, "the carton's pale face shows at the top-left corner")
+
+    def test_reprint_leaves_a_product_that_does_not_fit(self):
+        flat = self.save("flat.png", np.full((500, 400, 3), 128))
+        self.assertIn("no product fitted", exit_message(product_lock.reprint, self.rp(flat)))
+
+    def test_bad_inputs_are_refused(self):
+        self.assertIn("--face", exit_message(product_lock.reprint, self.rp(self.pack, face="0,0,50,50")))
+        self.assertIn("same shape", exit_message(product_lock.reprint, self.rp(self.save("wide.png", np.full((300, 600, 3), 128)))))
+        self.assertIn("side must be one of", exit_message(product_lock.layout, self.ns(plan=self.plan(products=[{"cx": 0.5, "base": 0.9, "height": 0.4, "side": "flat"}]))))
+        self.assertIn("height must be a number", exit_message(product_lock.layout, self.ns(plan=self.plan(products=[{"cx": 0.5, "base": 0.9, "height": "big"}]))))
+        self.assertIn("non-empty \"products\"", exit_message(product_lock.layout, self.ns(plan=self.plan(products=[]))))
+        self.assertIn("rect must be", exit_message(product_lock.layout, self.ns(plan=self.plan(shapes=[{"rect": [0.5, 0, 0.2, 1]}]))))
+        self.assertIn("--min-score", exit_message(product_lock.reprint, self.rp(self.pack, min_score=1.5)))
+        self.assertIn("--search-scale", exit_message(product_lock.reprint, self.rp(self.pack, search_scale=float("nan"))))
+        self.assertIn("--search-scale", exit_message(product_lock.reprint, self.rp(self.pack, search_scale=1.2)))
+        self.assertIn("--search-rot", exit_message(product_lock.reprint, self.rp(self.pack, search_rot=-1)))
+        self.assertIn("--search-px", exit_message(product_lock.reprint, self.rp(self.pack, search_px=-5)))
+        self.assertIn("--light-px", exit_message(product_lock.reprint, self.rp(self.pack, light_px=0)))
+
+
 class FoodGrade(unittest.TestCase):
     def picture(self):
         """A pale backdrop (240,235,225) with orange 'kernels' at x 0 to 40: the food touches the left edge."""
