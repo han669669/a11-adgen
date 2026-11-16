@@ -242,7 +242,7 @@ Field rules:
 | `evidence[].market` | `SG`, `non-SG` or `unknown`. A buyer insight with `market: "SG"` needs at least one evidence item with `market: "SG"`. If it has none, its basis is `hypothesis`. |
 | `evidence[].verified` | The server sets it (1.4). The input value is ignored. |
 | `evidence[].retrievedAt`, `publishedDate` | The server copies them from the research source when `sourceId` is given. |
-| `productFacts` | Only ids of rows in `facts`. A price, size, offer or certification that is not in `facts` is an unknown. A fact whose `verified` mark is not 1 (see 1.4) is shown as not verified to the writer, the critic and the owner; it must not be used as a factual claim in copy until its quote is found in a stored source or the owner confirms it in his own words. |
+| `productFacts` | Only ids of rows in `facts`. A price, size, offer or certification that is not in `facts` is an unknown. A fact whose `verified` mark is not 1 (see 1.4) is shown as not verified to the writer, the critic and the owner; it must not be used as a factual claim in copy until its quote is found in a stored source, or the owner approves that copy at the copy review after he saw the "not verified" mark. That approval is saved as today: `ideas_update copyApproved` keeps his exact words for that idea. It does not change `facts.verified`, which records only the server's quote check. |
 | `commercialObjective.source` | `default` means that nobody stated an objective. The default text is "practice batch: one ad good enough to win a real client". It is marked as a hypothesis. |
 | `unknowns[].howToResolve` | `owner`, `client` or `public_research`. |
 
