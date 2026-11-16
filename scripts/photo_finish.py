@@ -42,7 +42,7 @@ STEPS = ("tone", "soften", "halation", "lens", "grain")
 # Default amounts at --strength 1 (checked by eye at full size on the W46 Sonnet finals, 15-11-2026).
 DEFAULTS = {
     "shoulder": 0.78,     # tone: highlights above this (0..1) roll off softly towards white
-    "white": 0.975,       # tone: the brightest output value (no clipped digital white)
+    "white": 0.975,       # tone: the level the shoulder approaches (full white lands at about 0.91: no clipped digital white)
     "black": 0.012,       # tone: the deepest output value (a slight lift, as on a print)
     "sat_trim": 0.07,     # tone: how much the most saturated colours lose (s -> s * (1 - k * s^2))
     "soften_px": 0.7,     # soften: blur sigma
@@ -57,6 +57,20 @@ DEFAULTS = {
     "grain_px": 0.55,     # grain: clump size (blur sigma of the noise)
     "grain_chroma": 0.15, # grain: colour noise, as a share of the luminance noise
 }
+
+
+def check_params(p):
+    """Stop with a clear message on a tuning value that the formulas cannot take."""
+    for name, val in p.items():
+        if not np.isfinite(val) or val < 0:
+            sys.exit(f"--{name.replace('_', '-')} must be a finite number of 0 or more, got {val}")
+    if not p["black"] < p["shoulder"] < p["white"] <= 1:
+        sys.exit("tone needs black < shoulder < white <= 1")
+    if not p["halation_thr"] < 1:
+        sys.exit("--halation-thr must be less than 1")
+    for name in ("sat_trim", "soften_mix", "halation_mix", "vignette"):
+        if p[name] > 1:
+            sys.exit(f"--{name.replace('_', '-')} must be from 0 to 1")
 
 
 def need_cv2():
@@ -160,7 +174,7 @@ def grain(a, p, k, scale, rng, cv2):
     ca = p["grain_chroma"]
     if ca > 0:
         chroma = np.stack([field(), field(), field()], -1)
-        chroma -= chroma.mean(-1, keepdims=True)  # colour only: no brightness change
+        chroma -= luma(chroma)[..., None]  # colour only: no change in luma()
         out = out + chroma * (amp * ca)[..., None]
     return out
 
@@ -179,6 +193,7 @@ def finish(img, strength=1.0, skip=(), sharp_boxes=(), seed=None, params=None):
     cv2 = need_cv2()
     p = dict(DEFAULTS)
     p.update(params or {})
+    check_params(p)
     a = np.asarray(img.convert("RGB"), dtype=np.float32) / 255
     h, w = a.shape[:2]
     scale = w / REF_WIDTH

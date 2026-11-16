@@ -372,7 +372,9 @@ class PhotoFinish(Tmp):
         out = os.path.join(self.dir.name, "out.jpg")
         with contextlib.redirect_stdout(io.StringIO()) as buf:
             photo_finish.main(["--in", src, "--out", out, "--seed", "1", "--sharp", "0.3,0.0,0.7,0.2"])
-        self.assertEqual(Image.open(out).size, (64, 80))
+        with Image.open(out) as written:
+            self.assertEqual(written.format, "JPEG")
+            self.assertEqual(written.size, (64, 80))
         self.assertIn("sharp 1", buf.getvalue())
 
     def test_bad_input_stops_with_a_clear_message(self):
@@ -381,6 +383,19 @@ class PhotoFinish(Tmp):
         src = self.save("in.png", np.full((8, 8, 3), 150))
         self.assertIn("--sharp needs", exit_message(photo_finish.main, ["--in", src, "--out", out, "--sharp", "0.5,0.5,0.2,0.9"]))
         self.assertIn("--strength must be", exit_message(photo_finish.main, ["--in", src, "--out", out, "--strength", "3"]))
+        self.assertIn("--grain-amp must be", exit_message(photo_finish.main, ["--in", src, "--out", out, "--grain-amp", "nan"]))
+        self.assertIn("--soften-px must be", exit_message(photo_finish.main, ["--in", src, "--out", out, "--soften-px", "-1"]))
+        self.assertIn("black < shoulder < white", exit_message(photo_finish.main, ["--in", src, "--out", out, "--shoulder", "0.99"]))
+        self.assertIn("--halation-thr must be", exit_message(photo_finish.main, ["--in", src, "--out", out, "--halation-thr", "1"]))
+
+    def test_chroma_grain_keeps_luma(self):
+        img = self.grey(128, (64, 64))
+        skip = ("tone", "soften", "halation", "lens")
+        mono = photo_finish.finish(img, skip=skip, seed=3, params={"grain_amp": 0.05, "grain_chroma": 0})
+        colour = photo_finish.finish(img, skip=skip, seed=3, params={"grain_amp": 0.05, "grain_chroma": 1})
+        m, c = (np.asarray(x, np.float32) / 255 for x in (mono, colour))
+        self.assertGreater(float(np.abs(c - m).max()), 5 / 255)  # the colour grain is there
+        self.assertLess(float(np.abs(photo_finish.luma(c) - photo_finish.luma(m)).max()), 1.5 / 255)  # and it keeps luma
 
 
 if __name__ == "__main__":
