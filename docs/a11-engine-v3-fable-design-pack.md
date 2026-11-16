@@ -694,7 +694,7 @@ Evaluation fixtures for the critic contract (words, not code; used by hand or in
 | OD 2.3 | Start thresholds 4 and 3 | As written; Phase 4 checks them | Canon process |
 | OD 2.4 | Change of picks after a render | Owner's word only | Owner |
 | OD 2.5 | C4: sublines that are not facts; headline-only ads | Allowed as `second_beat` or `none` with the owner's word | Owner (flagged) |
-| OD 2.6 | C8: packaged F&B only in Goal 1 text | Design assumes packaged F&B | Owner (flagged) |
+| OD 2.6 | C8: scope in Goal 1 text | Decided 17-11-2026: F&B, packaged F&B and wellness product brands; no service-based wellness. Practice stays on packaged F&B. | Owner |
 
 | Risk | Control |
 |---|---|
@@ -780,7 +780,7 @@ A record with `kind: "direction"`, `idea_id` set, author `art-director`.
 
 **Calm rules (the owner's taste; conflict C5):** one hero pack; 5 elements or fewer in the scene (`elementCount`); no filler prop; a plain, lit surface unless the concept needs a place; muted accent colours. "The look follows the concept" means the staging, the camera and the light change with the idea. It does not mean busy scenes.
 
-**Fallback:** if the art director cannot find a concept-led look with acceptable risk, `shared.recipe` is `house` and the house recipe of playbook §7 is used. This is allowed and is recorded, so Phase 4 can count it.
+**Fallback (owner decision, 17-11-2026):** the house recipe of playbook §7 is the fallback when the owner says that the output is not up to standard. Then `shared.recipe` is `house`. If the art director cannot find a concept-led look with acceptable risk, it says so and proposes the fallback; the main session asks the owner. The use is recorded, so Phase 4 can count it.
 
 The rubric is in words in the subagent file. `direction_save` checks shape only: 3 drafts, each with a question, a plan and a prompt; the `pairs` lists present. It returns a warning when a pair lists fewer than 3 axes. It does not refuse.
 
@@ -1115,3 +1115,18 @@ For code and plugin changes: the same fixture check before the pull request merg
 | C8 / OD 2.6 | Packaged F&B only for now? | Yes |
 | OD 1.2 | Do you want to approve the brief before concepts? | No; you get 5 lines |
 | Migration 0015 | One live database change for Phases 1 to 4 | Needs your yes when the file is tested |
+
+**Owner decisions, 17-11-2026 SGT.** The owner answered all eight. They are in `docs/decisions.md`. Where a line below differs from a default in this document, the line below wins.
+
+| # | Decision |
+|---|---|
+| C1 | V3: 6 to 15 deeper concepts; the best 3 win, from any funnel stage. |
+| C2 | The copy review stays. The owner approves the words before any picture. |
+| C3 | Headlines can be in capitals on the picture when the type suits it. |
+| C4 | A subline that is not a fact is allowed. It never states a claim that is not verified. |
+| C5 | A new look for each concept. The house recipe (calm and plain) is the fallback when the owner says that the output is not up to standard. The art director can propose the fallback; it does not choose it alone. |
+| C6 | A failed draft is made again once, so the owner sees 3 good drafts. |
+| C7 | A pointer only now. Each document changes as its part is built. When all of v3 is built and works well, all documents are rewritten to describe the live tool. |
+| C8 | The target stays "F&B and wellness": F&B, packaged F&B and wellness brands that sell a product. Service-based wellness businesses are out. |
+
+These decisions apply to engine 3. The live batch flow does not change until the engine 3 units are merged.

@@ -469,6 +469,21 @@ Conflicts between the v3 specification and recorded owner decisions. They are fl
 | C7 | `AGENTS.md` and `docs/blueprint.md` become the v3 source of truth (§16). | The execution instructions limit this sprint to a pointer in `AGENTS.md`. | Pointer only now. Opus updates the documents as each phase ships. |
 | C8 | Goal 1 in `AGENTS.md` names "F&B and wellness brands". | 12-11-2026 and v3 §1.3: packaged F&B only for now. | Packaged F&B only. The goal text is the owner's to change. |
 
+**Owner decisions, 17-11-2026 SGT.** The owner answered all eight. They are in `docs/decisions.md`. Where a line below differs from a default in this document, the line below wins.
+
+| # | Decision |
+|---|---|
+| C1 | V3: 6 to 15 deeper concepts; the best 3 win, from any funnel stage. |
+| C2 | The copy review stays. The owner approves the words before any picture. |
+| C3 | Headlines can be in capitals on the picture when the type suits it. |
+| C4 | A subline that is not a fact is allowed. It never states a claim that is not verified. |
+| C5 | A new look for each concept. The house recipe (calm and plain) is the fallback when the owner says that the output is not up to standard. The art director can propose the fallback; it does not choose it alone. |
+| C6 | A failed draft is made again once, so the owner sees 3 good drafts. |
+| C7 | A pointer only now. Each document changes as its part is built. When all of v3 is built and works well, all documents are rewritten to describe the live tool. |
+| C8 | The target stays "F&B and wellness": F&B, packaged F&B and wellness brands that sell a product. Service-based wellness businesses are out. |
+
+These decisions apply to engine 3. The live batch flow does not change until the engine 3 units are merged.
+
 ## 20. Handoff to Opus
 
 - This audit is true for commit `860eb9f`. Check `git log 860eb9f..origin/main` first.

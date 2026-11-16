@@ -48,7 +48,7 @@ The audit is true for commit `860eb9faa04cb3b059cb7f447b85d2fc23d2b748`. At that
 | `AGENTS.md` | The standing project rules. |
 | This file | The implementation instructions. |
 
-If a design proposal conflicts with a recorded owner decision, flag it to the owner. Do not reverse a decision silently. The known conflicts are C1 to C8 in the audit, section 19. The design pack uses a default for each so that work can go on; section 6 of the design pack lists them. Each default becomes final only when the owner says so or when the unit that ships it adds a row to `docs/decisions.md` with his words.
+If a design proposal conflicts with a recorded owner decision, flag it to the owner. Do not reverse a decision silently. The known conflicts are C1 to C8 in the audit, section 19. The owner decided all eight on 17-11-2026; the decisions are in that section and in `docs/decisions.md`, and they win over the defaults. The design pack uses a default for each so that work can go on; section 6 of the design pack lists them. Each default becomes final only when the owner says so or when the unit that ships it adds a row to `docs/decisions.md` with his words.
 
 The design pack is a start, not a law. Where the code shows a better and smaller way, take it and say so in the pull request. Do not weaken the items in design pack section 0.6 (the owner's lessons).
 
@@ -65,7 +65,7 @@ You must:
 - Keep all functions that exist. Engine 2 batches, packs, the client portal and results must work as before.
 - Keep Claude Code as the only reasoning brain. The Worker makes no model call for thinking.
 - Use the stack that exists: Cloudflare Workers, D1, R2, KV, Images; Exa; fal.ai GPT Image 2.5 Sunburst; 4:5 output.
-- Keep packaged F&B as the first scope.
+- Keep the scope: F&B, packaged F&B and wellness brands that sell a product (owner, 17-11-2026). No service-based wellness. Practice batches stay on packaged F&B.
 - Keep the product lock, the logo by construction and the food checks.
 - Keep the owner's draft selection. The owner does not select concepts and does not write briefs.
 - Keep batches resumable from D1.
