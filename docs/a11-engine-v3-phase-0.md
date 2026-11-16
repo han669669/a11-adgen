@@ -456,7 +456,9 @@ Approvals needed later:
 3. The first paid v3 batch (spend is approved for practice batches up to the cap; say the estimate first).
 4. Any later migration for Phase 5.
 
-Conflicts between the v3 specification and recorded owner decisions. They are flagged, not decided. The design pack names a default for each so that work can go on; the owner can change it with one line.
+**Status: all eight are decided (17-11-2026 SGT). The decisions are in the second table below and they are the authority. The first table is kept as history: it shows the conflict and the default that the design used before the owner decided.**
+
+Conflicts between the v3 specification and recorded owner decisions. At the time of the audit they were flagged, not decided. The design pack names a default for each so that work can go on; the owner can change it with one line.
 
 | # | V3 says | The record says | Default used in the design |
 |---|---|---|---|
@@ -477,9 +479,9 @@ Conflicts between the v3 specification and recorded owner decisions. They are fl
 | C2 | The copy review stays. The owner approves the words before any picture. |
 | C3 | Headlines can be in capitals on the picture when the type suits it. |
 | C4 | A subline that is not a fact is allowed. It never states a claim that is not verified. |
-| C5 | A new look for each concept. The house recipe (calm and plain) is the fallback when the owner says that the output is not up to standard. The art director can propose the fallback; it does not choose it alone. |
-| C6 | A failed draft is made again once, so the owner sees 3 good drafts. |
-| C7 | A pointer only now. Each document changes as its part is built. When all of v3 is built and works well, all documents are rewritten to describe the live tool. |
+| C5 | A new look for each concept. The house recipe (calm and plain) is the fallback when the owner says that the output is not up to standard. The art director can propose the fallback; it does not choose it alone. The owner's exact words are saved in the direction record (design pack 3.4). |
+| C6 | A failed draft is made again once, so that the owner sees 3 good drafts where possible. If the second try also fails, the owner sees the good drafts only (fewer than 3) with a saved reason (design pack 3.6). No more automatic tries. |
+| C7 | A pointer only now. Each document changes as its part is built. When all of v3 is built and works well, all documents are rewritten to describe the live tool. The exception is `docs/a11-engine-v3.md`: it is the owner's text and is never edited. |
 | C8 | The target stays "F&B and wellness": F&B brands with packaged food or drinks, and all wellness brands except service-based wellness businesses with no packaged product. |
 
 These decisions apply to engine 3. The live batch flow does not change until the engine 3 units are merged.

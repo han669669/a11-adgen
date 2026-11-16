@@ -739,7 +739,8 @@ A record with `kind: "direction"`, `idea_id` set, author `art-director`.
     "hierarchy": "What the eye reads first, second, third. Back products recede: shadow, soft focus.",
     "type": { "headlineFont": "", "weight": "", "case": "", "reason": "A brand font that is not the logo's font." },
     "logo": { "placement": "", "note": "Optically centred. Ignore the TM and R marks." },
-    "recipe": "concept | house"
+    "recipe": "concept | house",
+    "recipeApproval": null
   },
   "drafts": [
     {
@@ -780,7 +781,7 @@ A record with `kind: "direction"`, `idea_id` set, author `art-director`.
 
 **Calm rules (the owner's taste; conflict C5):** one hero pack; 5 elements or fewer in the scene (`elementCount`); no filler prop; a plain, lit surface unless the concept needs a place; muted accent colours. "The look follows the concept" means the staging, the camera and the light change with the idea. It does not mean busy scenes.
 
-**Fallback (owner decision, 17-11-2026):** the house recipe of playbook §7 is the fallback when the owner says that the output is not up to standard. Then `shared.recipe` is `house`. If the art director cannot find a concept-led look with acceptable risk, it says so and proposes the fallback; the main session asks the owner. The use is recorded, so Phase 4 can count it.
+**Fallback (owner decision, 17-11-2026):** the house recipe of playbook §7 is the fallback when the owner says that the output is not up to standard. Then `shared.recipe` is `house`. If the art director cannot find a concept-led look with acceptable risk, it says so and proposes the fallback; the main session asks the owner. A proposal is not an approval. The approval is saved: the direction record with `shared.recipe: "house"` must have `shared.recipeApproval` with the owner's exact words, and `direction_save` refuses a `house` direction without it (a shape check). The main session also saves his words with `batch_update ownerVerdicts`, as it does today for owner notes. A session that resumes reads the record; if the field is absent, the fallback is not approved. The use is recorded, so Phase 4 can count it.
 
 The rubric is in words in the subagent file. `direction_save` checks shape only: 3 drafts, each with a question, a plan and a prompt; the `pairs` lists present. It returns a warning when a pair lists fewer than 3 axes. It does not refuse.
 
@@ -885,6 +886,7 @@ Engine 2 batches have no direction and no checks; every reader accepts their abs
 | 3.2 | For an idea that is not picked, or without approved copy | Refused |
 | 3.3 | 2 drafts, or a draft with no question or no plan | Refused |
 | 3.4 | A pair with 1 axis | Saved with a warning |
+| 3.4b | `shared.recipe: "house"` without `recipeApproval`; and with the owner's words | Refused; saved |
 | 3.5 | `batch_get` normal and with `withPlans` | Plans only in the second |
 | 3.6 | `checks_save` draft, eligible false, then a second render with `attempt: 2` | Both saved; `batch_get` shows the latest check for each render |
 | 3.7 | `checks_save` with a render of another idea | Refused |
@@ -1103,6 +1105,8 @@ For code and plugin changes: the same fixture check before the pull request merg
 
 ## 6. All open decisions for the owner in one place
 
+**Status: decided on 17-11-2026 SGT. The decisions table at the end of this section is the authority. The first table is history: the questions and the defaults before the owner decided.**
+
 | # | Question | Default used |
 |---|---|---|
 | C1 / OD 2.1 | Best three concepts with free funnel roles, and 6 to 15 concepts in place of 24 to 30 ideas? | Yes (v3 is newer) |
@@ -1124,9 +1128,9 @@ For code and plugin changes: the same fixture check before the pull request merg
 | C2 | The copy review stays. The owner approves the words before any picture. |
 | C3 | Headlines can be in capitals on the picture when the type suits it. |
 | C4 | A subline that is not a fact is allowed. It never states a claim that is not verified. |
-| C5 | A new look for each concept. The house recipe (calm and plain) is the fallback when the owner says that the output is not up to standard. The art director can propose the fallback; it does not choose it alone. |
-| C6 | A failed draft is made again once, so the owner sees 3 good drafts. |
-| C7 | A pointer only now. Each document changes as its part is built. When all of v3 is built and works well, all documents are rewritten to describe the live tool. |
+| C5 | A new look for each concept. The house recipe (calm and plain) is the fallback when the owner says that the output is not up to standard. The art director can propose the fallback; it does not choose it alone. The owner's exact words are saved in the direction record (design pack 3.4). |
+| C6 | A failed draft is made again once, so that the owner sees 3 good drafts where possible. If the second try also fails, the owner sees the good drafts only (fewer than 3) with a saved reason (design pack 3.6). No more automatic tries. |
+| C7 | A pointer only now. Each document changes as its part is built. When all of v3 is built and works well, all documents are rewritten to describe the live tool. The exception is `docs/a11-engine-v3.md`: it is the owner's text and is never edited. |
 | C8 | The target stays "F&B and wellness": F&B brands with packaged food or drinks, and all wellness brands except service-based wellness businesses with no packaged product. |
 
 These decisions apply to engine 3. The live batch flow does not change until the engine 3 units are merged.
