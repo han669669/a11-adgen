@@ -229,6 +229,14 @@ class LayoutReprint(Tmp):
             self.assertLess(after, before * 0.5, f"print in {(y0, y1, x0, x1)} is not restored: {before:.1f} -> {after:.1f}")
         np.testing.assert_allclose(got[10:60, 10:390], render[10:60, 10:390], atol=2)  # away from the products nothing changes
 
+    def test_layout_lets_a_product_bleed_off_the_edge(self):
+        # A lying carton cut by the left and top frame edges (the playbook asks for a box end past the edge).
+        plan = self.plan(products=[{"cx": 0.02, "base": 0.1, "height": 0.4, "side": "R"}])
+        with contextlib.redirect_stdout(io.StringIO()):
+            product_lock.layout(self.ns(plan=plan))
+        sk = np.asarray(Image.open(os.path.join(self.dir.name, "out.png")).convert("L"))
+        self.assertGreater(int(sk[20, 25]), 200, "the carton's pale face shows at the top-left corner")
+
     def test_reprint_leaves_a_product_that_does_not_fit(self):
         flat = self.save("flat.png", np.full((500, 400, 3), 128))
         self.assertIn("no product fitted", exit_message(product_lock.reprint, self.rp(flat)))

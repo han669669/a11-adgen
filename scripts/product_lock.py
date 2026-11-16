@@ -503,7 +503,9 @@ def layout(a):
     for q in plan["products"]:
         img = turn(piece, q["height"] * H * piece.height / (box[3] - box[1]), q["side"], q["rot"])
         x, y = corner(q, img, W, H)
-        canvas.alpha_composite(img, (x, y))
+        layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))   # paste clips a piece that bleeds off an edge; alpha_composite refuses it
+        layer.paste(img, (x, y), img)
+        canvas.alpha_composite(layer)
         print(f"product {len(boxes) + 1}: x {x},{x + img.width} y {y},{y + img.height}")
         boxes.append((x, y))
     canvas.convert("RGB").save(a.out, quality=95)
