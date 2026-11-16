@@ -11,6 +11,9 @@ Needs Python 3 with Pillow and numpy. Runs on the owner's machine or in the sess
             Each draft gets its own placement, so the 3 drafts of an idea differ in layout, scale and crop.
   cutout    Make a silhouette mask for a product that is not a rounded box (a cake on its box, on a dark or white backdrop).
             Pass it as --alpha to skeleton and swap.
+  layout    A skeleton from a plan file: each product at its own place, size, side (standing or lying) and small turn,
+            over flat shapes that draw real-scale cues (tile rows, a worktop edge). Use it for groups and true scale.
+  reprint   Put the real packshot print back on each product of a render made from a layout skeleton (the model smears small print).
   swap      Replace the product in an existing draft or final with the real one (repair of a picked draft).
             --lower-only keeps the scene above the label: for an open, almost empty jar (the packshot cannot show that
             state, so only the label and the base are real pixels).
@@ -410,6 +413,199 @@ def relight(a):
     Image.fromarray(out.clip(0, 255).astype("uint8")).save(a.out, quality=95)
     print(f"{a.out}: light from the {a.light}, shade {a.shade}, bounce {a.bounce} of {a.floor}, contact {a.contact}")
 
+SIDES = ("up", "L", "R")
+
+
+def load_plan(path):
+    """A layout plan (JSON): the canvas, flat shapes for the room's real-scale cues, and each product's place.
+    {"size": [1024, 1280], "bg": "#EEE8DF",
+     "shapes": [{"rect": [x0, y0, x1, y1], "fill": "#F6F5F2"}, ...],              (fractions, drawn in order, under the products)
+     "products": [{"cx": 0.24, "base": 0.77, "height": 0.21, "side": "R", "rot": -0.6}, ...]}
+    cx: centre x; base: y of the lowest point; height: the product's own length (cap to base); all fractions of the canvas.
+    side: "up" (standing), "L" (lying, top to the left) or "R" (lying, top to the right; its print reads left to right).
+    rot: a small turn in degrees (counter-clockwise), so a group looks put down by a person (creative-playbook 7.4 A)."""
+    import json
+    try:
+        with open(path) as f:
+            plan = json.load(f)
+    except (OSError, ValueError) as e:
+        sys.exit(f"cannot read the plan {path}: {e}")
+    if not isinstance(plan, dict) or not isinstance(plan.get("products"), list) or not plan["products"]:
+        sys.exit("the plan needs a non-empty \"products\" list")
+    size = plan.get("size", [1024, 1280])
+    if not (isinstance(size, list) and len(size) == 2 and all(isinstance(v, int) and v > 0 for v in size)):
+        sys.exit("the plan's \"size\" must be [W, H] in whole pixels")
+    def num(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool) and np.isfinite(v)
+    for i, q in enumerate(plan["products"]):
+        if not isinstance(q, dict):
+            sys.exit(f"product {i + 1}: must be an object")
+        q.setdefault("side", "up")
+        q.setdefault("rot", 0)
+        if q["side"] not in SIDES:
+            sys.exit(f"product {i + 1}: side must be one of {', '.join(SIDES)}")
+        for k in ("cx", "base", "height", "rot"):
+            if not num(q.get(k)):
+                sys.exit(f"product {i + 1}: {k} must be a number")
+        if not (0 < q["height"] <= 1.5 and -0.5 <= q["cx"] <= 1.5 and 0 < q["base"] <= 1.5 and abs(q["rot"]) <= 45):
+            sys.exit(f"product {i + 1}: height must be above 0, cx and base near the canvas, rot within 45 degrees")
+    for i, sh in enumerate(plan.get("shapes", [])):
+        r = sh.get("rect") if isinstance(sh, dict) else None
+        if not (isinstance(r, list) and len(r) == 4 and all(num(v) for v in r) and r[0] < r[2] and r[1] < r[3]):
+            sys.exit(f"shape {i + 1}: rect must be [x0, y0, x1, y1] fractions with x0<x1, y0<y1")
+        rgb(str(sh.get("fill", "#808080")))
+    return plan
+
+
+def product_piece(pack, box, alpha_path):
+    """The real product cut from the packshot (with PAD) and its mask, at packshot scale, as one RGBA image."""
+    x0, y0, x1, y1 = box
+    piece = cut(pack, box)
+    mask = alpha_from_png(alpha_path, (x0 - PAD, y0 - PAD, x1 + PAD, y1 + PAD), piece.size, pack.size) if alpha_path else alpha(piece.size, 1.0)
+    piece = piece.convert("RGBA")
+    piece.putalpha(mask)
+    return piece
+
+
+def turn(img, length_px, side, rot):
+    """Scale a packshot-scale piece so its own length (cap to base) is length_px, lay it down for side L or R, then turn it by rot."""
+    k = length_px / img.height
+    out = img.resize((max(1, round(img.width * k)), max(1, round(length_px))), Image.LANCZOS)
+    if side == "L":
+        out = out.rotate(90, expand=True, resample=Image.BICUBIC)
+    elif side == "R":
+        out = out.rotate(-90, expand=True, resample=Image.BICUBIC)
+    if rot:
+        out = out.rotate(rot, expand=True, resample=Image.BICUBIC)
+    return out
+
+
+def corner(q, img, W, H):
+    """Top-left corner of a turned piece placed at the plan's cx (centre) and base (lowest point)."""
+    return round(q["cx"] * W - img.width / 2), round(q["base"] * H - img.height)
+
+
+def layout(a):
+    """A skeleton from a plan: products at their own places, sizes, sides and small turns (a messy stack, a loose group, one upright),
+    over flat shapes that draw the room's real-scale cues (tile rows, a worktop edge). The model then builds the scene around them."""
+    pack = Image.open(a.packshot, formats=FORMATS).convert("RGB")
+    box = ints(a.box, 4)
+    check_box(box, pack.size)
+    plan = load_plan(a.plan)
+    W, H = plan["size"]
+    canvas = Image.new("RGBA", (W, H), rgb(str(plan.get("bg", "#E9E4DC"))) + (255,))
+    d = ImageDraw.Draw(canvas)
+    for sh in plan.get("shapes", []):
+        x0, y0, x1, y1 = sh["rect"]
+        d.rectangle((round(x0 * W), round(y0 * H), round(x1 * W) - 1, round(y1 * H) - 1), fill=rgb(str(sh.get("fill", "#808080"))))
+    piece = product_piece(pack, box, a.alpha)
+    boxes = []
+    for q in plan["products"]:
+        img = turn(piece, q["height"] * H * piece.height / (box[3] - box[1]), q["side"], q["rot"])
+        x, y = corner(q, img, W, H)
+        canvas.alpha_composite(img, (x, y))
+        print(f"product {len(boxes) + 1}: x {x},{x + img.width} y {y},{y + img.height}")
+        boxes.append((x, y))
+    canvas.convert("RGB").save(a.out, quality=95)
+    print(f"{a.out}: {len(plan['products'])} products on {W}x{H}, H/W {(box[3] - box[1]) / (box[2] - box[0]):.3f}")
+
+
+def reprint(a):
+    """Put the real print back on each product of a render made from a `layout` skeleton. The model smears small print
+    (W47 Oatside: the Nutri-Grade label and the vitamin badge came out as mirrored scribbles). For each product of the plan,
+    the packshot's printed face is fitted to the render (scale, turn and position near the plan's place), then pasted with the
+    render's own light: the light is read only where both show the pack's plain base colour, so a moved logo or badge leaves no glow.
+    The edges, the cap and the top folds stay the render's. A product that does not fit (a weak score) is left as it is."""
+    import cv2
+    pack = Image.open(a.packshot, formats=FORMATS).convert("RGB")
+    box = ints(a.box, 4)
+    check_box(box, pack.size)
+    face = ints(a.face, 4)
+    if not (box[0] <= face[0] < face[2] <= box[2] and box[1] <= face[1] < face[3] <= box[3]):
+        sys.exit(f"--face {a.face} must lie inside --box {a.box}, with x0<x1 and y0<y1")
+    if not (np.isfinite(a.min_score) and 0 < a.min_score < 1):
+        sys.exit("--min-score must be between 0 and 1")
+    plan = load_plan(a.plan)
+    render = Image.open(a.render, formats=FORMATS).convert("RGB")
+    W, H = render.size
+    pw, ph = plan["size"]
+    if abs(W / H - pw / ph) > 0.01:
+        sys.exit(f"the render ({W}x{H}) and the plan ({pw}x{ph}) do not have the same shape")
+    piece = product_piece(pack, box, a.alpha)
+    fm = Image.new("L", piece.size, 0)       # the printed face, in piece pixels
+    ImageDraw.Draw(fm).rectangle((face[0] - box[0] + PAD, face[1] - box[1] + PAD, face[2] - box[0] + PAD - 1, face[3] - box[1] + PAD - 1), fill=255)
+    fpiece = piece.copy()
+    fpiece.putalpha(Image.fromarray(np.minimum(np.asarray(fm), np.asarray(piece.getchannel("A")))))
+    R = np.asarray(render).astype(np.float32)
+    G = R.mean(axis=2)
+    out = R.copy()
+    debug = np.zeros((H, W), np.float32)
+    lp = lambda v: cv2.GaussianBlur(v, (0, 0), max(2.0, a.light_px * W / 1536))
+    fitted = 0
+    for i, q in enumerate(plan["products"]):
+        length = q["height"] * H * piece.height / (box[3] - box[1])
+        best = (-2.0,)
+        for s in np.arange(1 - a.search_scale, 1 + a.search_scale + 1e-9, 0.01):
+            for dr in np.linspace(-a.search_rot, a.search_rot, 5):
+                t = np.asarray(turn(piece.convert("RGB"), length * s, q["side"], q["rot"] + dr)).mean(axis=2).astype(np.float32)
+                th, tw = t.shape
+                iy, ix = int(th * 0.18), int(tw * 0.18)   # the inner part only: no backdrop and no rotated corners in the template
+                ti = t[iy:th - iy, ix:tw - ix]
+                x, y = round(q["cx"] * W - tw / 2), round(q["base"] * H - th)
+                pad = round(a.search_px * W / 1536)
+                x0, y0 = max(0, x - pad), max(0, y - pad)
+                sub = G[y0:min(H, y + th + pad), x0:min(W, x + tw + pad)]
+                if sub.shape[0] < ti.shape[0] or sub.shape[1] < ti.shape[1] or ti.std() < 1:
+                    continue
+                r = cv2.matchTemplate(sub, ti, cv2.TM_CCOEFF_NORMED)
+                _, mv, _, ml = cv2.minMaxLoc(r)
+                if mv > best[0]:
+                    best = (mv, s, dr, x0 + ml[0] - ix, y0 + ml[1] - iy)
+        if best[0] < a.min_score:
+            print(f"product {i + 1}: no good fit (score {max(best[0], 0):.3f} below {a.min_score}); left as rendered")
+            continue
+        mv, s, dr, x, y = best
+        img = np.asarray(turn(fpiece, length * s, q["side"], q["rot"] + dr)).astype(np.float32)
+        new, m = img[..., :3], img[..., 3] / 255
+        m = cv2.GaussianBlur(cv2.erode(m, np.ones((5, 5), np.uint8)), (0, 0), max(1.5, 3.0 * W / 1536))   # the face edge sits on plain pack: a soft seam
+        # clip the piece to the picture
+        h, w = m.shape
+        cx0, cy0, cx1, cy1 = max(0, x), max(0, y), min(W, x + w), min(H, y + h)
+        if cx1 <= cx0 or cy1 <= cy0:
+            print(f"product {i + 1}: fitted outside the picture; left as rendered")
+            continue
+        new, m = new[cy0 - y:cy1 - y, cx0 - x:cx1 - x], m[cy0 - y:cy1 - y, cx0 - x:cx1 - x]
+        reg = R[cy0:cy1, cx0:cx1]
+        # light from the pack's plain base colour only: where the packshot face shows it, and the render shows a near-neutral version of it
+        fpx = new.reshape(-1, 3)[m.reshape(-1) > 0.5]
+        if len(fpx) < 50:
+            print(f"product {i + 1}: too little of its face is inside the picture; left as rendered")
+            continue
+        base_col = np.median(fpx, axis=0)
+        paper = (np.abs(new - base_col).max(axis=2) < 28) * m
+        chroma = lambda v: v / np.maximum(v.sum(axis=2, keepdims=True), 1)
+        paper *= (np.abs(chroma(reg) - chroma(base_col[None, None])).max(axis=2) < 0.05) * (reg.mean(axis=2) > 0.3 * base_col.mean())
+        rl, fl = reg.mean(axis=2), new.mean(axis=2)
+        for _ in range(2):   # the second pass drops render pixels darker than the light predicts (smeared print bleeding grey)
+            den = np.maximum(lp(paper), 1e-4)
+            shade = np.clip((lp(rl * paper) / den) / np.maximum(lp(fl * paper) / den, 1), 0.3, 1.3)
+            paper = paper * (rl > 0.94 * shade * fl)
+        den = np.maximum(lp(paper), 1e-4)
+        tint = lp(reg * paper[..., None]) / den[..., None]
+        tint = tint / np.maximum(tint.mean(axis=2, keepdims=True), 1)
+        lit = np.clip(new * shade[..., None] * tint, 0, 255)
+        out[cy0:cy1, cx0:cx1] = out[cy0:cy1, cx0:cx1] * (1 - m[..., None]) + lit * m[..., None]
+        debug[cy0:cy1, cx0:cx1] = np.maximum(debug[cy0:cy1, cx0:cx1], m)
+        fitted += 1
+        print(f"product {i + 1}: fit {mv:.3f}, scale {s:.2f}, turn {q['rot'] + dr:+.1f} deg, at {x},{y}")
+    if fitted == 0:
+        sys.exit("no product fitted: check that the plan is the one the render was made from, and --box and --face")
+    Image.fromarray(out.clip(0, 255).astype("uint8")).save(a.out, quality=97, subsampling=0)
+    if a.debug:
+        Image.fromarray((debug * 255).astype("uint8")).save(a.debug)
+    print(f"{a.out}: real print on {fitted} of {len(plan['products'])} products")
+
+
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -466,6 +662,28 @@ def main():
     o.add_argument("--cx", type=float, default=None, help="centre x of the jar in the padded packshot (default: the middle of the picture)")
     o.add_argument("--out", required=True)
     o.set_defaults(fn=open_source)
+    y = sub.add_parser("layout", help="a skeleton from a plan file: products at their own places, sides and small turns, over flat real-scale cues")
+    y.add_argument("--packshot", required=True)
+    y.add_argument("--box", required=True, help="x0,y0,x1,y1 of the product in the packshot")
+    y.add_argument("--alpha", help="a silhouette mask the size of the packshot (from `cutout`) instead of a rounded box")
+    y.add_argument("--plan", required=True, help="the plan JSON (see load_plan); keep it: reprint needs the same plan")
+    y.add_argument("--out", required=True)
+    y.set_defaults(fn=layout)
+    e = sub.add_parser("reprint", help="put the real packshot print back on each product of a render made from a layout skeleton")
+    e.add_argument("--packshot", required=True)
+    e.add_argument("--box", required=True, help="the same --box as for layout")
+    e.add_argument("--alpha", help="the same --alpha as for layout")
+    e.add_argument("--face", required=True, help="x0,y0,x1,y1 of the printed face in the packshot: below the cap and the top folds, inside the edges")
+    e.add_argument("--plan", required=True, help="the plan the render's skeleton was made from")
+    e.add_argument("--render", required=True, help="the raw render (draft or final), before photo_finish and headline")
+    e.add_argument("--out", required=True)
+    e.add_argument("--debug", help="writes the paste mask (PNG) here")
+    e.add_argument("--min-score", type=float, default=0.8, help="a product whose fit scores lower is left as rendered")
+    e.add_argument("--search-scale", type=float, default=0.08, help="how far the size may differ from the plan (fraction)")
+    e.add_argument("--search-rot", type=float, default=1.5, help="how far the turn may differ from the plan (degrees)")
+    e.add_argument("--search-px", type=int, default=70, help="how far the place may differ from the plan (px at 1536 wide)")
+    e.add_argument("--light-px", type=float, default=14, help="blur of the light map (px at 1536 wide)")
+    e.set_defaults(fn=reprint)
     s = sub.add_parser("skeleton")
     s.add_argument("--packshot", required=True)
     s.add_argument("--box", required=True, help="x0,y0,x1,y1 of the product in the packshot")

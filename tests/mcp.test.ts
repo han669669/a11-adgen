@@ -131,7 +131,7 @@ describe("mcp handler", () => {
     for (const p of PROMPTS) for (const m of p.text({ url: "u", slug: "s", brand: "b", batchId: "", productUrl: "https://b.example/p", productTitle: "P", label: "W1", note: "n", adImageUrls: "https://a.example/1.png", title: "T" }).matchAll(/\b([a-z]+_[a-z_]+)\b/g)) used.add(m[1]!);
     expect(used.size).toBeGreaterThan(10);
     // Script names in the repo (scripts/<name>.py) are not tools.
-    const scripts = new Set(["box_print", "photo_finish"]);
+    const scripts = new Set(["box_print", "photo_finish", "product_lock"]);
     expect([...used].filter((n) => !known.has(n) && !scripts.has(n))).toEqual([]);
   });
   it("names only tools that exist in the server instructions, and keeps the draft order blind", () => {
@@ -140,7 +140,7 @@ describe("mcp handler", () => {
     for (const m of INSTRUCTIONS.matchAll(/\b([a-z]+_[a-z_]+)\b/g)) used.add(m[1]!);
     expect(used.size).toBeGreaterThan(10);
     // Script names in the repo (scripts/<name>.py) are not tools.
-    const scripts = new Set(["box_print", "photo_finish"]);
+    const scripts = new Set(["box_print", "photo_finish", "product_lock"]);
     expect([...used].filter((n) => !known.has(n) && !scripts.has(n))).toEqual([]);
     expect(INSTRUCTIONS).toContain("in image order");
     expect(INSTRUCTIONS).not.toContain("then tell him");
