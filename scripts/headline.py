@@ -210,9 +210,10 @@ def main(argv=None):
     p.add_argument("--leading", type=float, default=1.05, help="step between headline lines, x the font size")
     p.add_argument("--accent", default="", help="headline words set in --accent-color (matched without case)")
     p.add_argument("--accent-color", default="", help="the kit's accent colour, hex")
-    p.add_argument("--logo", help="drafts only: the kit logo (PNG) drawn at the top centre as a preview; compose_final places the real one on finals")
+    p.add_argument("--logo", help="the kit logo (PNG), drawn above the words: a preview on drafts, the real logo on a final built in code (creative-playbook 7.7)")
     p.add_argument("--logo-width", type=float, default=0.25, help="logo width, x the picture width")
     p.add_argument("--logo-top", type=float, default=0.045, help="logo top, x the picture height")
+    p.add_argument("--logo-x", type=float, default=None, help="logo left edge, x the picture width (default: centred); e.g. the text column's left edge, so the logo heads the words")
     a = p.parse_args(argv)
 
     a.headline = a.headline.replace("|", " | ")
@@ -289,10 +290,14 @@ def main(argv=None):
     if a.logo:  # checked before any drawing: a logo that reaches the text stops the script
         if not (0 < a.logo_width <= 1 and 0 <= a.logo_top < 1):
             sys.exit("--logo-width must be more than 0 and at most 1, --logo-top from 0 to less than 1")
+        if a.logo_x is not None and not (math.isfinite(a.logo_x) and 0 <= a.logo_x and a.logo_x + a.logo_width <= 1):
+            sys.exit("--logo-x must be 0 or more, with the logo inside the picture (logo-x + logo-width <= 1)")
         try:
             logo = Image.open(a.logo, formats=["PNG"]).convert("RGBA")
         except OSError as e:
             sys.exit(f"cannot read the logo {a.logo}: {e}")
+        if logo.getbbox():
+            logo = logo.crop(logo.getbbox())  # trim a transparent border, as compose_final does
         lw = max(1, int(W * a.logo_width))
         logo = logo.resize((lw, max(1, round(logo.height * lw / logo.width))), Image.LANCZOS)
         ly = int(H * a.logo_top)
@@ -305,7 +310,7 @@ def main(argv=None):
     if sl:
         y = put(sl, sf, sh, y + int(hf.size * a.gap))
     if logo:
-        im.paste(logo, ((W - logo.width) // 2, ly), logo)
+        im.paste(logo, ((W - logo.width) // 2 if a.logo_x is None else round(W * a.logo_x), ly), logo)
     im.save(a.out, quality=95)
     for n in (note, sub_note):
         if n:
