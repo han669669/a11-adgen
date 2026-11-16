@@ -307,6 +307,16 @@ class Headline(Tmp):
         self.assertGreater(int(a[int(500 * 0.045) + 5, 20]), 180)  # the backdrop beside it
         self.assertNotIn("WARNING", msg)
 
+    def test_the_logo_can_head_a_text_column(self):
+        logo = os.path.join(self.dir.name, "logo.png")
+        Image.new("RGBA", (100, 40), (0, 0, 0, 255)).save(logo)
+        out, msg = self.run_("--font", self.FONT, "--headline", "Hi", "--area", "0.5,0.3,0.9,0.5", "--logo", logo, "--logo-x", "0.5", "--logo-width", "0.3")
+        a = np.asarray(Image.open(out).convert("L"))
+        y = int(500 * 0.045) + 5
+        self.assertLess(int(a[y, int(400 * 0.55)]), 60)  # inside the logo, right of the centre
+        self.assertGreater(int(a[y, int(400 * 0.45)]), 200)  # left of it stays clear
+        self.assertIn("--logo-x must", exit_message(self.run_, "--font", self.FONT, "--headline", "Hi", "--area", "0.5,0.3,0.9,0.5", "--logo", logo, "--logo-x", "0.9"))
+
     def test_a_logo_that_reaches_the_text_is_refused_before_drawing(self):
         logo = os.path.join(self.dir.name, "logo.png")
         Image.new("RGBA", (100, 100), (0, 0, 0, 255)).save(logo)
