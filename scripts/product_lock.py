@@ -615,6 +615,9 @@ def reprint(a):
         g_shade = float(np.clip(np.median(rl[on] / np.maximum(fl[on], 1)), 0.3, 1.3))
         g_tint = np.median(reg[on], axis=0)
         g_tint = g_tint / max(g_tint.mean(), 1)
+        # the render's colour holds the pack's own base colour too: divide it out, or a coloured base (a kraft pouch) is tinted twice
+        own = base_col / max(float(base_col.mean()), 1)
+        tint, g_tint = tint / np.maximum(own, 0.05), g_tint / np.maximum(own, 0.05)
         shade = sup * shade + (1 - sup) * g_shade
         tint = sup[..., None] * tint + (1 - sup[..., None]) * g_tint
         lit = np.clip(new * shade[..., None] * tint, 0, 255)

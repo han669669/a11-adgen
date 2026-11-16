@@ -229,6 +229,23 @@ class LayoutReprint(Tmp):
             self.assertLess(after, before * 0.5, f"print in {(y0, y1, x0, x1)} is not restored: {before:.1f} -> {after:.1f}")
         np.testing.assert_allclose(got[10:60, 10:390], render[10:60, 10:390], atol=2)  # away from the products nothing changes
 
+    def test_reprint_keeps_a_coloured_pack_its_own_colour(self):
+        # A kraft-brown pouch under neutral light: the render's colour holds the pack's own brown, so it must not tint the print twice.
+        a = np.asarray(Image.open(self.pack).convert("RGB")).copy()
+        a[20:240, 30:130][np.all(a[20:240, 30:130] == 232, axis=2)] = (182, 124, 68)
+        self.pack = self.save("kraft.png", a)
+        with contextlib.redirect_stdout(io.StringIO()):
+            product_lock.layout(self.ns())
+        sk = np.asarray(Image.open(os.path.join(self.dir.name, "out.png")).convert("RGB")).astype(np.float32)
+        ideal = sk * 0.85
+        rpath = self.save("render.png", ideal.clip(0, 255))
+        with contextlib.redirect_stdout(io.StringIO()):
+            product_lock.reprint(self.rp(rpath))
+        got = np.asarray(Image.open(os.path.join(self.dir.name, "rp.png")).convert("RGB")).astype(np.float32)
+        y0, y1, x0, x1 = 300, 380, 70, 100                                      # plain kraft on the upright pouch
+        ratio = got[y0:y1, x0:x1].mean(axis=(0, 1)) / ideal[y0:y1, x0:x1].mean(axis=(0, 1))
+        self.assertLess(ratio.max() - ratio.min(), 0.06, f"the print took a colour cast: {ratio.round(3)}")
+
     def test_layout_lets_a_product_bleed_off_the_edge(self):
         # A lying carton cut by the left and top frame edges (the playbook asks for a box end past the edge).
         plan = self.plan(products=[{"cx": 0.02, "base": 0.1, "height": 0.4, "side": "R"}])
