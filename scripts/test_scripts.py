@@ -233,6 +233,7 @@ class LayoutReprint(Tmp):
         # A kraft-brown pouch under neutral light: the render's colour holds the pack's own brown, so it must not tint the print twice.
         a = np.asarray(Image.open(self.pack).convert("RGB")).copy()
         a[20:240, 30:130][np.all(a[20:240, 30:130] == 232, axis=2)] = (182, 124, 68)
+        a[100:140, 60:100][np.all(a[100:140, 60:100] == (182, 124, 68), axis=2)] = 250   # a white badge on the kraft face
         self.pack = self.save("kraft.png", a)
         with contextlib.redirect_stdout(io.StringIO()):
             product_lock.layout(self.ns())
@@ -247,6 +248,10 @@ class LayoutReprint(Tmp):
         y0, y1, x0, x1 = 300, 380, 70, 100                                      # plain kraft on the upright pouch
         ratio = got[y0:y1, x0:x1].mean(axis=(0, 1)) / ideal[y0:y1, x0:x1].mean(axis=(0, 1))
         self.assertLess(ratio.max() - ratio.min(), 0.06, f"the print took a colour cast: {ratio.round(3)}")
+        badge = (ideal.min(axis=2) > 200) & (ideal.max(axis=2) - ideal.min(axis=2) < 4)   # the white badge, neutral in the render
+        self.assertGreater(int(badge.sum()), 200, "the fixture shows the white badge")
+        rgb = got[badge].mean(axis=0)
+        self.assertLess(rgb.max() - rgb.min(), 6, f"the white badge turned yellow: {rgb.round(1)}")
 
     def test_layout_lets_a_product_bleed_off_the_edge(self):
         # A lying carton cut by the left and top frame edges (the playbook asks for a box end past the edge).
