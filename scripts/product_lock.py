@@ -5,7 +5,7 @@ Why: a model redraws a product from a photo and drifts (W46c: the jar came out 9
 A model keeps what is already in its input image. So we place the real product, cut from the packshot, at the exact
 proportions, and the model only builds the scene around it (creative-playbook.md section 7.4).
 
-Needs Python 3 with Pillow and numpy. Runs on the owner's machine or in the session, not in the Worker.
+Needs Python 3 with Pillow and numpy (reprint also needs OpenCV: opencv-python-headless, scripts/requirements.txt). Runs on the owner's machine or in the session, not in the Worker.
 
   skeleton  A blank canvas with N real products placed on it. Use it as the ONLY reference of a draft.
             Each draft gets its own placement, so the 3 drafts of an idea differ in layout, scale and crop.
@@ -481,8 +481,10 @@ def turn(img, length_px, side, rot):
 
 
 def corner(q, img, W, H):
-    """Top-left corner of a turned piece placed at the plan's cx (centre) and base (lowest point)."""
-    return round(q["cx"] * W - img.width / 2), round(q["base"] * H - img.height)
+    """Top-left corner of a turned RGBA piece whose visible product (its alpha box, not the padded image) is centred at the
+    plan's cx and has its lowest point at the plan's base."""
+    b = img.getchannel("A").getbbox() or (0, 0, img.width, img.height)
+    return round(q["cx"] * W - (b[0] + b[2]) / 2), round(q["base"] * H - b[3])
 
 
 def layout(a):
@@ -527,6 +529,14 @@ def reprint(a):
         sys.exit(f"--face {a.face} must lie inside --box {a.box}, with x0<x1 and y0<y1")
     if not (np.isfinite(a.min_score) and 0 < a.min_score < 1):
         sys.exit("--min-score must be between 0 and 1")
+    if not (np.isfinite(a.search_scale) and 0 <= a.search_scale < 1):
+        sys.exit("--search-scale must be 0 or more and below 1")
+    if not (np.isfinite(a.search_rot) and 0 <= a.search_rot <= 45):
+        sys.exit("--search-rot must be from 0 to 45 degrees")
+    if a.search_px < 0:
+        sys.exit("--search-px must be 0 or more")
+    if not (np.isfinite(a.light_px) and a.light_px > 0):
+        sys.exit("--light-px must be above 0")
     plan = load_plan(a.plan)
     render = Image.open(a.render, formats=FORMATS).convert("RGB")
     W, H = render.size
@@ -549,11 +559,12 @@ def reprint(a):
         best = (-2.0,)
         for s in np.arange(1 - a.search_scale, 1 + a.search_scale + 1e-9, 0.01):
             for dr in np.linspace(-a.search_rot, a.search_rot, 5):
-                t = np.asarray(turn(piece.convert("RGB"), length * s, q["side"], q["rot"] + dr)).mean(axis=2).astype(np.float32)
+                timg = turn(piece, length * s, q["side"], q["rot"] + dr)
+                t = np.asarray(timg.convert("RGB")).mean(axis=2).astype(np.float32)
                 th, tw = t.shape
                 iy, ix = int(th * 0.18), int(tw * 0.18)   # the inner part only: no backdrop and no rotated corners in the template
                 ti = t[iy:th - iy, ix:tw - ix]
-                x, y = round(q["cx"] * W - tw / 2), round(q["base"] * H - th)
+                x, y = corner(q, timg, W, H)   # the same place as layout put it
                 pad = round(a.search_px * W / 1536)
                 x0, y0 = max(0, x - pad), max(0, y - pad)
                 sub = G[y0:min(H, y + th + pad), x0:min(W, x + tw + pad)]
@@ -595,6 +606,17 @@ def reprint(a):
         den = np.maximum(lp(paper), 1e-4)
         tint = lp(reg * paper[..., None]) / den[..., None]
         tint = tint / np.maximum(tint.mean(axis=2, keepdims=True), 1)
+        # far from any plain pack colour (a big logo, a badge) the local light is a guess: blend to the product's mean light there
+        sup = np.clip(den * 4, 0, 1)
+        on = paper > 0.5
+        if on.sum() < 50:
+            print(f"product {i + 1}: too little plain pack colour to read the light from; left as rendered")
+            continue
+        g_shade = float(np.clip(np.median(rl[on] / np.maximum(fl[on], 1)), 0.3, 1.3))
+        g_tint = np.median(reg[on], axis=0)
+        g_tint = g_tint / max(g_tint.mean(), 1)
+        shade = sup * shade + (1 - sup) * g_shade
+        tint = sup[..., None] * tint + (1 - sup[..., None]) * g_tint
         lit = np.clip(new * shade[..., None] * tint, 0, 255)
         out[cy0:cy1, cx0:cx1] = out[cy0:cy1, cx0:cx1] * (1 - m[..., None]) + lit * m[..., None]
         debug[cy0:cy1, cx0:cx1] = np.maximum(debug[cy0:cy1, cx0:cx1], m)

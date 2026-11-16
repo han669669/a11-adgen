@@ -201,7 +201,7 @@ class LayoutReprint(Tmp):
         with contextlib.redirect_stdout(io.StringIO()):
             product_lock.layout(self.ns())
         sk = np.asarray(Image.open(os.path.join(self.dir.name, "out.png")).convert("L")).astype(int)
-        self.assertLess(abs(sk[150:395, 70:150].mean() - sk[150:395, 15:45].mean()), 200)  # the shapes and products are drawn
+        self.assertGreater(sk[272:282, 100:120].mean() - sk[100:150, 15:45].mean(), 50, "the upright carton's pale paper over the backdrop")
         self.assertLess(sk[300:400, 90:140].min(), 60, "the upright carton's dark print bars")
         self.assertGreater(sk[440:460, 10:20].mean(), 80)
         self.assertLess(abs(int(sk[480, 5]) - 0x6a), 25, "the floor shape under the products")
@@ -249,6 +249,11 @@ class LayoutReprint(Tmp):
         self.assertIn("non-empty \"products\"", exit_message(product_lock.layout, self.ns(plan=self.plan(products=[]))))
         self.assertIn("rect must be", exit_message(product_lock.layout, self.ns(plan=self.plan(shapes=[{"rect": [0.5, 0, 0.2, 1]}]))))
         self.assertIn("--min-score", exit_message(product_lock.reprint, self.rp(self.pack, min_score=1.5)))
+        self.assertIn("--search-scale", exit_message(product_lock.reprint, self.rp(self.pack, search_scale=float("nan"))))
+        self.assertIn("--search-scale", exit_message(product_lock.reprint, self.rp(self.pack, search_scale=1.2)))
+        self.assertIn("--search-rot", exit_message(product_lock.reprint, self.rp(self.pack, search_rot=-1)))
+        self.assertIn("--search-px", exit_message(product_lock.reprint, self.rp(self.pack, search_px=-5)))
+        self.assertIn("--light-px", exit_message(product_lock.reprint, self.rp(self.pack, light_px=0)))
 
 
 class FoodGrade(unittest.TestCase):
