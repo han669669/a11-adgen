@@ -65,7 +65,7 @@ You must:
 - Keep all functions that exist. Engine 2 batches, packs, the client portal and results must work as before.
 - Keep Claude Code as the only reasoning brain. The Worker makes no model call for thinking.
 - Use the stack that exists: Cloudflare Workers, D1, R2, KV, Images; Exa; fal.ai GPT Image 2.5 Sunburst; 4:5 output.
-- Keep the scope: F&B, packaged F&B and wellness brands that sell a product (owner, 17-11-2026). No service-based wellness. Practice batches stay on packaged F&B.
+- Keep the scope (owner, 17-11-2026): F&B brands with packaged food or drinks, and all wellness brands except service-based wellness businesses with no packaged product. Practice batches stay on packaged F&B.
 - Keep the product lock, the logo by construction and the food checks.
 - Keep the owner's draft selection. The owner does not select concepts and does not write briefs.
 - Keep batches resumable from D1.

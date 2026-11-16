@@ -694,7 +694,7 @@ Evaluation fixtures for the critic contract (words, not code; used by hand or in
 | OD 2.3 | Start thresholds 4 and 3 | As written; Phase 4 checks them | Canon process |
 | OD 2.4 | Change of picks after a render | Owner's word only | Owner |
 | OD 2.5 | C4: sublines that are not facts; headline-only ads | Allowed as `second_beat` or `none` with the owner's word | Owner (flagged) |
-| OD 2.6 | C8: scope in Goal 1 text | Decided 17-11-2026: F&B, packaged F&B and wellness product brands; no service-based wellness. Practice stays on packaged F&B. | Owner |
+| OD 2.6 | C8: scope in Goal 1 text | Decided 17-11-2026: F&B brands with packaged food or drinks, and all wellness brands except service-based wellness businesses with no packaged product. Practice stays on packaged F&B. | Owner |
 
 | Risk | Control |
 |---|---|
@@ -1127,6 +1127,6 @@ For code and plugin changes: the same fixture check before the pull request merg
 | C5 | A new look for each concept. The house recipe (calm and plain) is the fallback when the owner says that the output is not up to standard. The art director can propose the fallback; it does not choose it alone. |
 | C6 | A failed draft is made again once, so the owner sees 3 good drafts. |
 | C7 | A pointer only now. Each document changes as its part is built. When all of v3 is built and works well, all documents are rewritten to describe the live tool. |
-| C8 | The target stays "F&B and wellness": F&B, packaged F&B and wellness brands that sell a product. Service-based wellness businesses are out. |
+| C8 | The target stays "F&B and wellness": F&B brands with packaged food or drinks, and all wellness brands except service-based wellness businesses with no packaged product. |
 
 These decisions apply to engine 3. The live batch flow does not change until the engine 3 units are merged.
