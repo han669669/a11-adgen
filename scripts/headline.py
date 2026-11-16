@@ -206,8 +206,10 @@ def body_centre(logo):
     keep = len(runs)
     while keep > 1:  # drop small, short runs at the right end while together they stay narrow
         x0, x1 = runs[keep - 1]
-        tall = max(rows[x][1] for x in range(x0, x1 + 1)) - min(rows[x][0] for x in range(x0, x1 + 1)) + 1
-        if tall > 0.35 * h or runs[len(runs) - 1][1] - x0 + 1 > 0.1 * w:
+        bottom = max(rows[x][1] for x in range(x0, x1 + 1))
+        tall = bottom - min(rows[x][0] for x in range(x0, x1 + 1)) + 1
+        # a TM or R sits high; a trailing full stop or a low small glyph is part of the wordmark and stays
+        if bottom > 0.5 * h or tall > 0.35 * h or runs[len(runs) - 1][1] - x0 + 1 > 0.1 * w:
             break
         keep -= 1
     return (runs[0][0] + runs[keep - 1][1] + 1) / 2

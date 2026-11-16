@@ -436,6 +436,15 @@ class Headline(Tmp):
         a = np.asarray(Image.open(out).convert("L"))
         cols = np.where(a[int(500 * 0.045) + 12] < 60)[0]                # a row through the wordmark only, under the TM
         self.assertLess(abs((cols.min() + cols.max()) / 2 - 200), 2, "the wordmark is centred")
+        # A trailing full stop sits low: it is part of the wordmark, so the whole file is centred.
+        mark = Image.new("RGBA", (220, 60), (0, 0, 0, 0))
+        mark.paste((0, 0, 0, 255), (0, 0, 200, 60))
+        mark.paste((0, 0, 0, 255), (208, 50, 220, 60))
+        mark.save(logo)
+        out, _ = self.run_("--font", self.FONT, "--headline", "Hi", "--area", "0.1,0.3,0.9,0.5", "--logo", logo, "--logo-width", "0.55")
+        a = np.asarray(Image.open(out).convert("L"))
+        cols = np.where(a[int(500 * 0.045) + 55] < 60)[0]                # a row through the wordmark and the full stop
+        self.assertLess(abs((cols.min() + cols.max()) / 2 - 200), 2, "the logo with its full stop is centred")
 
     def test_the_logo_can_head_a_text_column(self):
         logo = os.path.join(self.dir.name, "logo.png")
