@@ -239,8 +239,10 @@ class LayoutReprint(Tmp):
         sk = np.asarray(Image.open(os.path.join(self.dir.name, "out.png")).convert("RGB")).astype(np.float32)
         ideal = sk * 0.85
         rpath = self.save("render.png", ideal.clip(0, 255))
-        with contextlib.redirect_stdout(io.StringIO()):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
             product_lock.reprint(self.rp(rpath))
+        self.assertIn("real print on 2 of 2 products", out.getvalue())
         got = np.asarray(Image.open(os.path.join(self.dir.name, "rp.png")).convert("RGB")).astype(np.float32)
         y0, y1, x0, x1 = 300, 380, 70, 100                                      # plain kraft on the upright pouch
         ratio = got[y0:y1, x0:x1].mean(axis=(0, 1)) / ideal[y0:y1, x0:x1].mean(axis=(0, 1))

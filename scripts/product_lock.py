@@ -617,7 +617,9 @@ def reprint(a):
         g_tint = g_tint / max(g_tint.mean(), 1)
         # the render's colour holds the pack's own base colour too: divide it out, or a coloured base (a kraft pouch) is tinted twice
         own = base_col / max(float(base_col.mean()), 1)
-        tint, g_tint = tint / np.maximum(own, 0.05), g_tint / np.maximum(own, 0.05)
+        ok = own >= 0.05                                     # a channel the base hardly holds gives no reliable light: keep it neutral
+        tint = np.divide(tint, own, out=np.ones_like(tint), where=np.broadcast_to(ok, tint.shape))
+        g_tint = np.divide(g_tint, own, out=np.ones_like(g_tint), where=ok)
         shade = sup * shade + (1 - sup) * g_shade
         tint = sup[..., None] * tint + (1 - sup[..., None]) * g_tint
         lit = np.clip(new * shade[..., None] * tint, 0, 255)
