@@ -186,27 +186,38 @@ Live read, 16-11-2026: 9 batches. Three are from before the funnel stages or fro
 
 ### 6.4 Smallest safe schema change
 
-Drop the two triggers and put in two triggers that keep a limit of 3 picked funnel ideas per batch. This is one migration with no table rebuild and no change to any row.
+Drop the two triggers and put in triggers that keep a limit of 3 picked funnel ideas per batch, and that keep the old limit of one per stage for an engine 2 batch. This is one migration with no table rebuild and no change to any row.
 
 ```sql
 -- Proposal only. Not applied. Part of migration 0015 (design pack 0.2).
+-- The column batches.engine (default 2) is added first, in the same migration.
 DROP TRIGGER ideas_pick_limit_insert;
 DROP TRIGGER ideas_pick_limit_update;
 CREATE TRIGGER ideas_pick_cap_insert BEFORE INSERT ON ideas
-WHEN NEW.picked = 1 AND NEW.format IN ('tof', 'mof', 'bof')
- AND (SELECT COUNT(*) FROM ideas WHERE batch_id = NEW.batch_id AND picked = 1) >= 3
-BEGIN SELECT RAISE(ABORT, 'Pick limit: 3 ideas per batch.'); END;
-CREATE TRIGGER ideas_pick_cap_update BEFORE UPDATE OF picked, batch_id ON ideas
-WHEN NEW.picked = 1 AND NEW.format IN ('tof', 'mof', 'bof')
- AND (SELECT COUNT(*) FROM ideas WHERE batch_id = NEW.batch_id AND picked = 1 AND id != NEW.id) >= 3
-BEGIN SELECT RAISE(ABORT, 'Pick limit: 3 ideas per batch.'); END;
+WHEN NEW.picked = 1 AND NEW.format IN ('tof', 'mof', 'bof') AND (
+  (SELECT COUNT(*) FROM ideas WHERE batch_id = NEW.batch_id AND picked = 1
+     AND format IN ('tof', 'mof', 'bof')) >= 3
+  OR ((SELECT engine FROM batches WHERE id = NEW.batch_id) = 2
+      AND (SELECT COUNT(*) FROM ideas WHERE batch_id = NEW.batch_id AND picked = 1
+             AND format = NEW.format) >= 1))
+BEGIN SELECT RAISE(ABORT, 'Pick limit: 3 ideas per batch; 1 per stage for an engine 2 batch.'); END;
+CREATE TRIGGER ideas_pick_cap_update BEFORE UPDATE OF picked, format, batch_id ON ideas
+WHEN NEW.picked = 1 AND NEW.format IN ('tof', 'mof', 'bof') AND (
+  (SELECT COUNT(*) FROM ideas WHERE batch_id = NEW.batch_id AND picked = 1 AND id != NEW.id
+     AND format IN ('tof', 'mof', 'bof')) >= 3
+  OR ((SELECT engine FROM batches WHERE id = NEW.batch_id) = 2
+      AND (SELECT COUNT(*) FROM ideas WHERE batch_id = NEW.batch_id AND picked = 1 AND id != NEW.id
+             AND format = NEW.format) >= 1))
+BEGIN SELECT RAISE(ABORT, 'Pick limit: 3 ideas per batch; 1 per stage for an engine 2 batch.'); END;
+-- A third pair of triggers, equal to the two old ones but with
+-- "NEW.format NOT IN ('tof', 'mof', 'bof')" in the WHEN clause, keeps the old limit for old-format rows.
 ```
 
-The old-format batch (four picks, formats `hook` to `offer`) is exempt because the new triggers look only at funnel formats.
+The per-stage limit of an engine 2 batch stays in the database. `ideasPick` (`worker/batch.ts:267-277`) does not check the stage; today only the triggers do. So the new triggers must keep that check for `engine = 2`, and they do. An old-format batch (formats `hook` to `offer`) keeps its old limit of one pick for each format through the third pair of triggers.
 
 ### 6.5 Compatibility, sequence and rollback
 
-1. The migration is safe with the old code: the old Worker gate (`worker/batch.ts:141-150`) and the old prompts still give one pick per stage. So the migration goes live first, with the owner's yes.
+1. The migration is safe with the old code: every batch that exists gets `engine = 2`, and the new triggers keep the limit of one pick per stage for such a batch. So the migration goes live first, with the owner's yes.
 2. Then the code merges. New batches carry a marker (`batches.engine = 3`, design pack 0.2). The board gate keeps the old rule for a batch with `engine = 2` and uses "exactly 3 picked" for `engine = 3`. A batch that is in work at the change keeps its old rule to the end.
 3. Rollback of the code: revert the PR. Old code runs on the new schema.
 4. Rollback of the schema: a new migration that drops the two new triggers and creates the two old ones again. A trigger checks only new writes, so rows of `engine = 3` batches with two picks in one stage stay as they are. No data is lost in either direction.

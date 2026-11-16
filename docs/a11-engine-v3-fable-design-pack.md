@@ -35,7 +35,7 @@ Words used in this file:
 
 File: `migrations/0015_engine_v3.sql`. The implementation session writes it, tests it on the preview D1 and asks the owner for the live run. Contents:
 
-**A. Pick limit: 3 for each batch, not 1 for each stage.** The SQL is in P0 §6.4. It drops `ideas_pick_limit_insert` and `ideas_pick_limit_update` (`migrations/0004_funnel.sql:29-41`) and creates `ideas_pick_cap_insert` and `ideas_pick_cap_update`. Before the live run, read the live trigger text (P0 U3).
+**A. Pick limit: 3 for each batch for engine 3; 1 for each stage stays for engine 2.** The SQL is in P0 §6.4. It drops `ideas_pick_limit_insert` and `ideas_pick_limit_update` (`migrations/0004_funnel.sql:29-41`) and creates `ideas_pick_cap_insert` and `ideas_pick_cap_update`, which read `batches.engine`. Part C (the engine column) must come before part A in the file. Before the live run, read the live trigger text (P0 U3).
 
 **B. Concept data on an idea.**
 
@@ -76,18 +76,27 @@ CREATE TABLE batch_records (
   batch_id TEXT NOT NULL REFERENCES batches(id),
   kind TEXT NOT NULL CHECK (kind IN
     ('brief', 'territories', 'concept_review', 'direction', 'draft_check', 'final_check', 'rank_context')),
-  idea_id TEXT REFERENCES ideas(id),
+  idea_id TEXT,
   version INTEGER NOT NULL,
   body TEXT NOT NULL,
   author TEXT NOT NULL CHECK (author IN ('main', 'writer', 'critic', 'art-director', 'owner', 'server')),
   prompt_version TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (idea_id, batch_id) REFERENCES ideas(id, batch_id)   -- the same composite key as picks, draft_ranks and verdicts
 );
 CREATE UNIQUE INDEX batch_records_version ON batch_records (batch_id, kind, IFNULL(idea_id, ''), version);
 CREATE INDEX batch_records_read ON batch_records (batch_id, kind, created_at);
 ```
 
-**F. Calibration runs (Phase 4).**
+The composite key makes sure that the idea of a record is an idea of the same batch. A record with no idea (`idea_id` NULL) is not checked by it, as SQLite skips a foreign key with a NULL part.
+
+**F. Fact check mark.**
+
+```sql
+ALTER TABLE facts ADD COLUMN verified INTEGER;   -- NULL: not checked (every row that exists). 1: the quote is in the stored source. 0: it is not.
+```
+
+**G. Calibration runs (Phase 4).**
 
 ```sql
 CREATE TABLE calibration_runs (
@@ -109,8 +118,8 @@ Notes for the implementation session:
 - Follow the style of the 14 migrations that exist (ids, date format, `STRICT` if the others use it). The SQL above shows the design, not the final text.
 - `tests/migrations.test.ts:9-41` tests the old triggers. Change that test in the same pull request as the migration file.
 - **Alternative that was considered:** one typed table for each record kind. It gives stronger column checks and six more tables. The one-table design was chosen because each kind is read whole, by batch, and is never joined on a field of its body. The implementation session may choose typed tables if it finds a query that needs them. It must say so in the pull request.
-- **Order:** the migration is safe to run while engine 2 code is live. Engine 2 code never picks more than one idea for each stage, because `ideasPick` (`worker/batch.ts:267-277`) checks this before the write. After the migration, that worker check is the only guard for engine 2 batches. Do not remove it.
-- **Rollback:** a new migration that drops the two new triggers and creates the two old triggers again. This is possible only while no batch has two picks in one stage. The new columns and tables stay; they do no harm. The code rollback is a revert pull request.
+- **Order:** the migration is safe to run while engine 2 code is live. `ideasPick` (`worker/batch.ts:267-277`) does not check the stage; the D1 triggers are the only guard of the one-per-stage limit. So the new triggers keep that limit for every batch with `engine = 2` (P0 §6.4), and every batch that exists gets `engine = 2`. Test this in `tests/migrations.test.ts`: after the migration, a second pick in one stage of an engine 2 batch is still refused.
+- **Rollback:** a new migration that drops the new triggers and creates the two old triggers again. A trigger checks only new writes, so rows that exist stay as they are. The new columns and tables stay; they do no harm. The code rollback is a revert pull request.
 - **Never** run migration 0014 or its backfill again.
 
 ### 0.3 Next step from the server (no new status values)
@@ -167,7 +176,7 @@ Every record has `prompt_version`. The subagent passes the plugin version (today
 
 - Research: `exa_search` and `exa_contents` (`worker/mcp.ts:67-98`, `worker/exa.ts:31-75`) return results to the session. The server stores nothing.
 - Insights: `batch_update insights` saves a flat list in `batches.insights` (`worker/mcp.ts:279-292`). Each item has text, a quote and a URL that the agent typed. The server does not know if the quote is real.
-- Facts: `facts_save` saves verified product facts for a subject (`worker/batch.ts:43-55`). Facts have a source and a quote. No retrieval date is returned.
+- Facts: `facts_save` saves product facts for a subject (`worker/batch.ts:43-55`). Facts have a source URL and a quote that the agent typed. The server checks only that the subject exists. It does not check the quote. So a row in `facts` is "the agent says it is verified", not "verified". No retrieval date is returned.
 - There is no place for the buyer, the category, the objective, the constraints or the unknowns. There is no difference between evidence, interpretation and hypothesis.
 - The writer reads the insights through `batch_get`. The critic reads the same view, which also has the main session's notes (`worker/batch.ts:512`).
 
@@ -233,7 +242,7 @@ Field rules:
 | `evidence[].market` | `SG`, `non-SG` or `unknown`. A buyer insight with `market: "SG"` needs at least one evidence item with `market: "SG"`. If it has none, its basis is `hypothesis`. |
 | `evidence[].verified` | The server sets it (1.4). The input value is ignored. |
 | `evidence[].retrievedAt`, `publishedDate` | The server copies them from the research source when `sourceId` is given. |
-| `productFacts` | Only ids of rows in `facts`. The facts table stays "verified facts only". A price, size, offer or certification that is not in `facts` is an unknown. |
+| `productFacts` | Only ids of rows in `facts`. A price, size, offer or certification that is not in `facts` is an unknown. A fact whose `verified` mark is not 1 (see 1.4) is shown as not verified to the writer, the critic and the owner; it must not be used as a factual claim in copy until its quote is found in a stored source or the owner confirms it in his own words. |
 | `commercialObjective.source` | `default` means that nobody stated an objective. The default text is "practice batch: one ad good enough to win a real client". It is marked as a hypothesis. |
 | `unknowns[].howToResolve` | `owner`, `client` or `public_research`. |
 
@@ -248,6 +257,7 @@ Private data: `owner_supplied` and `client_supplied` evidence has no public URL.
 - Without `batchId`, the tools work as today.
 - **Quote check in `brief_save`:** for each evidence item with a `sourceId`, the server normalises the quote and the stored text (lower case, all white space to one space, curly quotes to straight quotes, dashes to one form) and sets `verified` to true if the quote is in the text. An item with no `sourceId` gets `verified: false`, except `owner_supplied` and `client_supplied`, which get `verified: null`.
 - `brief_save` returns the list of items that are not verified. The main session then corrects the quote, fetches the page with `exa_contents`, or changes the basis of what depends on it.
+- **The same check for facts.** `facts_save` gets an optional `batchId`. With it, the server looks for each fact's quote in the stored source text of that batch with the same URL, with the same normalisation, and writes `facts.verified` (1 or 0). Without `batchId`, or when the page is not stored, the mark stays NULL (not checked). The batch prompt tells the main session to fetch the product page with `exa_contents` and `batchId` before `facts_save`. `brief_save` gives a warning for each fact id in `productFacts` whose mark is not 1. The copy review text marks a subline with `sublineBasis.kind: "fact"` whose fact is not verified, so the owner sees it before he approves. This is a mark and a warning, not a refusal (OD 1.1 covers both checks). Old facts have NULL and are treated as not checked.
 - The check proves that the words are on the page. It does not prove that the page is true.
 - Storage: about 40 sources for a batch at 20,000 characters is under 1 MB for a batch. Recheck the D1 limits first (P0 U4).
 
@@ -258,7 +268,7 @@ Private data: `owner_supplied` and `client_supplied` evidence has no public URL.
 | `exa_search`, `exa_contents` | EXTEND | Add optional `batchId` | Add `sourceId` to each result |
 | `brief_save` | NEW | `batchId`, `brief` (1.3), `promptVersion` | `version`, `unverified[]` (evidence ids), `warnings[]` |
 | `batch_get` | EXTEND | No change | Add `brief` (latest body and version), `sources` (id, URL, title, dates; no text), `nextStep` |
-| `facts_save` and the facts in `batch_get` | EXTEND | No change | Add `retrievedAt` (the row's `created_at`) |
+| `facts_save` and the facts in `batch_get` | EXTEND | Add optional `batchId` (quote check, 1.4) | Add `retrievedAt` (the row's `created_at`) and `verified` (true, false or null) |
 | `batch_update insights` | KEEP | No change | Engine 2 batches use it. Engine 3 batches do not need it. |
 
 `brief_save` warnings (not refusals): an insight with basis `evidence` and no verified evidence; an SG insight with no SG evidence; a buyer insight with basis `evidence` whose evidence has no `buyer` speaker; `confidence: "high"` with evidence from one domain.
@@ -386,11 +396,14 @@ Fixtures (new file, for example `tests/fixtures/brief.ts`): the example brief ab
 | 1.12 | `batch_get` on an engine 2 batch | `brief: null`; all old fields equal to today |
 | 1.13 | `owner_supplied` evidence with no URL | `verified: null`; no warning |
 | 1.14 | The MCP tool list test | `brief_save` is listed and has a test |
+| 1.15 | `facts_save` with `batchId`, quote in the stored page | `verified: true` |
+| 1.16 | `facts_save` with a quote that is not on the stored page; and with no stored page | `verified: false`; `verified: null` |
+| 1.17 | `brief_save` with a fact id whose mark is not 1 | Warning that names the fact |
 
 ### 1.13 Acceptance criteria
 
 1. A batch can save a brief with sources; each insight shows its basis, its evidence and its confidence (v3 Phase 1).
-2. A fact that is not verified is an unknown; the facts table has only verified facts.
+2. A fact that is not in `facts` is an unknown. Each fact shows whether the server found its quote in a stored source; a fact that is not verified is marked so wherever it is shown.
 3. No text calls public research "customer data".
 4. The writer and the critic get the brief through `batch_get`.
 5. A new session continues from the saved brief.
@@ -401,7 +414,7 @@ Fixtures (new file, for example `tests/fixtures/brief.ts`): the example brief ab
 
 | # | Decision | Default in this design | Who |
 |---|---|---|---|
-| OD 1.1 | Is an unverified quote a refusal? | No. A mark and a warning. A refusal needs one real failure and a row in `docs/decisions.md` (rule budget). | Owner, after first batches |
+| OD 1.1 | Is an unverified quote (evidence or fact) a refusal? | No. A mark and a warning. A refusal needs one real failure and a row in `docs/decisions.md` (rule budget). | Owner, after first batches |
 | OD 1.2 | Does the owner want to approve the brief before concepts? | No. He gets 5 lines. He said he does not want to write briefs (v3 §7.5). | Owner |
 | OD 1.3 | Reuse a brief from an earlier batch of the same product | Not in the first unit. | Implementation session |
 | OD 1.4 | Text limit for a stored source | 20,000 characters | Implementation session, after the limit check |
@@ -603,7 +616,7 @@ After a `select`, the main session stops and shows the owner, as text only: the 
 
 When the owner changes the words, `ideas_update` keeps the first text: it writes `copy.written = { headline, subline }` once, before the first change (unit 0; the `copy` column is JSON, so no migration). Phase 4 uses it for the copy correction rate.
 
-If the owner swaps a pick for a reserve, the main session calls `ideas_pick` again with the new 3 ids, the same review and a note `ownerSwap` with his words. The record author is `owner`.
+The owner is not asked to select concepts (v3 §7.5). The copy review is a yes or no on words. The reserves are shown only as the spares of today's copy review. If he rejects the words of a pick, the default is that the writer changes the words or the concept goes back to the critic (`concepts_rework` with his words). Only if he, in his own words, names a reserve to use in its place, the main session calls `ideas_pick` again with the new 3 ids, the same review and a note `ownerSwap` with his exact words. The record author is `owner`. The main session never suggests a swap.
 
 ### 2.8 MCP tools
 

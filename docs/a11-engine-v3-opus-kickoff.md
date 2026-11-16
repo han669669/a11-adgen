@@ -144,7 +144,7 @@ Do not claim success without evidence. Mark every item that you did not test as 
 
 **Target behaviour.**
 
-1. For each idea in the answer of `batchGet`: the idea is **decided** when it has an owner pick (a row in `picks` with `by_owner = 1` for that idea) or the owner passed on all its drafts (a full-pass verdict for that idea; read `verdictInserts` at `worker/batch.ts:94-134` and `picksSave` at `:317-352` for the exact way a pass is stored, and use that).
+1. For each idea in the answer of `batchGet`: the idea is **decided** when it has an owner pick (a row in `picks` with `by_owner = 1` for that idea) or the owner passed on all its drafts. A full pass (a draft verdict with mark `pass`; read `verdictInserts` at `worker/batch.ts:94-134` and `picksSave` at `:317-352` for the exact way it is stored) is saved for the idea, with no draft key. So it covers only the drafts that existed when it was saved. A draft made later (a redraft) stays held until a pick or a newer pass: compare the created time of each draft's render with the created time of the verdict.
 2. For an idea that is not decided, every draft has `rank: null` and `reason: null`.
 3. Each idea gets a new boolean `ranked`: true when at least one of its drafts has a row in `draft_ranks`. The batch flow uses it to know that the blind rank is done.
 4. For a decided idea the answer is as today.
@@ -167,6 +167,7 @@ Do not claim success without evidence. Mark every item that you did not test as 
 | c | After `picksSave` by the owner for that idea | Ranks and reasons as saved |
 | d | After a full pass on that idea's drafts | Ranks and reasons as saved |
 | e | Two ideas, one decided | Only the decided idea shows ranks |
+| e2 | A full pass, then new drafts of that idea with new ranks | The old drafts show ranks; the new drafts are held until a pick |
 | f | A pick that is not by the owner, if the code can make one | Still held |
 | g | `GET /api/batches/:id` before a pick | No rank and no reason in the JSON |
 | h | The test at `tests/batch.test.ts:162-179` | Read it. It expects rank fields on `batch_get`. Keep its order assertions; move its rank assertions after the pick if they are before it. |
