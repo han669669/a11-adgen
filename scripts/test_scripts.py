@@ -425,6 +425,27 @@ class Headline(Tmp):
         self.assertGreater(int(a[int(500 * 0.045) + 5, 20]), 180)  # the backdrop beside it
         self.assertNotIn("WARNING", msg)
 
+    def test_a_small_trade_mark_does_not_pull_the_centred_logo_left(self):
+        # A wordmark with a small TM at its right top (the IRVINS logo): the wordmark, not the whole file, is centred.
+        logo = os.path.join(self.dir.name, "logo.png")
+        mark = Image.new("RGBA", (220, 60), (0, 0, 0, 0))
+        mark.paste((0, 0, 0, 255), (0, 0, 200, 60))   # the wordmark
+        mark.paste((0, 0, 0, 255), (208, 0, 220, 10))  # the TM: small, short, set apart
+        mark.save(logo)
+        out, _ = self.run_("--font", self.FONT, "--headline", "Hi", "--area", "0.1,0.3,0.9,0.5", "--logo", logo, "--logo-width", "0.55")
+        a = np.asarray(Image.open(out).convert("L"))
+        cols = np.where(a[int(500 * 0.045) + 12] < 60)[0]                # a row through the wordmark only, under the TM
+        self.assertLess(abs((cols.min() + cols.max()) / 2 - 200), 2, "the wordmark is centred")
+        # A trailing full stop sits low: it is part of the wordmark, so the whole file is centred.
+        mark = Image.new("RGBA", (220, 60), (0, 0, 0, 0))
+        mark.paste((0, 0, 0, 255), (0, 0, 200, 60))
+        mark.paste((0, 0, 0, 255), (208, 50, 220, 60))
+        mark.save(logo)
+        out, _ = self.run_("--font", self.FONT, "--headline", "Hi", "--area", "0.1,0.3,0.9,0.5", "--logo", logo, "--logo-width", "0.55")
+        a = np.asarray(Image.open(out).convert("L"))
+        cols = np.where(a[int(500 * 0.045) + 55] < 60)[0]                # a row through the wordmark and the full stop
+        self.assertLess(abs((cols.min() + cols.max()) / 2 - 200), 2, "the logo with its full stop is centred")
+
     def test_the_logo_can_head_a_text_column(self):
         logo = os.path.join(self.dir.name, "logo.png")
         Image.new("RGBA", (100, 40), (0, 0, 0, 255)).save(logo)

@@ -184,6 +184,37 @@ def _layout(draw, path, sub_path, headline, subline, box_w, box_h, wght, sub_wgh
     return None
 
 
+def body_centre(logo):
+    """The x of the logo's visual centre: a small mark set apart at its right top (a TM or R sign) is left out,
+    or a centred logo leans left by half that mark's width."""
+    a = logo.getchannel("A").point(lambda v: 255 if v > 20 else 0)
+    w, h = a.size
+    px = a.load()
+    rows = []  # per column: the (top, bottom) of its ink, or None
+    for x in range(w):
+        ys = [y for y in range(h) if px[x, y]]
+        rows.append((ys[0], ys[-1]) if ys else None)
+    runs, start = [], None
+    for x, r in enumerate(rows + [None]):
+        if r and start is None:
+            start = x
+        elif not r and start is not None:
+            runs.append((start, x - 1))
+            start = None
+    if not runs:
+        return w / 2
+    keep = len(runs)
+    while keep > 1:  # drop small, short runs at the right end while together they stay narrow
+        x0, x1 = runs[keep - 1]
+        bottom = max(rows[x][1] for x in range(x0, x1 + 1))
+        tall = bottom - min(rows[x][0] for x in range(x0, x1 + 1)) + 1
+        # a TM or R sits high; a trailing full stop or a low small glyph is part of the wordmark and stays
+        if bottom > 0.5 * h or tall > 0.35 * h or runs[len(runs) - 1][1] - x0 + 1 > 0.1 * w:
+            break
+        keep -= 1
+    return (runs[0][0] + runs[keep - 1][1] + 1) / 2
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--in", dest="src", required=True)
@@ -310,7 +341,7 @@ def main(argv=None):
     if sl:
         y = put(sl, sf, sh, y + int(hf.size * a.gap))
     if logo:
-        im.paste(logo, ((W - logo.width) // 2 if a.logo_x is None else round(W * a.logo_x), ly), logo)
+        im.paste(logo, (round(W / 2 - body_centre(logo)) if a.logo_x is None else round(W * a.logo_x), ly), logo)
     im.save(a.out, quality=95)
     for n in (note, sub_note):
         if n:
