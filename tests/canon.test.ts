@@ -170,6 +170,96 @@ describe("taste canon", () => {
   });
 });
 
+describe("canon scopes (migration 0016)", () => {
+  const withBrands = () => {
+    const m = makeEnv();
+    m.raw.exec(`INSERT INTO brands (id, slug, name, created_at, updated_at) VALUES ('b1', 'wongi', 'WonGi', 't', 't'), ('b2', 'irvins', 'IRVINS', 't', 't')`);
+    return m;
+  };
+  const add = (env: Env, rule: string, more: Partial<canon.CanonChange> = {}) =>
+    canon.canonUpdate(env, { action: "add", rule, source: "owner 17-11", ...more }) as Promise<{ id: string; scope: string; brandSlug?: string }>;
+
+  it("gives a batch the rules that are not brand rules plus its own brand's rules, never another brand's", async () => {
+    const { env } = withBrands();
+    const owner = await add(env, "Calm ads win, for every brand.");
+    await add(env, "A creative principle for all.", { scope: "creative" });
+    const w = await add(env, "WonGi: the jar lid stays gold.", { scope: "brand", brandSlug: "wongi" });
+    const i = await add(env, "IRVINS: the fish skin stays crisp.", { scope: "brand", brandSlug: "irvins" });
+    expect(owner.scope).toBe("owner");
+    expect(w).toMatchObject({ scope: "brand", brandSlug: "wongi" });
+    const plain = await canon.canonGet(env, {});
+    expect(plain.rules.map((r) => r.rule)).toEqual(["Calm ads win, for every brand.", "A creative principle for all."]);
+    expect(plain).not.toHaveProperty("brandRules");
+    const wongi = await run(env, "canon_get", { brandSlug: "wongi" });
+    expect(wongi.rules.map((r: { rule: string }) => r.rule)).toEqual(["Calm ads win, for every brand.", "A creative principle for all.", "WonGi: the jar lid stays gold."]);
+    expect(wongi.rules[2]).toMatchObject({ scope: "brand", brandSlug: "wongi" });
+    expect(wongi).toMatchObject({ activeRules: 2, max: 40, brandRules: { brandSlug: "wongi", active: 1, max: 10 } });
+    // The recent changes follow the same filter: another brand's rule text never reaches this batch.
+    expect(wongi.recentChanges.map((l: { rule_id: string }) => l.rule_id)).not.toContain(i.id);
+    expect(JSON.stringify(wongi)).not.toContain("IRVINS");
+    // A review of every brand's rules, and of one scope.
+    expect((await canon.canonGet(env, { scope: "brand" })).rules.map((r) => r.brandSlug)).toEqual(["wongi", "irvins"]);
+    expect((await canon.canonGet(env, { scope: "creative" })).rules).toHaveLength(1);
+    expect((await canon.canonGet(env, { scope: "brand", brandSlug: "irvins" })).rules.map((r) => r.id)).toEqual([i.id]);
+    await expect(canon.canonGet(env, { scope: "owner", brandSlug: "irvins" })).rejects.toThrow(/brandSlug goes with scope brand/);
+    await expect(canon.canonGet(env, { brandSlug: "nobody" })).rejects.toThrow(/No brand nobody/);
+  });
+
+  it("needs a brand that exists for a brand rule, and no brand for any other rule", async () => {
+    const { env, raw } = withBrands();
+    await expect(add(env, "A brand rule without a brand.", { scope: "brand" })).rejects.toThrow(/needs brandSlug/);
+    await expect(add(env, "A brand rule for no brand.", { scope: "brand", brandSlug: "nobody" })).rejects.toThrow(/No brand nobody/);
+    await expect(add(env, "An owner rule with a brand.", { brandSlug: "wongi" })).rejects.toThrow(/Only a brand rule/);
+    // The database refuses the same, also for a write that does not go through the tool.
+    const ins = (scope: string, brand: string | null) =>
+      raw.prepare("INSERT INTO canon_rules (id, stage, scope, brand_slug, text, created_at, updated_at, last_evidence_at) VALUES (?, 'all', ?, ?, 'x', 't', 't', 't')").run(crypto.randomUUID().slice(0, 8), scope, brand);
+    expect(() => ins("brand", null)).toThrow(/canon scope/);
+    expect(() => ins("brand", "nobody")).toThrow(/canon scope/);
+    expect(() => ins("owner", "wongi")).toThrow(/canon scope/);
+    expect(() => ins("taste", null)).toThrow(/CHECK/);
+    const t = TOOLS.find((x) => x.name === "canon_update")!;
+    expect(() => validate(t.inputSchema, { action: "add", rule: "x x x x x x x x", source: "s s", scope: "product" })).toThrow();
+  });
+
+  it("moves a rule between scopes on an edit, logs the move, and keeps the scope when the edit names none", async () => {
+    const { env, raw } = withBrands();
+    const { id } = await add(env, "Gold lids look premium for this jar.");
+    await canon.canonUpdate(env, { action: "edit", id, rule: "Gold lids look premium for this jar.", source: "owner 17-11: only WonGi", scope: "brand", brandSlug: "wongi" });
+    expect((await canon.canonGet(env, { brandSlug: "wongi" })).rules[0]).toMatchObject({ id, scope: "brand", brandSlug: "wongi" });
+    expect((await canon.canonGet(env, { brandSlug: "irvins" })).rules).toEqual([]);
+    // A reword alone keeps the scope and the brand.
+    await canon.canonUpdate(env, { action: "edit", id, rule: "Gold lids look premium on the WonGi jar.", source: "s" });
+    expect((await canon.canonGet(env, { scope: "brand" })).rules[0]).toMatchObject({ id, brandSlug: "wongi", rule: "Gold lids look premium on the WonGi jar." });
+    // Evidence from other brands: back to an owner rule, and the brand goes.
+    await canon.canonUpdate(env, { action: "edit", id, rule: "Gold lids look premium.", source: "IRVINS and WonGi picks", scope: "owner" });
+    expect((await canon.canonGet(env, {})).rules[0]).toMatchObject({ id, scope: "owner" });
+    expect((await canon.canonGet(env, {})).rules[0]).not.toHaveProperty("brandSlug");
+    const logs = (raw.prepare("SELECT detail FROM canon_log WHERE rule_id = ? AND action = 'edit' ORDER BY id").all(id) as { detail: string }[]).map((l) => JSON.parse(l.detail));
+    expect(logs[0]).toMatchObject({ fromScope: "owner", toScope: "brand", toBrand: "wongi" });
+    expect(logs[1]).not.toHaveProperty("fromScope");
+    expect(logs[2]).toMatchObject({ fromScope: "brand", toScope: "owner", fromBrand: "wongi" });
+    expect(logs[2]).not.toHaveProperty("toBrand");
+    await expect(canon.canonUpdate(env, { action: "edit", id, rule: "Gold lids look premium.", source: "s", scope: "brand" })).rejects.toThrow(/needs brandSlug/);
+  });
+
+  it("keeps 10 active rules for each brand apart from the 40 for every batch", async () => {
+    const { env } = withBrands();
+    const ids: string[] = [];
+    for (let n = 0; n < 10; n++) ids.push((await add(env, `WonGi lesson number ${n}.`, { scope: "brand", brandSlug: "wongi" })).id);
+    await expect(add(env, "One WonGi lesson too many.", { scope: "brand", brandSlug: "wongi" })).rejects.toThrow(/This brand has 10 active rules/);
+    await add(env, "IRVINS has its own room.", { scope: "brand", brandSlug: "irvins" });
+    for (let n = 0; n < 40; n++) await add(env, `Owner rule number ${n}.`);
+    await expect(add(env, "One owner rule too many.")).rejects.toThrow(/The canon is full \(40 active rules\)/);
+    // A brand rule cannot become the 41st rule for every batch.
+    await expect(canon.canonUpdate(env, { action: "edit", id: ids[0]!, rule: "Now for every brand.", source: "s", scope: "owner" })).rejects.toThrow(/canon is full/);
+    await canon.canonUpdate(env, { action: "retire", id: ids[1]!, reason: "old" });
+    await add(env, "Room again for WonGi.", { scope: "brand", brandSlug: "wongi" });
+    await expect(canon.canonUpdate(env, { action: "restore", id: ids[1]!, reason: "back" })).rejects.toThrow(/This brand has 10 active rules/);
+    // A reword of a rule in a full scope is fine.
+    await canon.canonUpdate(env, { action: "edit", id: ids[2]!, rule: "WonGi lesson, reworded.", source: "s" });
+  });
+});
+
 describe("swipe file", () => {
   it("keeps the newest 3 per brand and stage, with the brand's own first group included", async () => {
     const { env, raw } = makeEnv();
