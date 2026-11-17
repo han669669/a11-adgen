@@ -216,8 +216,19 @@ export interface IdeaUpdate {
 
 export async function ideasUpdate(env: Env, updates: IdeaUpdate[]) {
   const stmts: D1PreparedStatement[] = [];
-  const owner: string[] = []; // the idea id each statement must change
+  const owner: (string | null)[] = []; // the idea id each statement must change (null: a statement that may change nothing)
   for (const u of updates) {
+    // Before the owner's first change of the words, keep the words as written (copy.written, once), so the copy
+    // correction rate can be measured (a11-engine v3 design pack §2.7).
+    if (u.headline !== undefined || u.subline !== undefined) {
+      stmts.push(
+        env.DB.prepare(
+          `UPDATE ideas SET copy = json_set(copy, '$.written', json_object('headline', headline, 'subline', COALESCE(json_extract(copy, '$.subline'), '')))
+           WHERE id = ? AND json_extract(copy, '$.written') IS NULL`,
+        ).bind(u.id),
+      );
+      owner.push(null);
+    }
     const sets: string[] = [];
     const args: unknown[] = [];
     if (u.picked !== undefined) (sets.push("picked = ?"), args.push(u.picked ? 1 : 0));
@@ -240,7 +251,7 @@ export async function ideasUpdate(env: Env, updates: IdeaUpdate[]) {
     }
   }
   const res = await env.DB.batch(stmts);
-  const missing = [...new Set(owner.filter((_, i) => res[i]?.meta.changes !== 1))];
+  const missing = [...new Set(owner.filter((id, i): id is string => id !== null && res[i]?.meta.changes !== 1))];
   if (missing.length) throw new Error(`No idea with id: ${missing.join(", ")}.`);
   return { updated: updates.length };
 }
@@ -250,8 +261,12 @@ export async function ideasUpdate(env: Env, updates: IdeaUpdate[]) {
  * A draft is rendered only for an idea whose headline and subline the owner approved, as they are now.
  */
 export async function copyApprovedCheck(env: Env, batchId: string, ideaId: string) {
-  const row = await env.DB.prepare("SELECT headline, copy FROM ideas WHERE id = ? AND batch_id = ?").bind(ideaId, batchId).first<{ headline: string; copy: string }>();
+  const row = await env.DB.prepare("SELECT headline, copy, picked FROM ideas WHERE id = ? AND batch_id = ?")
+    .bind(ideaId, batchId)
+    .first<{ headline: string; copy: string; picked: number }>();
   if (!row) throw new Error(`No idea ${ideaId} in batch ${batchId}. A draft belongs to an idea of its batch.`);
+  // A paid draft only for an idea the critic picked (a11-engine v3 design pack §2.6).
+  if (row.picked !== 1) throw new Error(`Idea ${ideaId} is not picked. Drafts are made only for the picked ideas of a batch.`);
   const copy = JSON.parse(row.copy) as { subline?: string; ownerApproved?: { headline: string; subline: string } };
   const ok = copy.ownerApproved;
   if (!copy.subline?.trim())
@@ -482,6 +497,32 @@ export async function batchList(env: Env, brandSlug?: string) {
 }
 
 /** Everything about one batch, for Claude and for the board. */
+/** A stable order for one batch that is not the order the writer gave (FNV-1a, 32 bit). */
+function shuffleKey(s: string) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
+  return h;
+}
+
+/**
+ * The critic's view of a batch (a11-engine v3 design pack §2.5): what it needs to judge, and nothing that shows
+ * a favourite. No batch notes, no picks or finals, no owner words, no rank or reason (also not of decided ideas),
+ * no final prompt, and the ideas in a stable shuffled order without their numbers.
+ */
+export async function batchGetCritic(env: Env, id: string) {
+  const { notes: _notes, picks: _picks, ideas, ...rest } = await batchGet(env, id);
+  return {
+    ...rest,
+    view: "critic" as const,
+    ideas: ideas
+      .map(({ n: _n, finals: _f, finalPrompt: _fp, finalRefs: _fr, copy, drafts, ...i }) => {
+        const { ownerApproved: _oa, written: _w, ...words } = (copy ?? {}) as Record<string, unknown>;
+        return { ...i, copy: words, drafts: drafts.map(({ key, url }) => ({ key, url })) };
+      })
+      .sort((a, b) => shuffleKey(`${id}:${a.id}`) - shuffleKey(`${id}:${b.id}`)),
+  };
+}
+
 export async function batchGet(env: Env, id: string) {
   const b = await env.DB.prepare(
     `SELECT b.*, br.slug AS brand_slug, br.name AS brand_name FROM batches b JOIN brands br ON br.id = b.brand_id WHERE b.id = ?`,
