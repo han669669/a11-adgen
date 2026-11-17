@@ -497,7 +497,8 @@ export async function tasteLog(env: Env, limit = 30, before?: string) {
   // The stored times have milliseconds: a time cut is normalised to that form, so a cut at 10:00:00Z keeps out 10:00:00.200Z.
   // A date cut stays as it is (it sorts before every time of that day).
   const parsed = before ? new Date(before) : null;
-  if (parsed && Number.isNaN(parsed.valueOf())) throw new InputError("before must be a real UTC date or time, such as 2026-11-12 or 2026-11-12T10:00:00.000Z.");
+  // Date rolls an impossible day over (2026-02-30 becomes 03-02): the date part must come back unchanged.
+  if (parsed && (Number.isNaN(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== before!.slice(0, 10))) throw new InputError("before must be a real UTC date or time, such as 2026-11-12 or 2026-11-12T10:00:00.000Z.");
   const cut = !before ? "9999" : before.length === 10 ? before : parsed!.toISOString();
   const picks = await env.DB.prepare(
     `SELECT p.render_key, p.idea_id, p.batch_id, p.note, p.created_at, i.format, i.headline, i.visual, b.label
