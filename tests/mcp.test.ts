@@ -72,6 +72,14 @@ describe("mcp handler", () => {
     expect(text).toContain("batch_update ownerVerdicts (stage 'draft', mark 'pass'");
     expect(text).toContain("when food shows");
   });
+  it("sends every critic read without the plugin to the critic view", async () => {
+    const { PROMPTS } = await import("../worker/prompts");
+    for (const name of ["batch", "redesign"]) {
+      const p = PROMPTS.find((x) => x.name === name)!;
+      const text = p.text({ brand: "b", productTitle: "t", productUrl: "https://x", label: "l", adUrl: "https://x" });
+      expect(text).toContain("rank them yourself in a fresh session, from batch_get with view 'critic'");
+    }
+  });
   it("runs the gold test inline, in the full set, and never asks to run another prompt", async () => {
     const { PROMPTS } = await import("../worker/prompts");
     for (const name of ["learn", "gold-test"]) {

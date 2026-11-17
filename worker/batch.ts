@@ -496,7 +496,6 @@ export async function batchList(env: Env, brandSlug?: string) {
   return (await (brandSlug ? stmt.bind(brandSlug) : stmt).all()).results;
 }
 
-/** Everything about one batch, for Claude and for the board. */
 /** A stable order for one batch that is not the order the writer gave (FNV-1a, 32 bit). */
 function shuffleKey(s: string) {
   let h = 0x811c9dc5;
@@ -523,6 +522,7 @@ export async function batchGetCritic(env: Env, id: string) {
   };
 }
 
+/** Everything about one batch, for Claude and for the board. */
 export async function batchGet(env: Env, id: string) {
   const b = await env.DB.prepare(
     `SELECT b.*, br.slug AS brand_slug, br.name AS brand_name FROM batches b JOIN brands br ON br.id = b.brand_id WHERE b.id = ?`,
