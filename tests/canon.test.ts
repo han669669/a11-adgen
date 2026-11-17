@@ -299,6 +299,8 @@ describe("gold set", () => {
     expect((await canon.goldScore(env, { note: "full after", answers: pass(full) })).previous).toMatchObject({ scope: "all", note: "full before" });
     expect((await canon.goldScore(env, { note: "scoped after", scope: "in_scope", answers: pass(scoped) })).previous).toMatchObject({ scope: "in_scope", note: "scoped before" });
     expect((await canon.goldRuns(env)).runs.map((x) => `${x.scope}:${x.note}`)).toEqual(["in_scope:scoped after", "all:full after", "in_scope:scoped before", "all:full before"]);
+    // The tag is the server's: a note may not start with it, or an all-scope run would read as an in_scope run.
+    await expect(canon.goldScore(env, { note: "[in_scope] mine", answers: pass(full) })).rejects.toThrow(/may not start with \[in_scope\]/);
   });
 
   it("pages the gold set in a fixed order", async () => {

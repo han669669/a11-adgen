@@ -881,7 +881,7 @@ export const TOOLS: Tool[] = [
   {
     name: "calibration_save",
     description:
-      "Save one critic replay run (design pack §4.6): the server scores the answers against the owner's labels and writes one calibration_runs row with the agreement (n, Wilson interval), the choice of each position (position bias) and each item right or wrong. kind triplet_replay: for each item of calibration_items kind triplet, choice is the key of the picture the critic chose or 'pass'; final_replay: approve, fix or reject; give the same asOf, split and seed. concept_stability: the critic's selections from two fresh contexts on one batch, with no pick saved; the alarm is fewer than 2 of 3 in common. A replay is secondary and marked contaminated (the canon is the current one). Do not show the result to the replay critic.",
+      "Save one critic replay run (design pack §4.6): the server scores the answers against the owner's labels and writes one calibration_runs row with the agreement (n, Wilson interval), the choice of each position (position bias) and each item right or wrong. kind triplet_replay: an answer for every item of the set (kind, asOf, split; a partial run is refused); for each item of calibration_items kind triplet, choice is the key of the picture the critic chose or 'pass'; final_replay: approve, fix or reject; give the same asOf, split and seed. concept_stability: the critic's selections from two fresh contexts on one batch, with no pick saved; the alarm is fewer than 2 of 3 in common. A replay is secondary and marked contaminated (the canon is the current one). Do not show the result to the replay critic.",
     inputSchema: {
       type: "object",
       properties: {
@@ -894,7 +894,7 @@ export const TOOLS: Tool[] = [
         answers: {
           type: "array",
           minItems: 1,
-          maxItems: 300,
+          maxItems: 2000,
           items: {
             type: "object",
             properties: {

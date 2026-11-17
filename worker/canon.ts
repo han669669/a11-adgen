@@ -284,6 +284,7 @@ export async function goldScore(env: Env, a: { note: string; answers: { id: stri
   // A run must cover the whole set of its scope, or the guard could pass on an easy subset. Ids are unique and all known, so equal counts mean full cover.
   const total = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM gold_items ${w.sql}`).bind(...w.binds).first<{ n: number }>())?.n ?? 0;
   if (ids.length !== total) throw new InputError(`Answer every gold item of the scope: the set has ${total} and you sent ${ids.length}.`);
+  if (a.note.startsWith(SCOPE_TAG)) throw new InputError(`The note may not start with ${SCOPE_TAG.trim()}: the server adds that tag for the in_scope score.`);
   const note = a.scope === "in_scope" ? `${SCOPE_TAG}${a.note}` : a.note;
   const agreed = a.answers.filter((x) => truth.get(x.id) === x.mark).length;
   const useAgreed = a.answers.filter((x) => x.mark === "use" && truth.get(x.id) === "use").length;

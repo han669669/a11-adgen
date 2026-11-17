@@ -257,7 +257,7 @@ export async function calibrationReport(env: Env, f: ReportFilter = {}) {
     falseRejection: stamped(rejected.map(([id, c]) => ({ engine: c.engine, pv: c.pv, hit: ownerPicked.has(id) }))),
     productDefectRate: stamped(all.map((c) => ({ engine: c.engine, pv: c.pv, hit: productFail(c) }))),
     copyCorrectionRate: byEngine(copies),
-    replays: await replaySummary(env),
+    replays: await replaySummary(env, f),
     paidRenderWaste: {
       usdWaste: round(waste),
       usdTotal: round(total),
@@ -314,7 +314,9 @@ async function deriveItems(env: Env, kind: ItemKind, asOf?: string) {
   };
   let items: Derived[];
   if (kind === "triplet") {
-    // A decision on a draft set: the owner's pick, or his full pass. The drafts he saw are the finished drafts of that idea made before it.
+    // A decision on a draft set: the owner's pick, or his full pass. The drafts he saw are the finished drafts of that idea
+    // made after his previous full pass on it and at or before the decision; for engine 3, only the eligible drafts of the
+    // direction round of that time (the board shows him those, design pack §3.6).
     const decisions = await q<IdeaRow & { batch_id: string; idea_id: string; at: string; label: string; said: string }>(
       `SELECT d.batch_id, d.idea_id, d.at, d.label, d.said, ${ideaCols} FROM (
          SELECT batch_id, idea_id, created_at AS at, render_key AS label, COALESCE(note, '') AS said FROM picks WHERE by_owner = 1 AND created_at <= ?1
@@ -323,10 +325,36 @@ async function deriveItems(env: Env, kind: ItemKind, asOf?: string) {
        ) d JOIN ideas i ON i.id = d.idea_id AND i.batch_id = d.batch_id JOIN batches b ON b.id = d.batch_id ORDER BY d.at, d.idea_id`,
       cut,
     );
-    const drafts = await q<{ batch: string; idea: string; image_keys: string; created_at: string }>(
-      `SELECT batch, idea, image_keys, created_at FROM renders WHERE kind = 'draft' AND status = 'done' AND created_at <= ? ORDER BY created_at, id`,
+    const drafts = await q<{ id: string; batch: string; idea: string; image_keys: string; created_at: string }>(
+      `SELECT id, batch, idea, image_keys, created_at FROM renders WHERE kind = 'draft' AND status = 'done' AND created_at <= ? ORDER BY created_at, id`,
       cut,
     );
+    const passes = await q<{ batch_id: string; idea_id: string; created_at: string }>(
+      "SELECT batch_id, idea_id, created_at FROM verdicts WHERE stage = 'draft' AND mark = 'pass' AND idea_id IS NOT NULL AND created_at <= ?",
+      cut,
+    );
+    // Engine 3: each draft check (oldest first) and each direction that starts a round (no draft renderId), with their times.
+    const checks = await q<{ body: string; created_at: string }>(
+      "SELECT body, created_at FROM batch_records WHERE kind = 'draft_check' AND created_at <= ? ORDER BY created_at, rowid",
+      cut,
+    );
+    const roundStarts = await q<{ batch_id: string; idea_id: string; version: number; created_at: string }>(
+      `SELECT batch_id, idea_id, version, created_at FROM batch_records d WHERE kind = 'direction' AND idea_id IS NOT NULL AND created_at <= ?
+         AND NOT EXISTS (SELECT 1 FROM json_each(d.body, '$.drafts') WHERE json_extract(value, '$.renderId') IS NOT NULL)`,
+      cut,
+    );
+    const seen = (d: (typeof decisions)[number]) => {
+      const prev = passes.filter((p) => p.batch_id === d.batch_id && p.idea_id === d.idea_id && p.created_at < d.at).reduce((m, p) => (p.created_at > m ? p.created_at : m), "");
+      const own = drafts.filter((r) => r.batch === d.batch_id && r.idea === d.idea_id && r.created_at > prev && r.created_at <= d.at);
+      if (d.engine !== 3) return own;
+      const round = roundStarts.filter((r) => r.batch_id === d.batch_id && r.idea_id === d.idea_id && r.created_at <= d.at).reduce((m, r) => Math.max(m, r.version), 0);
+      const newest = new Map<string, { eligible?: boolean; round?: number }>();
+      for (const c of checks) if (c.created_at <= d.at) {
+        const b = JSON.parse(c.body) as { renderId: string; eligible?: boolean; round?: number };
+        newest.set(b.renderId, b);
+      }
+      return own.filter((r) => newest.get(r.id)?.eligible === true && (newest.get(r.id)!.round ?? 0) >= round);
+    };
     items = decisions.map((d) => ({
       id: `t:${d.batch_id}:${d.idea_id}:${d.at}`,
       kind,
@@ -334,7 +362,7 @@ async function deriveItems(env: Env, kind: ItemKind, asOf?: string) {
       batchId: d.batch_id,
       ideaId: d.idea_id,
       decidedAt: d.at,
-      keys: drafts.filter((r) => r.batch === d.batch_id && r.idea === d.idea_id && r.created_at <= d.at).flatMap((r) => JSON.parse(r.image_keys) as string[]),
+      keys: seen(d).flatMap((r) => JSON.parse(r.image_keys) as string[]),
       idea: ideaOf(d),
       label: d.label,
       ownerSaid: d.said,
@@ -372,7 +400,7 @@ async function deriveItems(env: Env, kind: ItemKind, asOf?: string) {
 
 const inSplit = (i: number, holdoutFrom: number, split: Split) => split === "all" || (split === "holdout" ? i >= holdoutFrom : i < holdoutFrom);
 
-/** The pictures of an item in the order of the seed: the same seed gives the same order, so the server can check a position. */
+/** Keys in the order of the seed: the same seed gives the same order, so the server can check a position. */
 async function shuffled(keys: string[], seed: string) {
   const h = async (k: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${seed}|${k}`)))].map((b) => b.toString(16).padStart(2, "0")).join("");
   const hashed = await Promise.all(keys.map(async (k) => [await h(k), k] as const));
@@ -387,6 +415,9 @@ export async function calibrationItems(env: Env, a: { kind: ItemKind; asOf?: str
   const split = a.split ?? "all";
   const d = await deriveItems(env, a.kind, a.asOf);
   const chosen = d.kept.filter((_, i) => inSplit(i, d.holdoutFrom, split));
+  // The items in the order of the seed too, so the replay critic cannot read the decision order from the list.
+  const order = await shuffled(chosen.map((i) => i.id), a.seed);
+  const byId = new Map(chosen.map((i) => [i.id, i]));
   const balance = a.kind === "triplet"
     ? { picked: chosen.filter((i) => i.label !== "pass").length, passed: chosen.filter((i) => i.label === "pass").length }
     : Object.fromEntries(["approve", "fix", "reject"].map((m) => [m, chosen.filter((i) => i.label === m).length]));
@@ -402,7 +433,7 @@ export async function calibrationItems(env: Env, a: { kind: ItemKind; asOf?: str
       SMALL_SET,
       "Contamination: the critic's canon is the current one and may hold lessons from these items. Give the replay critic taste_log with before set to each item's decidedAt.",
     ],
-    items: await Promise.all(chosen.map(async (i) => ({
+    items: await Promise.all(order.map((id) => byId.get(id)!).map(async (i) => ({
       id: i.id,
       engine: i.engine,
       decidedAt: i.decidedAt,
@@ -438,6 +469,14 @@ export async function calibrationSave(
   let n: number, result: Record<string, unknown>, asOf: string;
   if (a.kind === "concept_stability") {
     if (!a.stability) throw new InputError("concept_stability needs stability: the batch id and the two selections.");
+    const both = [...a.stability.first, ...a.stability.second];
+    if (new Set(a.stability.first).size !== a.stability.first.length || new Set(a.stability.second).size !== a.stability.second.length)
+      throw new InputError("Each selection must name 3 different concepts.");
+    const known = await env.DB.prepare(`SELECT id FROM ideas WHERE batch_id = ? AND id IN (${both.map(() => "?").join(", ")})`)
+      .bind(a.stability.batchId, ...both).all<{ id: string }>();
+    const ids = new Set(known.results.map((r) => r.id));
+    const strange = both.filter((id) => !ids.has(id));
+    if (strange.length) throw new InputError(`Not concepts of batch ${a.stability.batchId}: ${[...new Set(strange)].slice(0, 3).join(", ")}.`);
     const common = a.stability.first.filter((id) => a.stability!.second.includes(id)).length;
     asOf = new Date().toISOString();
     n = 1;
@@ -453,6 +492,9 @@ export async function calibrationSave(
     if (new Set(ids).size !== ids.length) throw new InputError("Each item may be answered once.");
     const unknown = ids.filter((id) => !set.has(id) || !inSplit(set.get(id)!.x, d.holdoutFrom, split));
     if (unknown.length) throw new InputError(`Not items of this set (kind, asOf, split): ${unknown.slice(0, 3).join(", ")}.`);
+    // A run covers the whole set of its split, or two runs would not compare (the same rule as gold_score).
+    const expected = d.kept.filter((_, x) => inSplit(x, d.holdoutFrom, split)).length;
+    if (ids.length !== expected) throw new InputError(`Answer every item of this set (kind, asOf, split): it has ${expected} and you sent ${ids.length}.`);
     const scored = await Promise.all(a.answers.map(async (ans) => {
       const it = set.get(ans.itemId)!.item;
       let position: number | "pass" | null = null;
@@ -475,6 +517,7 @@ export async function calibrationSave(
       agreement: prop(right, n),
       chance: kind === "triplet" ? "1 in the number of pictures (1/3 for 3 drafts), or the class balance for a pass" : "the class balance",
       positions,
+      splitDate: d.splitDate,
       contaminated: true,
       stamp,
       items: scored.map(({ reason: _r, ...s }) => s),
@@ -487,21 +530,30 @@ export async function calibrationSave(
   return { id, kind: a.kind, asOf, split, n, ...result };
 }
 
-/** The replay runs for the report: the newest runs and the position bias of the triplet replays (design pack §4.9). */
-export async function replaySummary(env: Env) {
-  const runs = await env.DB.prepare(
-    "SELECT id, kind, as_of, split, canon_log_id, prompt_version, n, result, created_at FROM calibration_runs ORDER BY created_at DESC LIMIT 10",
-  ).all<{ id: string; kind: string; as_of: string; split: string; canon_log_id: string | null; prompt_version: string; n: number; result: string; created_at: string }>();
-  const all = await env.DB.prepare("SELECT result FROM calibration_runs WHERE kind = 'triplet_replay'").all<{ result: string }>();
+/**
+ * The replay runs for the report: the newest runs and the position bias of the triplet replays (design pack §4.9).
+ * since and promptVersion filter the runs; engine keeps the replay runs with an item of that engine, and the position
+ * bias counts the choices on those items only (a concept stability run has no engine, so engine leaves it out).
+ */
+export async function replaySummary(env: Env, f: ReportFilter = {}) {
+  type Row = { id: string; kind: string; as_of: string; split: string; canon_log_id: string | null; prompt_version: string; n: number; result: string; created_at: string };
+  type Res = { agreement?: unknown; common?: number; alarm?: boolean; items?: { engine: number; position: number | "pass" | null }[] };
+  const rows = (await env.DB.prepare(
+    `SELECT id, kind, as_of, split, canon_log_id, prompt_version, n, result, created_at FROM calibration_runs
+     WHERE created_at >= ?1 AND (?2 IS NULL OR prompt_version = ?2) ORDER BY created_at DESC`,
+  ).bind(f.since ?? "", f.promptVersion ?? null).all<Row>()).results
+    .map((r) => ({ r, res: JSON.parse(r.result) as Res }))
+    .filter(({ res }) => f.engine === undefined || (res.items ?? []).some((i) => i.engine === f.engine));
   const counts: Record<string, number> = {};
-  for (const r of all.results) for (const [p, c] of Object.entries((JSON.parse(r.result) as { positions?: Record<string, number> }).positions ?? {})) counts[p] = (counts[p] ?? 0) + c;
+  for (const { r, res } of rows) if (r.kind === "triplet_replay")
+    for (const i of res.items ?? []) if (typeof i.position === "number" && (f.engine === undefined || i.engine === f.engine)) counts[String(i.position)] = (counts[String(i.position)] ?? 0) + 1;
   const chose = ["1", "2", "3"].reduce((s, p) => s + (counts[p] ?? 0), 0);
   const share = Object.fromEntries(["1", "2", "3"].map((p) => [p, chose ? round((counts[p] ?? 0) / chose) : null]));
   return {
-    runs: runs.results.map((r) => {
-      const res = JSON.parse(r.result) as { agreement?: unknown; common?: number; alarm?: boolean };
-      return { id: r.id, kind: r.kind, asOf: r.as_of, split: r.split, canonLogId: r.canon_log_id, promptVersion: r.prompt_version, n: r.n, agreement: res.agreement ?? null, common: res.common, alarm: res.alarm, at: r.created_at };
-    }),
+    runs: rows.slice(0, 10).map(({ r, res }) => ({
+      id: r.id, kind: r.kind, asOf: r.as_of, split: r.split, canonLogId: r.canon_log_id, promptVersion: r.prompt_version, n: r.n,
+      agreement: res.agreement ?? null, common: res.common, alarm: res.alarm, at: r.created_at,
+    })),
     positionBias: { choices: chose, share, alarm: chose >= 20 && Object.values(share).some((s) => (s ?? 0) > 0.5) },
   };
 }
