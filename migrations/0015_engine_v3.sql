@@ -6,6 +6,12 @@
 -- C. The engine of a batch. Every batch that exists is engine 2. batch_create writes 3 only when engine 3 is live.
 -- It comes first: the triggers of part A read it.
 ALTER TABLE batches ADD COLUMN engine INTEGER NOT NULL DEFAULT 2 CHECK (engine IN (2, 3));
+-- The engine is fixed when the batch is made: a change would leave picks that break the other engine's limit.
+CREATE TRIGGER batches_engine_fixed BEFORE UPDATE OF engine ON batches
+WHEN NEW.engine IS NOT OLD.engine
+BEGIN
+  SELECT RAISE(ABORT, 'batches: the engine of a batch is fixed when it is made');
+END;
 
 -- B. The concept of an idea (territory, mechanism and the other concept fields), as JSON. Old ideas have '{}'.
 ALTER TABLE ideas ADD COLUMN concept TEXT NOT NULL DEFAULT '{}';
@@ -65,7 +71,7 @@ CREATE TABLE research_sources (
 );
 CREATE UNIQUE INDEX research_sources_once ON research_sources (batch_id, url, via);
 
--- E. Batch records: the brief, territories, concept reviews, directions, checks and rank stamps. Only added, never changed:
+-- E. Batch records: the brief, territories, concept reviews, directions, checks and rank stamps. Only added, never changed or deleted:
 -- a new version is a new row.
 CREATE TABLE batch_records (
   id TEXT PRIMARY KEY NOT NULL,
@@ -82,6 +88,10 @@ CREATE TABLE batch_records (
 CREATE UNIQUE INDEX batch_records_version ON batch_records (batch_id, kind, IFNULL(idea_id, ''), version);
 CREATE INDEX batch_records_read ON batch_records (batch_id, kind, created_at);
 CREATE TRIGGER batch_records_no_update BEFORE UPDATE ON batch_records
+BEGIN
+  SELECT RAISE(ABORT, 'batch_records: rows are only added, never changed');
+END;
+CREATE TRIGGER batch_records_no_delete BEFORE DELETE ON batch_records
 BEGIN
   SELECT RAISE(ABORT, 'batch_records: rows are only added, never changed');
 END;

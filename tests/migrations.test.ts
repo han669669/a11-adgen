@@ -112,18 +112,27 @@ describe("0015_engine_v3", () => {
                ('o2', 'bo', 2, 'hook', 'x', 'x', 'x', 0, 't');
     `);
     const rows = db.prepare("SELECT * FROM ideas ORDER BY id").all();
+    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[]).map((t) => t.name);
+    const snapshot = Object.fromEntries(tables.map((t) => [t, db.prepare(`SELECT * FROM "${t}" ORDER BY rowid`).all()]));
     db.exec("BEGIN");
     db.exec(sql("0015_engine_v3.sql"));
     db.exec("COMMIT");
-    return { db, rows };
+    return { db, rows, snapshot };
   };
   const pick = (db: DatabaseSync, id: string) => db.exec(`UPDATE ideas SET picked = 1 WHERE id = '${id}'`);
   const addIdea = (db: DatabaseSync, id: string, batch: string, n: number, format: string, picked = 1) =>
     db.exec(`INSERT INTO ideas (id, batch_id, n, format, insight, visual, headline, picked, created_at) VALUES ('${id}', '${batch}', ${n}, '${format}', 'x', 'x', 'x', ${picked}, 't')`);
 
   it("keeps every row, marks every batch engine 2 and adds empty defaults", () => {
-    const { db, rows } = migrated();
+    const { db, rows, snapshot } = migrated();
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    // Every row of every table before 0015 is still there, unchanged apart from the new columns and their defaults.
+    const added: Record<string, Record<string, unknown>> = { batches: { engine: 2 }, ideas: { concept: "{}" }, facts: { verified: null } };
+    for (const [t, before] of Object.entries(snapshot)) {
+      expect(db.prepare(`SELECT * FROM "${t}" ORDER BY rowid`).all()).toEqual(before.map((r) => ({ ...r, ...added[t] })));
+    }
+    expect(snapshot.batches).toHaveLength(2);
+    expect(snapshot.facts).toHaveLength(1);
     expect(db.prepare("SELECT id, engine FROM batches ORDER BY id").all()).toEqual([{ id: "ba", engine: 2 }, { id: "bo", engine: 2 }]);
     expect(db.prepare("SELECT * FROM ideas ORDER BY id").all()).toEqual(rows.map((r) => ({ ...r, concept: "{}" })));
     expect(db.prepare("SELECT verified FROM facts").all()).toEqual([{ verified: null }]);
@@ -157,7 +166,11 @@ describe("0015_engine_v3", () => {
     // Unpick one, then another can be picked.
     db.exec("UPDATE ideas SET picked = 0 WHERE id = 'e2'");
     pick(db, "e4");
-    expect(() => db.exec("UPDATE batches SET engine = 4 WHERE id = 'b3'")).toThrow(/CHECK/);
+    expect(() => db.exec("INSERT INTO batches (id, brand_id, subject_id, kit_version, label, status, engine, created_at, updated_at) VALUES ('b4', 'br', 'su', 1, 'W47', 'ideas', 4, 't', 't')")).toThrow(/CHECK/);
+    // The engine is fixed: 3 tof picks must never become an engine 2 batch.
+    expect(() => db.exec("UPDATE batches SET engine = 2 WHERE id = 'b3'")).toThrow("engine of a batch is fixed");
+    expect(() => db.exec("UPDATE batches SET engine = 3 WHERE id = 'ba'")).toThrow("engine of a batch is fixed");
+    db.exec("UPDATE batches SET status = 'drafts', engine = 3 WHERE id = 'b3'");
   });
 
   it("keeps the old limit of 1 per format for an old-format batch", () => {
@@ -185,6 +198,8 @@ describe("0015_engine_v3", () => {
     expect(() => add("x6", "ba", "brief", null, 0)).toThrow(/CHECK/);
     expect(() => add("x7", "zz", "brief", null, 1)).toThrow(/FOREIGN KEY/);
     expect(() => db.exec("UPDATE batch_records SET body = '{\"x\":1}' WHERE id = 'r1'")).toThrow("never changed");
+    expect(() => db.exec("DELETE FROM batch_records WHERE id = 'r1'")).toThrow("never changed");
+    expect(db.prepare("SELECT COUNT(*) AS n FROM batch_records").get()).toEqual({ n: 4 });
   });
 
   it("keeps one research source per batch, page and way it was read", () => {
