@@ -22,6 +22,19 @@ export async function subjectSave(
   input: { brandSlug: string; kind: "product" | "brand" | "redesign"; title: string; url?: string; imageUrls?: string[]; notes?: string },
 ) {
   const brand = await brandBySlug(env, input.brandSlug);
+  // a11-engine v3 Phase 5 (lasting product): a product page that this brand already has a subject for is the same
+  // product, so its facts and lessons carry over. Images or notes make a new subject, as before (they belong to that batch).
+  if (input.kind === "product" && input.url && !input.imageUrls?.length && !input.notes) {
+    const url = productUrlKey(input.url);
+    const earlier = await env.DB.prepare(
+      "SELECT id, title, url, created_at FROM subjects WHERE brand_id = ? AND kind = 'product' AND url IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 500",
+    ).bind(brand.id).all<{ id: string; title: string; url: string; created_at: string }>();
+    const same = earlier.results.find((r) => productUrlKey(r.url) === url);
+    if (same) {
+      const facts = await env.DB.prepare("SELECT COUNT(*) AS n FROM facts WHERE subject_id = ?").bind(same.id).first<{ n: number }>();
+      return { id: same.id, brandSlug: brand.slug, kind: input.kind, title: same.title, imageKeys: [], imageErrors: [], reused: true, since: same.created_at, facts: facts?.n ?? 0 };
+    }
+  }
   const id = crypto.randomUUID();
   // The images are fetched now and kept: a live ad can be taken down, and the agent looks at the copy with image_get.
   const { keys: imageKeys, errors: imageErrors } = await storeSubjectImages(env, id, input.imageUrls ?? []);
@@ -37,7 +50,17 @@ export async function subjectSave(
     if (!row) await Promise.all(imageKeys.map((k) => env.MEDIA.delete(k).catch(() => undefined)));
     throw e;
   }
-  return { id, brandSlug: brand.slug, kind: input.kind, title: input.title, imageKeys, imageErrors };
+  return { id, brandSlug: brand.slug, kind: input.kind, title: input.title, imageKeys, imageErrors, reused: false };
+}
+
+/** A product page URL as a key: the host in lower case, no fragment, no trailing slash. The query stays (it can name a variant). */
+function productUrlKey(u: string) {
+  try {
+    const x = new URL(u);
+    return `${x.protocol}//${x.host.toLowerCase()}${x.pathname.replace(/\/+$/, "")}${x.search}`;
+  } catch {
+    return u;
+  }
 }
 
 export interface FactInput {
