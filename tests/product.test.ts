@@ -58,7 +58,10 @@ describe("subject_save: a lasting product (unit 8)", () => {
     expect(raw.prepare("SELECT COUNT(*) AS n FROM subjects").get()).toEqual({ n: 6 });
     // The subject with notes is newer than the plain one, but only the plain one is reused.
     expect((await run(env, "subject_save", product("https://shop.example.com/p/granola"))).id).toBe(first.id);
-    raw.prepare("UPDATE subjects SET data = json_set(data, '$.notes', 'old note') WHERE id = ?").run(first.id);
+    // A subject that asked for images is not plain, even when every image failed to download.
+    raw.prepare("UPDATE subjects SET data = json_set(data, '$.imageUrls', json('[\"https://x.example/a.png\"]')) WHERE id = ?").run(first.id);
     expect((await run(env, "subject_save", product("https://shop.example.com/p/granola"))).reused).toBe(false);
+    raw.prepare("UPDATE subjects SET data = json_set(data, '$.imageUrls', json('[]'), '$.notes', 'old note') WHERE id = ?").run(first.id);
+    expect((await run(env, "subject_save", product("https://shop.example.com/p/granola"))).id).not.toBe(first.id);
   });
 });

@@ -31,8 +31,8 @@ export async function subjectSave(
     ).bind(brand.id).all<{ id: string; title: string; url: string; data: string; created_at: string }>();
     // Only a plain earlier subject (no images, no notes) is the product: images and notes belong to their own batch.
     const plain = (d: string) => {
-      const x = JSON.parse(d) as { imageKeys?: string[]; notes?: string };
-      return !x.imageKeys?.length && !x.notes;
+      const x = JSON.parse(d) as { imageKeys?: string[]; imageUrls?: string[]; notes?: string };
+      return !x.imageKeys?.length && !x.imageUrls?.length && !x.notes;
     };
     const same = earlier.results.find((r) => productUrlKey(r.url) === url && plain(r.data));
     if (same) {
