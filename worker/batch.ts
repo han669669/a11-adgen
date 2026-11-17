@@ -656,7 +656,8 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
       finalPrompt: i.final_prompt,
       finalRefs: JSON.parse(i.final_refs),
       // Engine 3: the art director's newest direction (design pack §3.3), or null. Engine 2 ideas have no such field.
-      ...(b.engine === 3 ? { direction: directions.get(i.id) ?? null } : {}),
+      // Only a picked idea shows it: the direction of a concept that a swap or a rework unpicked is not for use.
+      ...(b.engine === 3 ? { direction: i.picked === 1 ? (directions.get(i.id) ?? null) : null } : {}),
       ranked: newest.length > 0 && newest.every((d) => rankBy.has(d.key)),
       // Submit order, then image order. Never rank order: the order must not show the critic's rank.
       // rank and reason are null until the owner decides on the idea (see shown above).

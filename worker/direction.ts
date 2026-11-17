@@ -88,17 +88,43 @@ export type Direction = {
   elementCount: number;
 };
 
-/** The plan text as an object, or a refusal: the same first checks as load_plan in scripts/product_lock.py. */
+const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+/** A colour as scripts/product_lock.py rgb() reads it: #RRGGBB, or three numbers with commas. */
+const colour = (v: unknown) => /^(#[0-9a-fA-F]{6}|\s*-?\d+(\.\d+)?\s*(,\s*-?\d+(\.\d+)?\s*){2})$/.test(String(v));
+
+/** The plan text as an object, or a refusal: the checks of load_plan in scripts/product_lock.py, so reprint can read it. */
 function parsePlan(n: number, text: string): Record<string, unknown> {
+  const bad = (why: string): never => {
+    throw new InputError(`drafts n ${n}: ${why} (scripts/product_lock.py load_plan). Give the text of the plan file that product_lock.py layout read.`);
+  };
   let plan: unknown;
   try {
     plan = JSON.parse(text);
   } catch {
-    throw new InputError(`drafts n ${n}: plan is not JSON. Give the text of the plan file that product_lock.py layout read.`);
+    return bad("plan is not JSON");
   }
-  const products = (plan as { products?: unknown } | null)?.products;
-  if (!plan || typeof plan !== "object" || Array.isArray(plan) || !Array.isArray(products) || products.length === 0)
-    throw new InputError(`drafts n ${n}: the plan needs a non-empty "products" list (scripts/product_lock.py load_plan).`);
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) return bad("the plan must be a JSON object");
+  const p = plan as { size?: unknown; bg?: unknown; products?: unknown; shapes?: unknown };
+  if (!Array.isArray(p.products) || p.products.length === 0) bad('the plan needs a non-empty "products" list');
+  if (p.size !== undefined && !(Array.isArray(p.size) && p.size.length === 2 && p.size.every((v) => Number.isInteger(v) && v > 0)))
+    bad('the plan\'s "size" must be [W, H] in whole pixels');
+  if (p.bg !== undefined && !colour(p.bg)) bad('the plan\'s "bg" must be a colour such as #EEE8DF');
+  for (const [i, q] of (p.products as unknown[]).entries()) {
+    if (!q || typeof q !== "object" || Array.isArray(q)) bad(`product ${i + 1} must be an object`);
+    const { side = "up", rot = 0, cx, base, height } = q as Record<string, unknown>;
+    if (!["up", "L", "R"].includes(side as string)) bad(`product ${i + 1}: side must be one of up, L, R`);
+    if (![cx, base, height, rot].every(num)) bad(`product ${i + 1}: cx, base, height and rot must be numbers`);
+    const [x, y, h, r] = [cx, base, height, rot] as [number, number, number, number];
+    if (!(h > 0 && h <= 1.5 && x >= -0.5 && x <= 1.5 && y > 0 && y <= 1.5 && Math.abs(r) <= 45))
+      bad(`product ${i + 1}: height must be above 0, cx and base near the canvas, rot within 45 degrees`);
+  }
+  if (p.shapes !== undefined && !Array.isArray(p.shapes)) bad('the plan\'s "shapes" must be a list');
+  for (const [i, sh] of ((p.shapes ?? []) as unknown[]).entries()) {
+    const r = (sh as { rect?: unknown } | null)?.rect;
+    if (!(Array.isArray(r) && r.length === 4 && r.every(num) && r[0]! < r[2]! && r[1]! < r[3]!)) bad(`shape ${i + 1}: rect must be [x0, y0, x1, y1] with x0<x1, y0<y1`);
+    const fill = (sh as { fill?: unknown }).fill;
+    if (fill !== undefined && !colour(fill)) bad(`shape ${i + 1}: fill must be a colour such as #F6F5F2`);
+  }
   return plan as Record<string, unknown>;
 }
 
@@ -107,11 +133,17 @@ export async function directionSave(env: Env, batchId: string, ideaId: string, d
   const b = await env.DB.prepare("SELECT engine FROM batches WHERE id = ?").bind(batchId).first<{ engine: number }>();
   if (!b) throw new InputError(`No batch with id ${batchId}.`);
   if (b.engine !== 3) throw new InputError("direction_save is for an engine 3 batch only. An engine 2 batch keeps the art director's plans in its notes, as today.");
-  const idea = await env.DB.prepare("SELECT n, picked, copy FROM ideas WHERE id = ? AND batch_id = ?").bind(ideaId, batchId).first<{ n: number; picked: number; copy: string }>();
+  const idea = await env.DB.prepare("SELECT n, picked, headline, copy FROM ideas WHERE id = ? AND batch_id = ?")
+    .bind(ideaId, batchId)
+    .first<{ n: number; picked: number; headline: string; copy: string }>();
   if (!idea) throw new InputError(`${ideaId} is not an idea of batch ${batchId}.`);
   if (idea.picked !== 1) throw new InputError(`Idea ${idea.n} is not picked: only the 3 picked concepts get a direction.`);
-  if (!(JSON.parse(idea.copy) as { ownerApproved?: unknown }).ownerApproved)
+  const copy = JSON.parse(idea.copy) as { subline?: string; ownerApproved?: { headline?: string; subline?: string } };
+  if (!copy.ownerApproved)
     throw new InputError(`The owner has not approved the words of idea ${idea.n}: show him the copy review first (ideas_update copyApproved).`);
+  // As copyApprovedCheck (worker/batch.ts) for a render: the direction leaves space for the words he approved, not old ones.
+  if (copy.ownerApproved.headline !== idea.headline || copy.ownerApproved.subline !== copy.subline)
+    throw new InputError(`The words of idea ${idea.n} changed after the owner approved them: show him the new words and save his approval again first.`);
 
   const ns = direction.drafts.map((d) => d.n).sort();
   if (ns.join() !== "1,2,3") throw new InputError("drafts needs n 1, 2 and 3, once each.");

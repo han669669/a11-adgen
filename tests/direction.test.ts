@@ -35,11 +35,11 @@ const direction = (over: Record<string, unknown> = {}, shared: Record<string, un
   ...over,
 });
 
-/** An engine 3 batch with 3 picks (ideas 0, 3 and 6) whose words the owner approved. */
+/** An engine 3 batch with 3 picks (ideas 0, 3 and 6) whose words (headline and subline as they are) the owner approved. */
 async function approved() {
   const s = await withConcepts();
   await run(s.env, "ideas_pick", select(s.ideas));
-  s.raw.prepare(`UPDATE ideas SET copy = json_set(copy, '$.ownerApproved', json('{"headline":"h","subline":"s"}')) WHERE batch_id = ? AND picked = 1`).run(E3);
+  s.raw.prepare(`UPDATE ideas SET copy = json_set(copy, '$.ownerApproved', json_object('headline', headline, 'subline', json_extract(copy, '$.subline'))) WHERE batch_id = ? AND picked = 1`).run(E3);
   return s;
 }
 const save = (env: any, ideaId: string, d: unknown = direction()) => run(env, "direction_save", { batchId: E3, ideaId, direction: d, promptVersion: "0.2.15" });
@@ -90,7 +90,27 @@ describe("direction_save", () => {
     await expect(save(env, ideas[0]!.id, direction({ drafts: [draft(1), draft(2), draft(2)] }))).rejects.toThrow("n 1, 2 and 3, once each");
     await expect(save(env, ideas[0]!.id, direction({ drafts: [draft(1), draft(2), draft(3, { plan: "products: []" })] }))).rejects.toThrow("plan is not JSON");
     await expect(save(env, ideas[0]!.id, direction({ drafts: [draft(1), draft(2), draft(3, { plan: '{"products": []}' })] }))).rejects.toThrow('non-empty "products" list');
-    expect(records(raw)).toEqual([]);
+    // The other checks of load_plan in scripts/product_lock.py, so reprint can read the plan later.
+    const badPlan = (over: Record<string, unknown>) => direction({ drafts: [draft(1), draft(2), draft(3, { plan: JSON.stringify({ ...PLAN, ...over }) })] });
+    const product = PLAN.products[0]!;
+    await expect(save(env, ideas[0]!.id, badPlan({ size: [1024.5, 1280] }))).rejects.toThrow('"size" must be [W, H]');
+    await expect(save(env, ideas[0]!.id, badPlan({ products: [{ ...product, side: "flat" }] }))).rejects.toThrow("side must be one of up, L, R");
+    await expect(save(env, ideas[0]!.id, badPlan({ products: [{ ...product, height: 0 }] }))).rejects.toThrow("height must be above 0");
+    await expect(save(env, ideas[0]!.id, badPlan({ products: [{ cx: 0.5, base: 0.8 }] }))).rejects.toThrow("must be numbers");
+    await expect(save(env, ideas[0]!.id, badPlan({ shapes: [{ rect: [0.5, 0, 0.2, 1] }] }))).rejects.toThrow("shape 1: rect");
+    await expect(save(env, ideas[0]!.id, badPlan({ bg: "beige" }))).rejects.toThrow('"bg" must be a colour');
+    // side and rot may be left out, as load_plan gives them defaults; a colour may be three numbers.
+    const { side: _s, rot: _r, ...bare } = product;
+    expect(await save(env, ideas[0]!.id, badPlan({ products: [bare], bg: "233, 228, 220" }))).toMatchObject({ version: 1 });
+    await expect(save(env, ideas[0]!.id, badPlan({ products: [bare], bg: "233, 228, 220" }))).resolves.toMatchObject({ version: 2 });
+    expect(records(raw).length).toBe(2);
+  });
+
+  it("refuses a direction when the words changed after the owner approved them", async () => {
+    const { env, raw, ideas } = await approved();
+    expect(await save(env, ideas[0]!.id)).toMatchObject({ version: 1 });
+    raw.prepare("UPDATE ideas SET headline = 'A new headline.' WHERE id = ?").run(ideas[0]!.id);
+    await expect(save(env, ideas[0]!.id)).rejects.toThrow("changed after the owner approved them");
   });
 
   it("(3.4) saves a weak set with warnings: a pair with 1 axis, no composition, camera or scale, 7 elements, a high risk with no reason", async () => {
@@ -162,9 +182,11 @@ describe("direction_save", () => {
       roles: [{ ideaId: ideas[0]!.id, role: "tof" }, { ideaId: ideas[3]!.id, role: "tof" }, { ideaId: ideas[1]!.id, role: "bof" }],
       reserves: [ideas[6]!.id, ideas[4]!.id], ownerSwap: "Use the second one instead of the gift.",
     });
-    raw.prepare(`UPDATE ideas SET copy = json_set(copy, '$.ownerApproved', json('{"headline":"h","subline":"s"}')) WHERE id = ?`).run(ideas[1]!.id);
+    raw.prepare(`UPDATE ideas SET copy = json_set(copy, '$.ownerApproved', json_object('headline', headline, 'subline', json_extract(copy, '$.subline'))) WHERE id = ?`).run(ideas[1]!.id);
     const b = await run(env, "batch_get", { id: E3 });
     expect(ideaOf(b, ideas[0]!).direction.current).toBe(false);
+    // The unpicked concept (6) keeps its record, but batch_get shows no direction on it.
+    expect(ideaOf(b, ideas[6]!).direction).toBeNull();
     expect(b.nextStep).toBe("direction");
   });
 
