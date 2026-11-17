@@ -1,6 +1,8 @@
 import { brandBySlug, latestKit } from "./brand";
 import type { Env } from "./env";
+import { checkConcepts, type Concept, type Territory, territoriesGet } from "./concepts";
 import { briefGet, factMarks, sourcesList } from "./research";
+import { InputError } from "./schema";
 import * as fal from "./fal";
 import { storeSubjectImages } from "./subjectimages";
 
@@ -195,23 +197,58 @@ export interface IdeaInput {
   headline: string;
   copy?: Record<string, unknown>;
   picked?: boolean;
+  /** Engine 3 only: the concept fields (a11-engine v3 design pack §2.3). */
+  concept?: Concept;
 }
 
 export async function ideasSave(env: Env, batchId: string, ideas: IdeaInput[]) {
-  const batch = await env.DB.prepare("SELECT id FROM batches WHERE id = ?").bind(batchId).first();
+  return (await ideasSaveFull(env, batchId, ideas)).ideas;
+}
+
+/**
+ * Save ideas. An engine 2 batch takes the old shape only. An engine 3 batch takes concepts: each idea has its concept,
+ * and the first save has the territories (design pack §2.2, §2.3). The ideas and the territories record are one D1
+ * batch: all or nothing.
+ */
+export async function ideasSaveFull(env: Env, batchId: string, ideas: IdeaInput[], territories?: Territory[], promptVersion = "") {
+  const batch = await env.DB.prepare("SELECT id, subject_id, engine FROM batches WHERE id = ?").bind(batchId).first<{ id: string; subject_id: string; engine: number }>();
   if (!batch) throw new Error(`No batch with id ${batchId}.`);
+  if (batch.engine !== 3 && (territories || promptVersion || ideas.some((i) => i.concept)))
+    throw new InputError("territories, concept and promptVersion are for an engine 3 batch only. This batch is engine 2: save the ideas without them.");
+  // Read the idea numbers before the checks: a save that commits between this read and the insert takes the same
+  // numbers, so UNIQUE (batch_id, n) refuses this whole save when another ideas save of the batch commits in between.
+  // (A brief saved in between is not caught: the concepts then carry the brief version that they were checked against.)
   const max = await env.DB.prepare("SELECT COALESCE(MAX(n), 0) AS n FROM ideas WHERE batch_id = ?").bind(batchId).first<{ n: number }>();
+  const v3 = batch.engine === 3 ? await checkConcepts(env, batch, ideas, territories, promptVersion) : null;
   const at = now();
-  const saved = ideas.map((idea, i) => ({ id: crypto.randomUUID(), n: (max?.n ?? 0) + i + 1, ...idea }));
-  await env.DB.batch(
-    saved.map((s) =>
-      env.DB.prepare(
-        `INSERT INTO ideas (id, batch_id, n, format, insight, source_url, visual, headline, copy, picked, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(s.id, batchId, s.n, s.format, s.insight, s.sourceUrl ?? null, s.visual, s.headline, JSON.stringify(s.copy ?? {}), s.picked ? 1 : 0, at),
-    ),
+  const saved = ideas.map((idea, i) => ({ id: crypto.randomUUID(), n: (max?.n ?? 0) + i + 1, ...idea, concept: v3?.concepts[i] ?? {} }));
+  const stmts = saved.map((s) =>
+    env.DB.prepare(
+      `INSERT INTO ideas (id, batch_id, n, format, insight, source_url, visual, headline, copy, picked, created_at, concept)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(s.id, batchId, s.n, s.format, s.insight, s.sourceUrl ?? null, s.visual, s.headline, JSON.stringify(s.copy ?? {}), s.picked ? 1 : 0, at, JSON.stringify(s.concept)),
   );
-  return saved.map((s) => ({ id: s.id, n: s.n, format: s.format, headline: s.headline, picked: !!s.picked }));
+  if (v3?.record)
+    // The next version in the same statement, so two saves at the same time cannot get one number.
+    stmts.push(
+      env.DB.prepare(
+        `INSERT INTO batch_records (id, batch_id, kind, idea_id, version, body, author, prompt_version, created_at)
+         SELECT ?, ?, 'territories', NULL, COALESCE(MAX(version), 0) + 1, ?, 'writer', ?, ? FROM batch_records
+         WHERE batch_id = ? AND kind = 'territories' AND idea_id IS NULL`,
+      ).bind(crypto.randomUUID(), batchId, JSON.stringify(v3.record), promptVersion, at, batchId),
+    );
+  try {
+    await env.DB.batch(stmts);
+  } catch (e) {
+    if (/UNIQUE/i.test((e as Error).message) && /ideas/i.test((e as Error).message))
+      throw new InputError("Another save of this batch ran at the same time, and nothing of this save was kept. Read batch_get and save again.");
+    throw e;
+  }
+  return {
+    engine: batch.engine,
+    ideas: saved.map((s) => ({ id: s.id, n: s.n, format: s.format, headline: s.headline, picked: !!s.picked })),
+    warnings: v3?.warnings ?? [],
+  };
 }
 
 export interface IdeaUpdate {
@@ -583,6 +620,8 @@ export async function batchGet(env: Env, id: string) {
       visual: i.visual,
       headline: i.headline,
       copy: JSON.parse(i.copy),
+      // Engine 3: the concept fields; an engine 2 idea has {}.
+      concept: JSON.parse(i.concept ?? "{}"),
       picked: i.picked === 1,
       finalPrompt: i.final_prompt,
       finalRefs: JSON.parse(i.final_refs),
@@ -621,6 +660,8 @@ export async function batchGet(env: Env, id: string) {
     engine,
     brief,
     sources: await sourcesList(env, id),
+    // Engine 3: the newest territories list with its version, or null.
+    territories: await territoriesGet(env, id),
     insights: JSON.parse(b.insights),
     notes: b.notes,
     ideas: ideasOut,
