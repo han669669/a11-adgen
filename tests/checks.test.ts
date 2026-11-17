@@ -14,6 +14,7 @@ const finalCheck = (rid: string, over: Record<string, unknown> = {}) => ({
     conceptQuality: "pass", productTruth: "pass", brandIdentity: "pass", copyAccuracy: "pass",
     foodAuthenticity: "na", composition: "pass", visualCraft: "pass", renderChecklist: "pass",
   },
+  items: [{ code: "D1", found: false }, { code: "F6", found: false }],
   checkedAt: ["full", "phone"],
   logoCentred: true,
   copyMatchesApproved: true,
@@ -151,6 +152,9 @@ describe("checks_save", () => {
     expect(await saveCheck(env, idea, finalCheck(renderId(1, 9), { items: [{ code: "D1", found: true, note: "A stray mark." }] }), "final_check")).toMatchObject({ ready: false });
     expect(await saveCheck(env, idea, finalCheck(renderId(1, 9), { finalPoints: { ...finalCheck("x").finalPoints, visualCraft: "na" } }), "final_check")).toMatchObject({ ready: false });
     expect(await saveCheck(env, idea, finalCheck(renderId(1, 9)), "final_check")).toMatchObject({ ready: true });
+    // Both kinds need the checklist items: the ready and eligible rules read them.
+    await expect(saveCheck(env, idea, finalCheck(renderId(1, 9), { items: undefined }), "final_check")).rejects.toThrow("final_check needs items");
+    await expect(saveCheck(env, idea, draftCheck(renderId(1, 1), { items: undefined }))).rejects.toThrow("draft_check needs items");
   });
 
   it("0 or 1 eligible drafts after the redos: nextStep direction; a new direction starts a new round, and the old drafts no longer count", async () => {
@@ -170,14 +174,20 @@ describe("checks_save", () => {
     expect(ideaOf(b, idea).drafts.map((d: { current: boolean }) => d.current)).toEqual([false, false, false, false, false]);
     expect(b.nextStep).toBe("drafts");
     await expect(run(env, "drafts_rank", { batchId: E3, ranks: [{ key: `renders/${renderId(1, 1)}/0.jpg`, rank: 1, reason: "The pouch reads first." }] })).rejects.toThrow("is not an eligible current draft");
-    // The new round: 0 eligible after the redos stays at drafts (the main session tells the owner) ...
+    // The new round: 3 first tries fail, then the 3 redos fail too. 0 eligible stays at drafts (the main session tells the owner) ...
     for (const n of [7, 8, 9]) {
       addRender(raw, renderId(1, n), idea, "draft", "2026-11-17T07:20:00.000Z");
-      await saveCheck(env, idea, bad(renderId(1, n), 2));
+      await saveCheck(env, idea, bad(renderId(1, n), 1));
     }
     expect((await run(env, "batch_get", { id: E3 })).nextStep).toBe("drafts");
-    // ... and 1 eligible after the new round is done: the owner sees it with the reason.
-    await saveCheck(env, idea, draftCheck(renderId(1, 7)));
+    const redos = ["a", "b", "c"].map((x) => `1${x}000000-0000-4000-8000-000000000000`);
+    for (const rid of redos) {
+      addRender(raw, rid, idea, "draft", "2026-11-17T07:30:00.000Z");
+      await saveCheck(env, idea, bad(rid, 2));
+    }
+    expect((await run(env, "batch_get", { id: E3 })).nextStep).toBe("drafts");
+    // ... and 1 eligible redo after the new round is done: the owner sees it with the reason.
+    await saveCheck(env, idea, draftCheck(redos[0]!, { attempt: 2 }));
     b = await run(env, "batch_get", { id: E3 });
     expect(b.nextStep).toBe("draft_rank");
     expect((await run(env, "batch_get", { id: E3, view: "critic" })).ideas.find((i: { id: string }) => i.id === idea).drafts).toHaveLength(1);

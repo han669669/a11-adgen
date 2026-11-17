@@ -42,8 +42,9 @@ export const CHECK_SCHEMA: ObjectSchema = {
     },
     items: {
       type: "array",
+      minItems: 1,
       maxItems: 17,
-      description: "The render-checklist codes you checked (D1 to D9, F1 to F8), each found or not.",
+      description: "Both kinds, at least one: the render-checklist codes you checked (D1 to D9, F1 to F8), each found or not.",
       items: {
         type: "object",
         properties: { code: { type: "string", pattern: "^(D[1-9]|F[1-8])$" }, found: { type: "boolean" }, note: text() },
@@ -133,7 +134,9 @@ export async function checksSave(env: Env, batchId: string, ideaId: string, kind
 
   const wrong = (kind === "draft_check" ? FINAL_ONLY : DRAFT_ONLY).filter((k) => check[k] !== undefined);
   if (wrong.length) throw new InputError(`${kind} does not take ${wrong.join(", ")}.`);
-  const codes = (check.items ?? []).map((i) => i.code);
+  // The render checklist is part of both checks: the eligible and ready rules read its D and F items.
+  if (!check.items?.length) throw new InputError(`${kind} needs items: each render-checklist code you checked (D1 to D9, F1 to F8), found or not.`);
+  const codes = check.items.map((i) => i.code);
   if (new Set(codes).size !== codes.length) throw new InputError("items names a code twice.");
   if (kind === "draft_check") {
     for (const k of DRAFT_ONLY) if (check[k] === undefined) throw new InputError(`draft_check needs ${k}.`);
