@@ -98,7 +98,7 @@ describe("ideas_save on an engine 3 batch", () => {
     const got = await run(env, "batch_get", { id: E3 });
     expect(got.territories).toMatchObject({ version: 1, briefVersion: 1 });
     expect(got.territories.territories).toHaveLength(4);
-    expect(got.ideas[0].concept).toMatchObject({ territory: "t1", insightId: "i1", briefVersion: 1, mechanism: { type: "product_obsession" } });
+    expect(got.ideas[0].concept).toMatchObject({ territory: "t1", insightId: "i1", briefVersion: 1, promptVersion: "0.2.12", mechanism: { type: "product_obsession" } });
     expect(got.nextStep).toBe("concept_review");
     // The critic reads the concepts and territories too.
     const critic = await run(env, "batch_get", { id: E3, view: "critic" });
@@ -114,7 +114,7 @@ describe("ideas_save on an engine 3 batch", () => {
   });
 
   it("(2.3) refuses a concept whose territory is not in the list, and ids that are not in the brief or the facts", async () => {
-    const { env, factIds } = await seeded();
+    const { env, raw, factIds } = await seeded();
     const with0 = (over: Record<string, unknown>) => {
       const a = firstRound();
       a.ideas[0] = idea("t1", over);
@@ -130,7 +130,10 @@ describe("ideas_save on an engine 3 batch", () => {
     const dup = firstRound();
     dup.territories[1] = territory("t1", "i2");
     await expect(run(env, "ideas_save", dup)).rejects.toThrow("Each territory key may appear only once.");
-    // A good fact id is kept; nothing was saved by the refused calls.
+    // Nothing was saved by the refused calls.
+    expect((raw.prepare("SELECT COUNT(*) AS c FROM ideas WHERE batch_id = ?").get(E3) as { c: number }).c).toBe(0);
+    expect((raw.prepare("SELECT COUNT(*) AS c FROM batch_records WHERE batch_id = ? AND kind = 'territories'").get(E3) as { c: number }).c).toBe(0);
+    // A good fact id is kept.
     const ok = await run(env, "ideas_save", with0({ sublineBasis: { kind: "fact", factId: factIds[0] } }));
     expect(ok.ideas).toHaveLength(10);
   });
@@ -151,6 +154,20 @@ describe("ideas_save on an engine 3 batch", () => {
     await expect(run(env, "ideas_save", noT)).rejects.toThrow("needs its territories (3 to 5) with the first concepts.");
   });
 
+  it("refuses the whole save when another save of the batch commits first", async () => {
+    const { env, raw } = await seeded();
+    const db = env.DB as unknown as { batch: (s: unknown[]) => Promise<unknown> };
+    const batchFn = db.batch.bind(db);
+    // Another save commits idea 1 after this save read the numbers and ran its checks.
+    db.batch = async (stmts) => {
+      raw.prepare("INSERT INTO ideas (id, batch_id, n, format, insight, visual, headline, copy, picked, created_at) VALUES ('other', ?, 1, 'tof', 'x', 'x', 'x', '{}', 0, 'now')").run(E3);
+      return batchFn(stmts);
+    };
+    await expect(run(env, "ideas_save", firstRound())).rejects.toThrow("Another save of this batch ran at the same time");
+    expect((raw.prepare("SELECT COUNT(*) AS c FROM ideas WHERE batch_id = ?").get(E3) as { c: number }).c).toBe(1);
+    expect((raw.prepare("SELECT COUNT(*) AS c FROM batch_records WHERE batch_id = ? AND kind = 'territories'").get(E3) as { c: number }).c).toBe(0);
+  });
+
   it("refuses concepts before the brief", async () => {
     const { env } = await seeded({ brief: false });
     await expect(run(env, "ideas_save", firstRound())).rejects.toThrow("Save the brief first with brief_save");
@@ -166,7 +183,7 @@ describe("ideas_save on an engine 3 batch", () => {
     expect(r.warnings).toEqual([
       expect.stringContaining("t1, t4 start from the same insight i1"),
       "ideas[0].concept: the subline states a fact, but sublineBasis has no factId. Name the fact, or make the subline a second beat.",
-      "ideas[1].concept: a headline-only ad needs the owner's word at the copy review.",
+      "ideas[1].concept: a headline-only ad needs the owner's word, and render_submit refuses a draft without a subline. Give it a subline unless he asked for none.",
     ]);
   });
 
@@ -198,10 +215,11 @@ describe("ideas_save on an engine 2 batch", () => {
     const r = await run(env, "ideas_save", { batchId: e2, ideas: [plain] });
     expect(r).toEqual([{ id: expect.any(String), n: 1, format: "tof", headline: "Gone.", picked: false }]);
     await expect(run(env, "ideas_save", { batchId: e2, ideas: [{ ...plain, concept: concept("t1") }] })).rejects.toThrow(
-      "territories and concept are for an engine 3 batch only.",
+      "territories, concept and promptVersion are for an engine 3 batch only.",
     );
+    await expect(run(env, "ideas_save", { batchId: e2, promptVersion: "0.2.12", ideas: [plain] })).rejects.toThrow("for an engine 3 batch only.");
     await expect(run(env, "ideas_save", { batchId: e2, territories: firstRound().territories, ideas: [plain] })).rejects.toThrow(
-      "territories and concept are for an engine 3 batch only.",
+      "territories, concept and promptVersion are for an engine 3 batch only.",
     );
     const got = await run(env, "batch_get", { id: e2 });
     expect(got.territories).toBeNull();

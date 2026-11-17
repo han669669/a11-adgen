@@ -357,13 +357,13 @@ export const TOOLS: Tool[] = [
   {
     name: "ideas_save",
     description:
-      "Save ideas for a batch (the burst). Each idea = insight + visual idea + headline + funnel stage (format: tof, mof or bof). Read docs/creative-playbook.md first. Every idea is saved not picked (this tool takes no pick): the critic subagent picks 3 later with ideas_pick (1 tof, 1 mof, 1 bof). Returns the idea ids (use them as render_submit's idea). An engine 3 batch (batch_get engine 3) saves concepts instead: each idea has its concept, and the first save has 3 to 5 territories and 6 to 15 concepts, 2 or 3 for each territory (a later save adds concepts, at most 24 in the batch, and may send a new territory list that keeps the used keys); the brief must be saved first. It returns warnings, never a refusal for taste.",
+      "Save ideas for a batch. Engine 2 (every batch now): the burst. Each idea = insight + visual idea + headline + funnel stage (format: tof, mof or bof). Read docs/creative-playbook.md first. Every idea is saved not picked (this tool takes no pick): the critic subagent picks 3 later with ideas_pick (1 tof, 1 mof, 1 bof). Returns the idea ids (use them as render_submit's idea). Engine 3 (batch_get engine 3) saves concepts instead, after the brief: each idea has its concept, and the first save has 3 to 5 territories and 6 to 15 concepts, 2 or 3 for each territory (a later save adds concepts, at most 24 in the batch, and may send a new territory list that keeps the used keys). It returns the ids and warnings, never a refusal for taste. The engine 3 concept review is not built yet: stop after the save.",
     inputSchema: {
       type: "object",
       properties: {
         batchId: { type: "string", pattern: "^[0-9a-f-]{36}$" },
         territories: { type: "array", minItems: 3, maxItems: 5, items: TERRITORY_SCHEMA, description: "Engine 3 only: the territories (design pack §2.2)." },
-        promptVersion: { type: "string", maxLength: 40, description: "the plugin version" },
+        promptVersion: { type: "string", maxLength: 40, description: "Engine 3 only: the plugin version, kept with each concept and the territories." },
         ideas: {
           type: "array",
           minItems: 1,

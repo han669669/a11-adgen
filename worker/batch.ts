@@ -213,10 +213,12 @@ export async function ideasSave(env: Env, batchId: string, ideas: IdeaInput[]) {
 export async function ideasSaveFull(env: Env, batchId: string, ideas: IdeaInput[], territories?: Territory[], promptVersion = "") {
   const batch = await env.DB.prepare("SELECT id, subject_id, engine FROM batches WHERE id = ?").bind(batchId).first<{ id: string; subject_id: string; engine: number }>();
   if (!batch) throw new Error(`No batch with id ${batchId}.`);
-  const v3 = batch.engine === 3 ? await checkConcepts(env, batch, ideas, territories) : null;
-  if (!v3 && (territories || ideas.some((i) => i.concept)))
-    throw new InputError("territories and concept are for an engine 3 batch only. This batch is engine 2: save the ideas without them.");
+  if (batch.engine !== 3 && (territories || promptVersion || ideas.some((i) => i.concept)))
+    throw new InputError("territories, concept and promptVersion are for an engine 3 batch only. This batch is engine 2: save the ideas without them.");
+  // Read the idea numbers before the checks: a save that commits between this read and the insert takes the same
+  // numbers, so UNIQUE (batch_id, n) refuses this whole save and no check can be out of date.
   const max = await env.DB.prepare("SELECT COALESCE(MAX(n), 0) AS n FROM ideas WHERE batch_id = ?").bind(batchId).first<{ n: number }>();
+  const v3 = batch.engine === 3 ? await checkConcepts(env, batch, ideas, territories, promptVersion) : null;
   const at = now();
   const saved = ideas.map((idea, i) => ({ id: crypto.randomUUID(), n: (max?.n ?? 0) + i + 1, ...idea, concept: v3?.concepts[i] ?? {} }));
   const stmts = saved.map((s) =>
@@ -234,7 +236,13 @@ export async function ideasSaveFull(env: Env, batchId: string, ideas: IdeaInput[
          WHERE batch_id = ? AND kind = 'territories' AND idea_id IS NULL`,
       ).bind(crypto.randomUUID(), batchId, JSON.stringify(v3.record), promptVersion, at, batchId),
     );
-  await env.DB.batch(stmts);
+  try {
+    await env.DB.batch(stmts);
+  } catch (e) {
+    if (/UNIQUE/i.test((e as Error).message) && /ideas/i.test((e as Error).message))
+      throw new InputError("Another save of this batch ran at the same time, and nothing of this save was kept. Read batch_get and save again.");
+    throw e;
+  }
   return {
     engine: batch.engine,
     ideas: saved.map((s) => ({ id: s.id, n: s.n, format: s.format, headline: s.headline, picked: !!s.picked })),

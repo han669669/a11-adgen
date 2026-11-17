@@ -33,7 +33,7 @@ export const TERRITORY_SCHEMA: ObjectSchema = {
 
 export const CONCEPT_SCHEMA: ObjectSchema = {
   type: "object",
-  description: "Engine 3 only: the concept fields (design pack §2.3). The server adds briefVersion.",
+  description: "Engine 3 only: the concept fields (design pack §2.3). The server adds briefVersion and promptVersion.",
   properties: {
     territory: { type: "string", pattern: KEY, description: "the key of a territory of this batch" },
     name: line(120),
@@ -96,6 +96,7 @@ export async function checkConcepts(
   batch: { id: string; subject_id: string },
   ideas: { concept?: Concept }[],
   territories: Territory[] | undefined,
+  promptVersion = "",
 ) {
   const brief = await briefGet(env, batch.id);
   if (!brief) throw new InputError("Save the brief first with brief_save: each territory and concept names an insight of the brief.");
@@ -148,7 +149,8 @@ export async function checkConcepts(
     const f = c.sublineBasis.factId;
     if (f && !factKnown.has(Number(f))) throw new InputError(`${where}.sublineBasis.factId ${f} is not a fact of this batch's subject.`);
     if (c.sublineBasis.kind === "fact" && !f) warnings.push(`${where}: the subline states a fact, but sublineBasis has no factId. Name the fact, or make the subline a second beat.`);
-    if (c.sublineBasis.kind === "none") warnings.push(`${where}: a headline-only ad needs the owner's word at the copy review.`);
+    if (c.sublineBasis.kind === "none")
+      warnings.push(`${where}: a headline-only ad needs the owner's word, and render_submit refuses a draft without a subline. Give it a subline unless he asked for none.`);
   });
 
   if (existing === 0) {
@@ -159,7 +161,7 @@ export async function checkConcepts(
   }
 
   return {
-    concepts: concepts.map((c) => ({ ...c, briefVersion: brief.version })),
+    concepts: concepts.map((c) => ({ ...c, briefVersion: brief.version, promptVersion })),
     record: territories ? { briefVersion: brief.version, territories } : null,
     warnings,
   };
