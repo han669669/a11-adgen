@@ -1,47 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { TOOLS } from "../worker/mcp";
 import { validate } from "../worker/schema";
-import { E3, run, select, withConcepts, type Idea } from "./helpers/engine3";
+import { approved, direction, draft, E3, PLAN, run, select, type Idea } from "./helpers/engine3";
 
 /** a11-engine v3 Phase 3: the art direction of a picked concept (design pack §3.3, §3.4, §3.7, tests 3.1 to 3.5). */
 
-const PLAN = { size: [1024, 1280], bg: "#EEE8DF", shapes: [{ rect: [0, 0.7, 1, 1], fill: "#F6F5F2" }], products: [{ cx: 0.5, base: 0.82, height: 0.42, side: "up", rot: -0.6 }] };
-const axes = (tag: string) => ({
-  composition: `${tag} composition`, productPosition: `${tag} position`, scale: `${tag} scale`, camera: `${tag} camera`,
-  light: `${tag} light`, environment: "a plain lit counter", negativeSpace: `${tag} space`, staging: `${tag} staging`,
-});
-const draft = (n: number, over: Record<string, unknown> = {}) => ({
-  n,
-  question: `Question ${n}: is the idea clearer when the pouch is ${["empty", "tipped", "closed"][n - 1]}?`,
-  axes: axes(`d${n}`),
-  plan: JSON.stringify({ ...PLAN, products: [{ ...PLAN.products[0], cx: 0.3 + n * 0.1 }] }),
-  prompt: `A photograph of an empty pouch on a counter at night, draft ${n}.`,
-  ...over,
-});
-const direction = (over: Record<string, unknown> = {}, shared: Record<string, unknown> = {}) => ({
-  why: "The empty pouch is the proof that it does not last. A calm counter at night makes the empty pack the only story.",
-  mechanism: { type: "product_obsession", productionRisk: "low" },
-  shared: {
-    backdrop: "A warm grey wall.", light: "One soft lamp from the left.", colour: "Kit cream, a muted red accent.", supportingObjects: [],
-    hierarchy: "The empty pouch, then the headline, then the logo. Back products recede.",
-    type: { headlineFont: "Museo Sans Rounded", weight: "800", case: "sentence", reason: "A brand font that is not the logo's font." },
-    logo: { placement: "top centre", note: "Optically centred. Ignore the TM mark." },
-    recipe: "concept",
-    ...shared,
-  },
-  drafts: [draft(1), draft(2), draft(3)],
-  diversity: { pairs: { "1-2": ["composition", "scale", "camera"], "1-3": ["camera", "light", "staging"], "2-3": ["scale", "negativeSpace", "productPosition"] } },
-  elementCount: 3,
-  ...over,
-});
-
-/** An engine 3 batch with 3 picks (ideas 0, 3 and 6) whose words (headline and subline as they are) the owner approved. */
-async function approved() {
-  const s = await withConcepts();
-  await run(s.env, "ideas_pick", select(s.ideas));
-  s.raw.prepare(`UPDATE ideas SET copy = json_set(copy, '$.ownerApproved', json_object('headline', headline, 'subline', json_extract(copy, '$.subline'))) WHERE batch_id = ? AND picked = 1`).run(E3);
-  return s;
-}
 const save = (env: any, ideaId: string, d: unknown = direction()) => run(env, "direction_save", { batchId: E3, ideaId, direction: d, promptVersion: "0.2.15" });
 const records = (raw: any) =>
   raw.prepare("SELECT idea_id, version, author, prompt_version FROM batch_records WHERE batch_id = ? AND kind = 'direction' ORDER BY rowid").all(E3) as Record<string, unknown>[];

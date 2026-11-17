@@ -115,3 +115,86 @@ export const select = (ideas: Idea[], over: Record<string, unknown> = {}) => {
     ...over,
   };
 };
+
+/** An art direction for one picked concept (design pack §3.3), with 3 drafts that pass the rubric. */
+export const PLAN = { size: [1024, 1280], bg: "#EEE8DF", shapes: [{ rect: [0, 0.7, 1, 1], fill: "#F6F5F2" }], products: [{ cx: 0.5, base: 0.82, height: 0.42, side: "up", rot: -0.6 }] };
+export const axes = (tag: string) => ({
+  composition: `${tag} composition`, productPosition: `${tag} position`, scale: `${tag} scale`, camera: `${tag} camera`,
+  light: `${tag} light`, environment: "a plain lit counter", negativeSpace: `${tag} space`, staging: `${tag} staging`,
+});
+export const draft = (n: number, over: Record<string, unknown> = {}) => ({
+  n,
+  question: `Question ${n}: is the idea clearer when the pouch is ${["empty", "tipped", "closed"][n - 1]}?`,
+  axes: axes(`d${n}`),
+  plan: JSON.stringify({ ...PLAN, products: [{ ...PLAN.products[0], cx: 0.3 + n * 0.1 }] }),
+  prompt: `A photograph of an empty pouch on a counter at night, draft ${n}.`,
+  ...over,
+});
+export const direction = (over: Record<string, unknown> = {}, shared: Record<string, unknown> = {}) => ({
+  why: "The empty pouch is the proof that it does not last. A calm counter at night makes the empty pack the only story.",
+  mechanism: { type: "product_obsession", productionRisk: "low" },
+  shared: {
+    backdrop: "A warm grey wall.", light: "One soft lamp from the left.", colour: "Kit cream, a muted red accent.", supportingObjects: [],
+    hierarchy: "The empty pouch, then the headline, then the logo. Back products recede.",
+    type: { headlineFont: "Museo Sans Rounded", weight: "800", case: "sentence", reason: "A brand font that is not the logo's font." },
+    logo: { placement: "top centre", note: "Optically centred. Ignore the TM mark." },
+    recipe: "concept",
+    ...shared,
+  },
+  drafts: [draft(1), draft(2), draft(3)],
+  diversity: { pairs: { "1-2": ["composition", "scale", "camera"], "1-3": ["camera", "light", "staging"], "2-3": ["scale", "negativeSpace", "productPosition"] } },
+  elementCount: 3,
+  ...over,
+});
+
+/** An engine 3 batch with 3 picks (ideas 0, 3 and 6) whose words (headline and subline as they are) the owner approved. */
+export async function approved() {
+  const s = await withConcepts();
+  await run(s.env, "ideas_pick", select(s.ideas));
+  s.raw.prepare(`UPDATE ideas SET copy = json_set(copy, '$.ownerApproved', json_object('headline', headline, 'subline', json_extract(copy, '$.subline'))) WHERE batch_id = ? AND picked = 1`).run(E3);
+  return s;
+}
+
+/** A draft check (design pack §3.6) that passes every point. */
+export const draftCheck = (renderId: string, over: Record<string, unknown> = {}) => ({
+  renderId,
+  eligible: true,
+  attempt: 1,
+  measured: { shapeRatio: 0.668, targetRatio: 0.667, tolerance: 0.02 },
+  items: [{ code: "D3", found: false }, { code: "F6", found: false }],
+  points: {
+    productShape: "pass", label: "pass", logo: "na", food: "pass", light: "pass", scale: "pass", props: "pass", physics: "pass",
+    composition: "pass", hierarchy: "pass", headlineSpace: "pass", defects: "pass",
+  },
+  reason: "The pouch shape is exact and the counter is calm.",
+  ...over,
+});
+
+/** A finished draft render of an idea (one image), as render_submit and render_status leave it. */
+export function addRender(raw: DatabaseSync, id: string, ideaId: string, kind = "draft", at = "2026-11-17T07:00:00.000Z") {
+  raw
+    .prepare(
+      `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, image_keys, usd_est, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'done', 'p', '[]', 1024, 1280, 'low', 1, ?, 0.02, ?, ?)`,
+    )
+    .run(id, E3, ideaId, kind, JSON.stringify([`renders/${id}/0.jpg`]), at, at);
+}
+export const renderId = (pick: number, n: number) => `${pick}${n}000000-0000-4000-8000-000000000000`.slice(0, 36);
+
+/**
+ * An engine 3 batch ready for the board: 3 picks with approved words and a direction each, 3 finished drafts each, all
+ * checked eligible, and a final prompt.
+ */
+export async function boardReady() {
+  const s = await approved();
+  const picks = [s.ideas[0]!, s.ideas[3]!, s.ideas[6]!];
+  for (const [p, idea] of picks.entries()) {
+    await run(s.env, "direction_save", { batchId: E3, ideaId: idea.id, direction: direction() });
+    for (const n of [1, 2, 3]) {
+      addRender(s.raw, renderId(p + 1, n), idea.id);
+      await run(s.env, "checks_save", { batchId: E3, ideaId: idea.id, kind: "draft_check", check: draftCheck(renderId(p + 1, n)) });
+    }
+  }
+  s.raw.prepare("UPDATE ideas SET final_prompt = 'final' WHERE batch_id = ? AND picked = 1").run(E3);
+  return { ...s, picks };
+}

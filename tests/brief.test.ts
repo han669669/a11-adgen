@@ -268,7 +268,7 @@ describe("brief_save", () => {
 
 describe("nextStepV3", () => {
   const idea = (id: string, over: Record<string, unknown> = {}) => ({
-    id, picked: true, copy: { ownerApproved: "ok" }, directed: true, ranked: true, currentDrafts: 3, finals: [{ status: "done" }], ...over,
+    id, picked: true, copy: { ownerApproved: "ok" }, directed: true, ranked: true, draftsDone: true, finals: [{ status: "done", ready: true }], ...over,
   });
   const three = (over: Record<string, unknown> = {}) => [idea("a", over), idea("b"), idea("c"), idea("d", { picked: false })];
   const all = new Set(["a", "b", "c"]);
@@ -279,17 +279,19 @@ describe("nextStepV3", () => {
     expect(batch.nextStepV3("ideas", true, [idea("a"), idea("b"), idea("c", { picked: false })], all)).toBe("concept_review");
     expect(batch.nextStepV3("ideas", true, three({ copy: {} }), all)).toBe("copy_review");
     expect(batch.nextStepV3("ideas", true, three({ directed: false }), all)).toBe("direction");
-    expect(batch.nextStepV3("drafts", true, three({ currentDrafts: 2 }), all)).toBe("drafts");
+    expect(batch.nextStepV3("drafts", true, three({ draftsDone: false }), all)).toBe("drafts");
     expect(batch.nextStepV3("drafts", true, three({ ranked: false }), all)).toBe("draft_rank");
     expect(batch.nextStepV3("drafts", true, three(), all)).toBe("board");
     expect(batch.nextStepV3("board", true, three(), new Set(["b", "c"]))).toBe("owner_pick");
     expect(batch.nextStepV3("finals", true, three({ finals: [] }), all)).toBe("finals");
     // A queued or failed final is not done.
     expect(batch.nextStepV3("finals", true, three({ finals: [{ status: "queued" }, { status: "failed" }] }), all)).toBe("finals");
+    // A done final without a ready final check is not done either (design pack §3.6).
+    expect(batch.nextStepV3("finals", true, three({ finals: [{ status: "done", ready: false }] }), all)).toBe("finals");
     expect(batch.nextStepV3("done", true, three(), all)).toBe("done");
   });
 
-  it("asks for new drafts after a full pass (no current drafts)", () => {
-    expect(batch.nextStepV3("board", true, three({ currentDrafts: 0 }), new Set(["b", "c"]))).toBe("drafts");
+  it("asks for new drafts after a full pass (no current drafts, so the drafts are not done)", () => {
+    expect(batch.nextStepV3("board", true, three({ draftsDone: false }), new Set(["b", "c"]))).toBe("drafts");
   });
 });
