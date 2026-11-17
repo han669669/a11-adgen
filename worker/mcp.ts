@@ -584,7 +584,7 @@ export const TOOLS: Tool[] = [
   {
     name: "taste_log",
     description:
-      "What the owner chose and what he passed over, newest first: his words, your blind rank and reason for the chosen draft, and the same for the drafts he passed, plus how often his pick was your rank 1, and his verdicts (full passes on drafts, notes on finals, approvals and rejections of finals and pack copy, each with his exact words, newest first; when two are about the same picture, the newest is his current view). Read it before you write ideas, prompts or ranks for a new batch, and when you write the rank reasons. Where he chose a draft you ranked lower, find what he saw that you did not (look, light, shape, mood) and let it steer the next batch. This is evidence, not a rule: do not add code rules from one pick.",
+      "What the owner chose and what he passed over, newest first: his words, your blind rank and reason for the chosen draft, and the same for the drafts he passed, plus how often his pick was your rank 1, and his verdicts (full passes on drafts, notes on finals, approvals and rejections of finals and pack copy, each with his exact words, newest first; when two are about the same picture, the newest is his current view), and his copy corrections (the words as written and the words he approved, when they differ). Read it before you write ideas, prompts or ranks for a new batch, and when you write the rank reasons. Where he chose a draft you ranked lower, find what he saw that you did not (look, light, shape, mood) and let it steer the next batch. This is evidence, not a rule: do not add code rules from one pick.",
     inputSchema: {
       type: "object",
       properties: {
@@ -618,11 +618,11 @@ export const TOOLS: Tool[] = [
   {
     name: "canon_update",
     description:
-      "Change the taste canon, one change per call, and say where it comes from. add: a new rule (rule, source, the owner's quote when you have one, scope). edit: reword a rule or change its scope (rule, source). evidence: a pick or result agreed (kind hit) or disagreed (kind miss) with a rule (source). retire: drop a rule (reason): no evidence in 60 days, or the owner contradicted it. restore: bring one back (reason). Scope: owner for his taste on every brand (the default); brand with brandSlug for a lesson about one brand (a correction about one brand stays a brand rule until evidence shows it holds for other brands); creative for a creative principle; performance for a lesson from ad results only. Product truth (a product's shape, facts or real food) is never a rule: it stays in the facts and the kit. Write rules in plain words about taste, never as a pattern to match. Every change is logged and the owner can undo it. The owner's own words are the best evidence; never invent a quote.",
+      "Change the taste canon, one change per call, and say where it comes from. add: a new rule (rule, source, the owner's quote when you have one, scope). edit: reword a rule or change its scope (rule, source). evidence: a pick or result agreed (kind hit) or disagreed (kind miss) with a rule (source). retire: drop a rule (reason): no evidence in 60 days, or the owner contradicted it. restore: bring one back (reason). add and edit need learning (the learning record): what you saw, the examples it explains and the ones against it, the evidence count, how sure you are and what it should change, with goldBefore (the gold_score runId before the change). A new rule that every brand reads needs 2 pieces of evidence or more, or learning.ownerApproval (his own words that make it a rule); one correction about one brand is a brand rule. test: after the change, give goldAfter (the runId after it) or untestable (why the text gold set cannot test it: a visual or brand rule); the result says held, fell (balanced accuracy fell by 0.04 or more: undo the change) or no_baseline. Scope: owner for his taste on every brand (the default); brand with brandSlug for a lesson about one brand (a correction about one brand stays a brand rule until evidence shows it holds for other brands); creative for a creative principle; performance for a lesson from ad results only. Product truth (a product's shape, facts or real food) is never a rule: it stays in the facts and the kit. Write rules in plain words about taste, never as a pattern to match. Every change is logged and the owner can undo it. The owner's own words are the best evidence; never invent a quote.",
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["add", "edit", "evidence", "retire", "restore"] },
+        action: { type: "string", enum: ["add", "edit", "evidence", "retire", "restore", "test"] },
         id: { type: "string", pattern: "^[0-9a-f]{8}$", description: "The rule id (edit, evidence, retire, restore)." },
         rule: { type: "string", minLength: 8, maxLength: 400 },
         stage: { type: "string", enum: ["all", "tof", "mof", "bof"], description: "add: defaults to all. edit: leave out to keep the rule's stage." },
@@ -632,6 +632,23 @@ export const TOOLS: Tool[] = [
         quote: { type: "string", maxLength: 500, description: "The owner's own words, copied exactly." },
         kind: { type: "string", enum: ["hit", "miss"] },
         reason: { type: "string", minLength: 3, maxLength: 300 },
+        learning: {
+          type: "object",
+          properties: {
+            observation: { type: "string", minLength: 3, maxLength: 500, description: "What you saw, in plain words." },
+            examples: { type: "array", minItems: 1, maxItems: 10, items: { type: "string", minLength: 3, maxLength: 200 }, description: "The picks, verdicts or results it explains (batch, idea or picture, and his words)." },
+            counterexamples: { type: "array", maxItems: 10, items: { type: "string", minLength: 3, maxLength: 200 }, description: "The ones that go against it; an empty list when you found none." },
+            evidenceCount: { type: "integer", minimum: 1, maximum: 1000 },
+            confidence: { type: "string", enum: ["low", "medium", "high"] },
+            expectedEffect: { type: "string", minLength: 3, maxLength: 300, description: "What the change should do to the next batch." },
+            goldBefore: { type: "integer", minimum: 1, description: "The gold_score runId made before the change." },
+            ownerApproval: { type: "string", minLength: 1, maxLength: 500, description: "His own words that make this a rule for every brand, copied exactly." },
+          },
+          required: ["observation", "examples", "counterexamples", "evidenceCount", "confidence", "expectedEffect"],
+          additionalProperties: false,
+        },
+        goldAfter: { type: "integer", minimum: 1, description: "test: the gold_score runId made after the change." },
+        untestable: { type: "string", minLength: 3, maxLength: 300, description: "test: why the gold set cannot test this rule." },
       },
       required: ["action"],
       additionalProperties: false,
@@ -827,7 +844,7 @@ export const TOOLS: Tool[] = [
   {
     name: "gold_score",
     description:
-      "Compare your blind use/pass answers on gold items with the owner's marks. Saves the run (note says what you tested, e.g. 'before canon change X') and shows the run before it. Agreement alone can be gamed (most marks are pass), so the result also shows the baseline of answering the more common mark for everything, and balanced accuracy: it must not fall by 0.04 or more when a canon or prompt change ships (a smaller move is noise). Never answer gold items you have already seen marked.",
+      "Compare your blind use/pass answers on gold items with the owner's marks. Saves the run (note says what you tested, e.g. 'before canon change X') and shows the run before it. Agreement alone can be gamed (most marks are pass), so the result also shows the baseline of answering the more common mark for everything, and balanced accuracy: it must not fall by 0.04 or more when a canon or prompt change ships (a smaller move is noise). It returns runId: give it to canon_update as learning.goldBefore or as the test's goldAfter. Never answer gold items you have already seen marked.",
     inputSchema: {
       type: "object",
       properties: {

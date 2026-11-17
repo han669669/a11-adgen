@@ -716,6 +716,25 @@ describe("copy review", () => {
     await expect(batch.ideasUpdate(env, [{ id: "55555555-5555-5555-5555-555555555555", headline: "X" }])).rejects.toThrow("No idea");
   });
 
+  it("gives taste_log his copy corrections: the words as written and the words he approved, cut by before", async () => {
+    const { env, raw } = makeEnv();
+    const { b, ideas } = await seed(env);
+    const [changed, same] = [ideas[0]!.id, ideas[1]!.id];
+    raw.prepare("UPDATE ideas SET copy = json_set(copy, '$.subline', 'Gone by noon.') WHERE id = ?").run(changed);
+    await batch.ideasUpdate(env, [{ id: changed, headline: "Wait, there's ten?", copyApproved: "yes, with my headline" }]);
+    // Changed, then changed back to the words as written before he approved: no correction.
+    await batch.ideasUpdate(env, [{ id: same, subline: "One price.", copyApproved: "yes" }]);
+    raw.prepare("UPDATE ideas SET copy = json_set(copy, '$.written', json_object('headline', headline, 'subline', 'One price.')) WHERE id = ?").run(same);
+    const log = await batch.tasteLog(env);
+    expect(log.copyCorrections).toEqual([{
+      at: expect.any(String), batch: b.label, stage: "tof",
+      written: { headline: "Somehow the jar is empty again.", subline: "Gone by noon." },
+      approved: { headline: "Wait, there's ten?", subline: "Gone by noon." },
+      ownerSaid: "yes, with my headline",
+    }]);
+    expect((await batch.tasteLog(env, 30, "2026-01-01")).copyCorrections).toEqual([]);
+  });
+
   it("reports an unknown idea on approval, and the schema takes only his words", async () => {
     const { env } = makeEnv();
     await expect(batch.ideasUpdate(env, [{ id: "55555555-5555-5555-5555-555555555555", copyApproved: "yes" }])).rejects.toThrow("No idea");

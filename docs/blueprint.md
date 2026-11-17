@@ -58,7 +58,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 
 | Memory | Fed by | Used by | Curation |
 |---|---|---|---|
-| **Taste canon**: 20 to 40 rules in plain words | Owner final picks (picked = good, shown but not picked = weak bad), notes, results | Writer, critic, draft check (MCP resource) | Each rule keeps its evidence count and its hit rate on the owner's picks. No evidence in 60 days → retired. Max 40 rules. a11-engine v3 (migration 0016): each rule has a scope, owner, brand (with its brand), creative or performance; a batch reads the rules that are not brand rules plus its own brand's rules; max 10 active rules for each brand. Product truth is never a rule. |
+| **Taste canon**: 20 to 40 rules in plain words | Owner final picks (picked = good, shown but not picked = weak bad), notes, results | Writer, critic, draft check (MCP resource) | Each rule keeps its evidence count and its hit rate on the owner's picks. No evidence in 60 days → retired. Max 40 rules. a11-engine v3 (migration 0016): each rule has a scope, owner, brand (with its brand), creative or performance; a batch reads the rules that are not brand rules plus its own brand's rules; max 10 active rules for each brand. Product truth is never a rule. Each add and edit keeps its learning record in the canon log (specification §9.7), and `canon_update test` records the gold result after it. |
 | **Swipe file**: real ads + why they work | Owner picks, client winners, v1 Used ads | Writer, as examples (never copy words or objects) | Top 3 per brand and per format. |
 | **Results ledger**: one row per ad per report | Client screenshots and CSVs | Iteration mix (step 5), week report | Winner = above the client's baseline CTR with enough impressions. |
 

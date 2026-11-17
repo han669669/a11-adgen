@@ -7,6 +7,9 @@ import { validate } from "../worker/schema";
 import { readFileSync } from "node:fs";
 import { fakeD1 } from "./helpers/d1";
 
+/** A learning record with 2 pieces of evidence, so a rule for every brand is allowed. */
+const L: canon.Learning = { observation: "Seen in a test.", examples: ["pick 1", "pick 2"], counterexamples: [], evidenceCount: 2, confidence: "medium", expectedEffect: "Calmer drafts." };
+
 /** The migration seeds the canon. Most tests start from an empty one; the seed has its own test. */
 function makeEnv(opts: { seeded?: boolean } = {}) {
   const env = { DB: fakeD1() } as unknown as Env;
@@ -45,7 +48,7 @@ describe("canon seed", () => {
 describe("taste canon", () => {
   it("adds a rule with its evidence, and reads it back", async () => {
     const { env } = makeEnv();
-    const { id } = await canon.canonUpdate(env, { action: "add", rule: "One focal product, little to look at.", source: "B41", quote: "they weren't chaotic or busy" }) as { id: string };
+    const { id } = await canon.canonUpdate(env, { action: "add", learning: L, rule: "One focal product, little to look at.", source: "B41", quote: "they weren't chaotic or busy" }) as { id: string };
     const g = await canon.canonGet(env, {});
     expect(g.activeRules).toBe(1);
     expect(g.rules[0]).toMatchObject({ id, rule: "One focal product, little to look at.", evidenceCount: 1, hitRate: null, retireDue: false });
@@ -54,14 +57,14 @@ describe("taste canon", () => {
 
   it("needs a source to add or edit, and an id for the rest", async () => {
     const { env } = makeEnv();
-    await expect(canon.canonUpdate(env, { action: "add", rule: "A rule without a source." })).rejects.toThrow(/source/);
+    await expect(canon.canonUpdate(env, { action: "add", learning: L, rule: "A rule without a source." })).rejects.toThrow(/source/);
     await expect(canon.canonUpdate(env, { action: "retire", reason: "x y z" })).rejects.toThrow(/id/);
     await expect(canon.canonUpdate(env, { action: "retire", id: "deadbeef", reason: "gone" })).rejects.toThrow(/No such rule/);
   });
 
   it("counts hits and misses into a hit rate, and keeps each as evidence", async () => {
     const { env } = makeEnv();
-    const { id } = await canon.canonUpdate(env, { action: "add", rule: "Calm ads win.", source: "B41" }) as { id: string };
+    const { id } = await canon.canonUpdate(env, { action: "add", learning: L, rule: "Calm ads win.", source: "B41" }) as { id: string };
     for (const kind of ["hit", "hit", "miss"] as const) await canon.canonUpdate(env, { action: "evidence", id, kind, source: "W46c pick" });
     const r = (await canon.canonGet(env, {})).rules[0]!;
     expect(r).toMatchObject({ hits: 2, misses: 1, hitRate: 0.67, evidenceCount: 4 });
@@ -69,16 +72,16 @@ describe("taste canon", () => {
 
   it("filters by stage but always includes the rules for every stage", async () => {
     const { env } = makeEnv();
-    await canon.canonUpdate(env, { action: "add", rule: "Rule for every stage here.", source: "s" });
-    await canon.canonUpdate(env, { action: "add", rule: "Rule for the bottom of funnel.", source: "s", stage: "bof" });
-    await canon.canonUpdate(env, { action: "add", rule: "Rule for the top of funnel.", source: "s", stage: "tof" });
+    await canon.canonUpdate(env, { action: "add", learning: L, rule: "Rule for every stage here.", source: "s" });
+    await canon.canonUpdate(env, { action: "add", learning: L, rule: "Rule for the bottom of funnel.", source: "s", stage: "bof" });
+    await canon.canonUpdate(env, { action: "add", learning: L, rule: "Rule for the top of funnel.", source: "s", stage: "tof" });
     const bof = (await canon.canonGet(env, { stage: "bof" })).rules.map((r) => r.rule);
     expect(bof).toEqual(["Rule for every stage here.", "Rule for the bottom of funnel."]);
   });
 
   it("flags a rule with no evidence for 60 days, retires it, and takes no evidence while it is retired", async () => {
     const { env, raw } = makeEnv();
-    const { id } = await canon.canonUpdate(env, { action: "add", rule: "An old rule nobody checked.", source: "s" }) as { id: string };
+    const { id } = await canon.canonUpdate(env, { action: "add", learning: L, rule: "An old rule nobody checked.", source: "s" }) as { id: string };
     raw.prepare("UPDATE canon_rules SET last_evidence_at = ? WHERE id = ?").run(new Date(Date.now() - 61 * 86_400_000).toISOString(), id);
     const g = await canon.canonGet(env, {});
     expect(g.retireDue).toEqual([id]);
@@ -94,8 +97,8 @@ describe("taste canon", () => {
 
   it("edits a rule, keeps the old words in the log", async () => {
     const { env } = makeEnv();
-    const { id } = await canon.canonUpdate(env, { action: "add", rule: "First wording of the rule.", source: "s" }) as { id: string };
-    await canon.canonUpdate(env, { action: "edit", id, rule: "Second wording of the rule.", source: "owner, 07-11-2026" });
+    const { id } = await canon.canonUpdate(env, { action: "add", learning: L, rule: "First wording of the rule.", source: "s" }) as { id: string };
+    await canon.canonUpdate(env, { action: "edit", learning: L, id, rule: "Second wording of the rule.", source: "owner, 07-11-2026" });
     const g = await canon.canonGet(env, {});
     expect(g.rules[0]!.rule).toBe("Second wording of the rule.");
     expect(g.recentChanges[0]!.detail).toContain("First wording of the rule.");
@@ -103,27 +106,27 @@ describe("taste canon", () => {
 
   it("does not count an edit as evidence, and refuses an edit of a retired rule", async () => {
     const { env, raw } = makeEnv();
-    const { id } = await canon.canonUpdate(env, { action: "add", rule: "An old rule that was reworded.", source: "s", stage: "bof" }) as { id: string };
+    const { id } = await canon.canonUpdate(env, { action: "add", learning: L, rule: "An old rule that was reworded.", source: "s", stage: "bof" }) as { id: string };
     raw.prepare("UPDATE canon_rules SET last_evidence_at = ? WHERE id = ?").run(new Date(Date.now() - 70 * 86_400_000).toISOString(), id);
-    await canon.canonUpdate(env, { action: "edit", id, rule: "A reworded rule, still stale.", source: "owner" });
+    await canon.canonUpdate(env, { action: "edit", learning: L, id, rule: "A reworded rule, still stale.", source: "owner" });
     const r = (await canon.canonGet(env, {})).rules[0]!;
     expect(r).toMatchObject({ rule: "A reworded rule, still stale.", stage: "bof", evidenceCount: 1, retireDue: true });
     await canon.canonUpdate(env, { action: "retire", id, reason: "stale" });
-    await expect(canon.canonUpdate(env, { action: "edit", id, rule: "Edit of a retired rule.", source: "owner" })).rejects.toThrow(/Restore it first/);
+    await expect(canon.canonUpdate(env, { action: "edit", learning: L, id, rule: "Edit of a retired rule.", source: "owner" })).rejects.toThrow(/Restore it first/);
   });
 
   it("keeps the owner's words with an edit, in the log", async () => {
     const { env } = makeEnv();
-    const { id } = await canon.canonUpdate(env, { action: "add", rule: "A rule that will be reworded.", source: "s" }) as { id: string };
-    await canon.canonUpdate(env, { action: "edit", id, rule: "The rule, reworded after he said so.", source: "owner, 07-11-2026", quote: "his exact words" });
+    const { id } = await canon.canonUpdate(env, { action: "add", learning: L, rule: "A rule that will be reworded.", source: "s" }) as { id: string };
+    await canon.canonUpdate(env, { action: "edit", learning: L, id, rule: "The rule, reworded after he said so.", source: "owner, 07-11-2026", quote: "his exact words" });
     expect((await canon.canonGet(env, {})).recentChanges[0]!.detail).toContain("his exact words");
   });
 
   it("keeps the stage on an edit that does not name one (the tool schema adds no default)", async () => {
     const { env } = makeEnv();
-    const { id } = await canon.canonUpdate(env, { action: "add", rule: "A rule for the bottom of funnel.", source: "s", stage: "bof" }) as { id: string };
+    const { id } = await canon.canonUpdate(env, { action: "add", learning: L, rule: "A rule for the bottom of funnel.", source: "s", stage: "bof" }) as { id: string };
     const t = TOOLS.find((x) => x.name === "canon_update")!;
-    const args = validate(t.inputSchema, { action: "edit", id, rule: "Same rule, reworded a little.", source: "owner" });
+    const args = validate(t.inputSchema, { action: "edit", learning: L, id, rule: "Same rule, reworded a little.", source: "owner" });
     expect(args).not.toHaveProperty("stage");
     await t.run(env, args);
     expect((await canon.canonGet(env, {})).rules[0]!.stage).toBe("bof");
@@ -131,7 +134,7 @@ describe("taste canon", () => {
 
   it("flags a rule at exactly 60 days, and a restore does not make a stale rule fresh", async () => {
     const { env, raw } = makeEnv();
-    const { id } = await canon.canonUpdate(env, { action: "add", rule: "A rule at the 60 day line.", source: "s" }) as { id: string };
+    const { id } = await canon.canonUpdate(env, { action: "add", learning: L, rule: "A rule at the 60 day line.", source: "s" }) as { id: string };
     raw.prepare("UPDATE canon_rules SET last_evidence_at = ? WHERE id = ?").run(new Date(Date.now() - 60 * 86_400_000 - 1000).toISOString(), id);
     expect((await canon.canonGet(env, {})).retireDue).toEqual([id]);
     await canon.canonUpdate(env, { action: "retire", id, reason: "stale" });
@@ -143,7 +146,7 @@ describe("taste canon", () => {
 
   it("lists rules added in the same millisecond in the order they were added", async () => {
     const { env, raw } = makeEnv();
-    for (const n of ["first", "second", "third"]) await canon.canonUpdate(env, { action: "add", rule: `The ${n} rule of the day.`, source: "s" });
+    for (const n of ["first", "second", "third"]) await canon.canonUpdate(env, { action: "add", learning: L, rule: `The ${n} rule of the day.`, source: "s" });
     raw.prepare("UPDATE canon_rules SET created_at = '2026-11-07T00:00:00.000Z'").run();
     expect((await canon.canonGet(env, {})).rules.map((r) => r.rule)).toEqual(["The first rule of the day.", "The second rule of the day.", "The third rule of the day."]);
   });
@@ -152,12 +155,12 @@ describe("taste canon", () => {
     const { env } = makeEnv();
     let first = "";
     for (let i = 0; i < 40; i++) {
-      const r = await canon.canonUpdate(env, { action: "add", rule: `Rule number ${i} of the canon.`, source: "s" }) as { id: string };
+      const r = await canon.canonUpdate(env, { action: "add", learning: L, rule: `Rule number ${i} of the canon.`, source: "s" }) as { id: string };
       if (i === 0) first = r.id;
     }
-    await expect(canon.canonUpdate(env, { action: "add", rule: "One rule too many here.", source: "s" })).rejects.toThrow(/canon is full/);
+    await expect(canon.canonUpdate(env, { action: "add", learning: L, rule: "One rule too many here.", source: "s" })).rejects.toThrow(/canon is full/);
     await canon.canonUpdate(env, { action: "retire", id: first, reason: "old" });
-    await canon.canonUpdate(env, { action: "add", rule: "Now there is room again.", source: "s" });
+    await canon.canonUpdate(env, { action: "add", learning: L, rule: "Now there is room again.", source: "s" });
     await expect(canon.canonUpdate(env, { action: "restore", id: first, reason: "back" })).rejects.toThrow(/canon is full/);
   });
 
@@ -177,7 +180,7 @@ describe("canon scopes (migration 0016)", () => {
     return m;
   };
   const add = (env: Env, rule: string, more: Partial<canon.CanonChange> = {}) =>
-    canon.canonUpdate(env, { action: "add", rule, source: "owner 17-11", ...more }) as Promise<{ id: string; scope: string; brandSlug?: string }>;
+    canon.canonUpdate(env, { action: "add", learning: L, rule, source: "owner 17-11", ...more }) as Promise<{ id: string; scope: string; brandSlug?: string }>;
 
   it("gives a batch the rules that are not brand rules plus its own brand's rules, never another brand's", async () => {
     const { env } = withBrands();
@@ -218,20 +221,20 @@ describe("canon scopes (migration 0016)", () => {
     expect(() => ins("owner", "wongi")).toThrow(/canon scope/);
     expect(() => ins("taste", null)).toThrow(/CHECK/);
     const t = TOOLS.find((x) => x.name === "canon_update")!;
-    expect(() => validate(t.inputSchema, { action: "add", rule: "x x x x x x x x", source: "s s", scope: "product" })).toThrow();
+    expect(() => validate(t.inputSchema, { action: "add", learning: L, rule: "x x x x x x x x", source: "s s", scope: "product" })).toThrow();
   });
 
   it("moves a rule between scopes on an edit, logs the move, and keeps the scope when the edit names none", async () => {
     const { env, raw } = withBrands();
     const { id } = await add(env, "Gold lids look premium for this jar.");
-    await canon.canonUpdate(env, { action: "edit", id, rule: "Gold lids look premium for this jar.", source: "owner 17-11: only WonGi", scope: "brand", brandSlug: "wongi" });
+    await canon.canonUpdate(env, { action: "edit", learning: L, id, rule: "Gold lids look premium for this jar.", source: "owner 17-11: only WonGi", scope: "brand", brandSlug: "wongi" });
     expect((await canon.canonGet(env, { brandSlug: "wongi" })).rules[0]).toMatchObject({ id, scope: "brand", brandSlug: "wongi" });
     expect((await canon.canonGet(env, { brandSlug: "irvins" })).rules).toEqual([]);
     // A reword alone keeps the scope and the brand.
-    await canon.canonUpdate(env, { action: "edit", id, rule: "Gold lids look premium on the WonGi jar.", source: "s" });
+    await canon.canonUpdate(env, { action: "edit", learning: L, id, rule: "Gold lids look premium on the WonGi jar.", source: "s" });
     expect((await canon.canonGet(env, { scope: "brand" })).rules[0]).toMatchObject({ id, brandSlug: "wongi", rule: "Gold lids look premium on the WonGi jar." });
     // Evidence from other brands: back to an owner rule, and the brand goes.
-    await canon.canonUpdate(env, { action: "edit", id, rule: "Gold lids look premium.", source: "IRVINS and WonGi picks", scope: "owner" });
+    await canon.canonUpdate(env, { action: "edit", learning: L, id, rule: "Gold lids look premium.", source: "IRVINS and WonGi picks", scope: "owner" });
     expect((await canon.canonGet(env, {})).rules[0]).toMatchObject({ id, scope: "owner" });
     expect((await canon.canonGet(env, {})).rules[0]).not.toHaveProperty("brandSlug");
     const logs = (raw.prepare("SELECT detail FROM canon_log WHERE rule_id = ? AND action = 'edit' ORDER BY id").all(id) as { detail: string }[]).map((l) => JSON.parse(l.detail));
@@ -239,7 +242,7 @@ describe("canon scopes (migration 0016)", () => {
     expect(logs[1]).not.toHaveProperty("fromScope");
     expect(logs[2]).toMatchObject({ fromScope: "brand", toScope: "owner", fromBrand: "wongi" });
     expect(logs[2]).not.toHaveProperty("toBrand");
-    await expect(canon.canonUpdate(env, { action: "edit", id, rule: "Gold lids look premium.", source: "s", scope: "brand" })).rejects.toThrow(/needs brandSlug/);
+    await expect(canon.canonUpdate(env, { action: "edit", learning: L, id, rule: "Gold lids look premium.", source: "s", scope: "brand" })).rejects.toThrow(/needs brandSlug/);
   });
 
   it("keeps 10 active rules for each brand apart from the 40 for every batch", async () => {
@@ -251,12 +254,80 @@ describe("canon scopes (migration 0016)", () => {
     for (let n = 0; n < 40; n++) await add(env, `Owner rule number ${n}.`);
     await expect(add(env, "One owner rule too many.")).rejects.toThrow(/The canon is full \(40 active rules\)/);
     // A brand rule cannot become the 41st rule for every batch.
-    await expect(canon.canonUpdate(env, { action: "edit", id: ids[0]!, rule: "Now for every brand.", source: "s", scope: "owner" })).rejects.toThrow(/canon is full/);
+    await expect(canon.canonUpdate(env, { action: "edit", learning: L, id: ids[0]!, rule: "Now for every brand.", source: "s", scope: "owner" })).rejects.toThrow(/canon is full/);
     await canon.canonUpdate(env, { action: "retire", id: ids[1]!, reason: "old" });
     await add(env, "Room again for WonGi.", { scope: "brand", brandSlug: "wongi" });
     await expect(canon.canonUpdate(env, { action: "restore", id: ids[1]!, reason: "back" })).rejects.toThrow(/This brand has 10 active rules/);
     // A reword of a rule in a full scope is fine.
-    await canon.canonUpdate(env, { action: "edit", id: ids[2]!, rule: "WonGi lesson, reworded.", source: "s" });
+    await canon.canonUpdate(env, { action: "edit", learning: L, id: ids[2]!, rule: "WonGi lesson, reworded.", source: "s" });
+  });
+});
+
+describe("learning records (specification 9.7, 9.8)", () => {
+  /** A gold run row: balanced accuracy = mean of use recall (useAgreed / 30) and pass recall ((agreed - useAgreed) / 70). */
+  const goldRow = (raw: DatabaseSync, agreed: number, useAgreed: number, note = "a run") =>
+    Number(raw.prepare("INSERT INTO gold_runs (note, n, agreed, use_agreed, use_truth, at) VALUES (?, 100, ?, ?, 30, 't')").run(note, agreed, useAgreed).lastInsertRowid);
+  const one = { ...L, examples: ["W47 mof note"], evidenceCount: 1 };
+  const logOf = (raw: DatabaseSync, id: string) =>
+    (raw.prepare("SELECT action, detail FROM canon_log WHERE rule_id = ? ORDER BY id").all(id) as { action: string; detail: string }[]).map((l) => ({ action: l.action, ...JSON.parse(l.detail) }));
+
+  it("needs a learning record for add and edit, and keeps it in the log with a snapshot of the gold run before", async () => {
+    const { env, raw } = makeEnv();
+    await expect(canon.canonUpdate(env, { action: "add", rule: "A rule with no record.", source: "s" })).rejects.toThrow(/add needs learning/);
+    await expect(canon.canonUpdate(env, { action: "add", rule: "A rule with a lost run.", source: "s", learning: { ...L, goldBefore: 99 } })).rejects.toThrow(/No gold run 99/);
+    await expect(canon.canonUpdate(env, { action: "add", rule: "More examples than evidence.", source: "s", learning: { ...L, evidenceCount: 1, ownerApproval: "yes" } })).rejects.toThrow(/evidenceCount must count every example/);
+    const before = goldRow(raw, 76, 20);
+    const { id } = await canon.canonUpdate(env, { action: "add", rule: "Calm ads win.", source: "B41", learning: { ...L, goldBefore: before } }) as { id: string };
+    await expect(canon.canonUpdate(env, { action: "edit", id, rule: "Calm ads win, always.", source: "s" })).rejects.toThrow(/edit needs learning/);
+    const [add] = logOf(raw, id);
+    expect(add.learning).toMatchObject({ observation: "Seen in a test.", evidenceCount: 2, confidence: "medium", goldBefore: { runId: before, scope: "all", balancedAccuracy: 0.733 } });
+    // A retire may carry a record too; it is not needed.
+    await canon.canonUpdate(env, { action: "retire", id, reason: "he contradicted it", learning: one });
+    expect(logOf(raw, id)[1]!.learning).toMatchObject({ evidenceCount: 1 });
+    const t = TOOLS.find((x) => x.name === "canon_update")!;
+    expect(() => validate(t.inputSchema, { action: "add", rule: "x x x x x x x x", source: "s s", learning: { observation: "x x x", examples: ["a b c"], evidenceCount: 1, confidence: "medium", expectedEffect: "x x x" } })).toThrow(/counterexamples/);
+    expect(() => validate(t.inputSchema, { action: "add", rule: "x x x x x x x x", source: "s s", learning: { ...L, confidence: "sure" } })).toThrow();
+  });
+
+  it("does not make one correction a rule for every brand without the owner's words", async () => {
+    const { env, raw } = makeEnv();
+    raw.exec(`INSERT INTO brands (id, slug, name, created_at, updated_at) VALUES ('b1', 'wongi', 'WonGi', 't', 't')`);
+    await expect(canon.canonUpdate(env, { action: "add", rule: "Gold lids look premium.", source: "W47", learning: one })).rejects.toThrow(/One piece of evidence is not enough/);
+    await expect(canon.canonUpdate(env, { action: "add", rule: "Gold lids look premium.", source: "W47", scope: "creative", learning: one })).rejects.toThrow(/One piece of evidence/);
+    const { id } = await canon.canonUpdate(env, { action: "add", rule: "Gold lids look premium.", source: "W47", scope: "brand", brandSlug: "wongi", learning: one }) as { id: string };
+    await canon.canonUpdate(env, { action: "add", rule: "The owner made this a rule.", source: "owner 12-11", learning: { ...one, ownerApproval: "a b c yes" } });
+    // A brand rule moves out of its brand only with more evidence or his words; a reword in its scope needs neither.
+    await expect(canon.canonUpdate(env, { action: "edit", id, rule: "Gold lids look premium.", source: "s", scope: "owner", learning: one })).rejects.toThrow(/One piece of evidence/);
+    await canon.canonUpdate(env, { action: "edit", id, rule: "Gold lids look premium on WonGi.", source: "s", learning: one });
+    await canon.canonUpdate(env, { action: "edit", id, rule: "Gold lids look premium.", source: "IRVINS and WonGi", scope: "owner", learning: L });
+    expect((await canon.canonGet(env, {})).rules.map((r) => r.id)).toContain(id);
+  });
+
+  it("tests the newest change against the gold run before it: held, fell, untestable or no baseline", async () => {
+    const { env, raw } = makeEnv();
+    const before = goldRow(raw, 76, 20);
+    const { id } = await canon.canonUpdate(env, { action: "add", rule: "Calm ads win.", source: "B41", learning: { ...L, goldBefore: before } }) as { id: string };
+    await expect(canon.canonUpdate(env, { action: "test", id })).rejects.toThrow(/goldAfter .* or untestable/);
+    await expect(canon.canonUpdate(env, { action: "test", id, goldAfter: before })).rejects.toThrow(/made after/);
+    const inScope = goldRow(raw, 75, 19, "[in_scope] after");
+    await expect(canon.canonUpdate(env, { action: "test", id, goldAfter: inScope })).rejects.toThrow(/same scope/);
+    expect(await canon.canonUpdate(env, { action: "test", id, goldAfter: goldRow(raw, 75, 19) })).toEqual({ id, tested: "add", result: "held", delta: -0.016 });
+    expect(await canon.canonUpdate(env, { action: "test", id, goldAfter: goldRow(raw, 66, 15) })).toMatchObject({ result: "fell", delta: -0.119 });
+    expect(await canon.canonUpdate(env, { action: "test", id, untestable: "a visual rule: the gold set is text only" })).toMatchObject({ result: "untestable", delta: null });
+    const tests = logOf(raw, id).filter((l) => l.action === "test");
+    expect(tests.map((l) => l.result)).toEqual(["held", "fell", "untestable"]);
+    expect(tests[0]).toMatchObject({ of: "add", goldBefore: before, goldAfter: { balancedAccuracy: 0.717 } });
+    // A change with no run before it has no baseline.
+    await canon.canonUpdate(env, { action: "edit", id, rule: "Calm ads win, mostly.", source: "s", learning: L });
+    expect(await canon.canonUpdate(env, { action: "test", id, goldAfter: goldRow(raw, 75, 19) })).toMatchObject({ tested: "edit", result: "no_baseline" });
+  });
+
+  it("gives the gold run id, so a learning record can name it", async () => {
+    const { env, raw } = makeEnv();
+    raw.exec("INSERT INTO gold_items (id, label, mark, created_at) VALUES ('g1', 'a', 'use', 't'), ('g2', 'b', 'pass', 't')");
+    const r = await canon.goldScore(env, { note: "before x", answers: [{ id: "g1", mark: "use" }, { id: "g2", mark: "use" }] });
+    expect(r.runId).toBeGreaterThan(0);
+    expect((await canon.goldRuns(env)).runs[0]).toMatchObject({ runId: r.runId, note: "before x", balancedAccuracy: 0.5 });
   });
 });
 
