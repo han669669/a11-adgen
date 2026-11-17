@@ -6,7 +6,7 @@ import { PROMPTS } from "../worker/prompts";
 import { adName } from "../worker/pack";
 import { AD_NAME } from "../worker/results";
 import { validate } from "../worker/schema";
-import { E3, entry, firstRound, gates, idea, run, scores, seeded, select, withConcepts, type Idea } from "./helpers/engine3";
+import { boardReady, E3, entry, firstRound, gates, idea, run, scores, seeded, select, withConcepts, type Idea } from "./helpers/engine3";
 
 /** a11-engine v3 Phase 2: the critic's concept review and the 3 picks with roles (design pack §2.5, §2.6, tests 2.5 to 2.16). */
 
@@ -38,8 +38,9 @@ describe("ideas_pick on an engine 3 batch", () => {
     expect(got.conceptReview).toMatchObject({ version: 1, author: "critic", outcome: "select", reworks: 0, reserves: [ideas[1]!.id, ideas[4]!.id] });
     expect(got.nextStep).toBe("copy_review");
     expect(await run(env, "batch_get", { id: E3, view: "critic" })).not.toHaveProperty("conceptReview");
-    // Two tof picks are not refused by the pick-cap trigger, and the board gate takes the 3 in any mix.
-    await expect(batch.batchUpdate(env, { id: E3, status: "board" })).resolves.toMatchObject({ updated: ["status"] });
+    // Two tof picks are not refused by the pick-cap trigger. The board gate takes the 3 in any mix, but only after their words,
+    // directions and draft checks (test 3.8 in tests/checks.test.ts, with the same tof, tof, bof picks).
+    await expect(batch.batchUpdate(env, { id: E3, status: "board" })).rejects.toThrow("nextStep is 'copy_review'");
   });
 
   it("(2.7) refuses a wrong shape, and saves nothing", async () => {
@@ -179,8 +180,7 @@ describe("ideas_pick on an engine 3 batch", () => {
   });
 
   it("refuses the board status when the picks change between the check and the write", async () => {
-    const { env, raw, ideas } = await withConcepts();
-    await run(env, "ideas_pick", select(ideas));
+    const { env, raw, ideas } = await boardReady();
     const db = env.DB as unknown as { batch: (s: unknown[]) => Promise<unknown> };
     const batchFn = db.batch.bind(db);
     db.batch = async (stmts) => (raw.prepare("UPDATE ideas SET picked = 0 WHERE id = ?").run(ideas[0]!.id), batchFn(stmts));
