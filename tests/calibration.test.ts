@@ -110,6 +110,10 @@ describe("calibration", () => {
     const atInstant = await run(env, "taste_log", { before: "2026-11-12T00:00:00Z" });
     expect([atInstant.picks.length, atInstant.verdicts.length]).toEqual([1, 0]);
     expect((await run(env, "taste_log", { before: "2026-11-12T00:00:01Z" })).verdicts).toHaveLength(1);
+    await expect(run(env, "taste_log", { before: "2026-11-12T25:00Z" })).rejects.toThrow("before must be a real UTC date or time");
+    // A rank saved at or after the cut is not in the log, and not in the tally either.
+    raw.prepare("UPDATE draft_ranks SET created_at = '2026-11-12T00:00:00.000Z' WHERE idea_id LIKE '1%'").run();
+    expect((await run(env, "taste_log", { before: "2026-11-12" })).tally).toEqual({ reviewed: 0, agreed: 0 });
   });
 
   it("(4.9) the copy correction rate: 2 of 3 picked ideas have approved words that differ from the words as written", async () => {

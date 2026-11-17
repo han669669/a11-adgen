@@ -483,7 +483,7 @@ export async function picksSave(env: Env, batchId: string, picks: { key: string;
 async function tasteTally(env: Env, before = "9999") {
   const r = await env.DB.prepare(
     `SELECT COUNT(*) AS reviewed, COALESCE(SUM(d.rank = 1), 0) AS agreed
-     FROM picks p JOIN draft_ranks d ON d.render_key = p.render_key WHERE p.by_owner = 1 AND p.created_at < ?`,
+     FROM picks p JOIN draft_ranks d ON d.render_key = p.render_key AND d.created_at < ?1 WHERE p.by_owner = 1 AND p.created_at < ?1`,
   ).bind(before).first<{ reviewed: number; agreed: number }>();
   return { reviewed: r?.reviewed ?? 0, agreed: r?.agreed ?? 0 };
 }
@@ -496,7 +496,9 @@ export async function tasteLog(env: Env, limit = 30, before?: string) {
   // before (design pack §4.5 rule 5): only the decisions made before that time, so a replay cannot see its own answer.
   // The stored times have milliseconds: a time cut is normalised to that form, so a cut at 10:00:00Z keeps out 10:00:00.200Z.
   // A date cut stays as it is (it sorts before every time of that day).
-  const cut = !before ? "9999" : before.length === 10 ? before : new Date(before).toISOString();
+  const parsed = before ? new Date(before) : null;
+  if (parsed && Number.isNaN(parsed.valueOf())) throw new InputError("before must be a real UTC date or time, such as 2026-11-12 or 2026-11-12T10:00:00.000Z.");
+  const cut = !before ? "9999" : before.length === 10 ? before : parsed!.toISOString();
   const picks = await env.DB.prepare(
     `SELECT p.render_key, p.idea_id, p.batch_id, p.note, p.created_at, i.format, i.headline, i.visual, b.label
      FROM picks p JOIN ideas i ON i.id = p.idea_id AND i.batch_id = p.batch_id JOIN batches b ON b.id = p.batch_id
