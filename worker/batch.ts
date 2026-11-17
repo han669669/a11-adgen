@@ -2,6 +2,7 @@ import { brandBySlug, latestKit } from "./brand";
 import type { Env } from "./env";
 import { checkConcepts, type Concept, type Territory, territoriesGet } from "./concepts";
 import { briefGet, factMarks, sourcesList } from "./research";
+import { directionsGet } from "./direction";
 import { conceptPick, conceptReviewGet, type PickInput } from "./review";
 import { InputError } from "./schema";
 import * as fal from "./fal";
@@ -588,7 +589,7 @@ export async function batchGetCritic(env: Env, id: string) {
     ...rest,
     view: "critic" as const,
     ideas: ideas
-      .map(({ n: _n, finals: _f, finalPrompt: _fp, finalRefs: _fr, copy, drafts, ...i }) => {
+      .map(({ n: _n, finals: _f, finalPrompt: _fp, finalRefs: _fr, direction: _d, copy, drafts, ...i }) => {
         const { ownerApproved: _oa, written: _w, ...words } = (copy ?? {}) as Record<string, unknown>;
         return { ...i, copy: words, drafts: drafts.map(({ key, url }) => ({ key, url })) };
       })
@@ -597,7 +598,7 @@ export async function batchGetCritic(env: Env, id: string) {
 }
 
 /** Everything about one batch, for Claude and for the board. */
-export async function batchGet(env: Env, id: string) {
+export async function batchGet(env: Env, id: string, { withPlans = false } = {}) {
   const b = await env.DB.prepare(
     `SELECT b.*, br.slug AS brand_slug, br.name AS brand_name FROM batches b JOIN brands br ON br.id = b.brand_id WHERE b.id = ?`,
   ).bind(id).first<Record<string, any>>();
@@ -626,9 +627,8 @@ export async function batchGet(env: Env, id: string) {
   const [brief, conceptReview, directions] = await Promise.all([
     briefGet(env, id),
     conceptReviewGet(env, id),
-    env.DB.prepare("SELECT DISTINCT idea_id FROM batch_records WHERE batch_id = ? AND kind = 'direction' AND idea_id IS NOT NULL LIMIT 60").bind(id).all<{ idea_id: string }>(),
+    directionsGet(env, id, withPlans),
   ]);
-  const directed = new Set(directions.results.map((d) => d.idea_id));
   const currentDrafts = new Map<string, number>();
   const ideasOut = ideas.results.map((i) => {
     const drafts = renders.results
@@ -655,6 +655,9 @@ export async function batchGet(env: Env, id: string) {
       picked: i.picked === 1,
       finalPrompt: i.final_prompt,
       finalRefs: JSON.parse(i.final_refs),
+      // Engine 3: the art director's newest direction (design pack §3.3), or null. Engine 2 ideas have no such field.
+      // Only a picked idea shows it: the direction of a concept that a swap or a rework unpicked is not for use.
+      ...(b.engine === 3 ? { direction: i.picked === 1 ? (directions.get(i.id) ?? null) : null } : {}),
       ranked: newest.length > 0 && newest.every((d) => rankBy.has(d.key)),
       // Submit order, then image order. Never rank order: the order must not show the critic's rank.
       // rank and reason are null until the owner decides on the idea (see shown above).
@@ -700,7 +703,7 @@ export async function batchGet(env: Env, id: string) {
     picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, byOwner: p.by_owner === 1, finalRenderId: p.final_render_id })),
     drafting: renders.results.filter((r) => r.status === "queued").map((r) => r.id),
     // Engine 3 only: the next step of the batch, from its rows (design pack §1.11). Engine 2 batches have none.
-    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, currentDrafts: currentDrafts.get(i.id) ?? 0, rendered: renders.results.some((r) => r.idea === i.id), directed: directed.has(i.id) })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.n > conceptReview.lastN) }) } : {}),
+    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, currentDrafts: currentDrafts.get(i.id) ?? 0, rendered: renders.results.some((r) => r.idea === i.id), directed: directions.get(i.id)?.current === true })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.n > conceptReview.lastN) }) } : {}),
   };
 }
 
@@ -713,7 +716,7 @@ type IdeaState = {
   finals: { status: unknown }[];
   /** Any render row of the idea, also a queued or failed one (ideas_pick freezes the picks then). */
   rendered?: boolean;
-  /** The idea has a direction record (design pack §1.11 step 6). */
+  /** The idea has a direction record that is newer than the newest concept review (design pack §1.11 step 6). */
   directed: boolean;
 };
 

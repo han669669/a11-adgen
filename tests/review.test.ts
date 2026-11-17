@@ -6,42 +6,10 @@ import { PROMPTS } from "../worker/prompts";
 import { adName } from "../worker/pack";
 import { AD_NAME } from "../worker/results";
 import { validate } from "../worker/schema";
-import { E3, firstRound, idea, run, seeded } from "./helpers/engine3";
+import { E3, entry, firstRound, gates, idea, run, scores, seeded, select, withConcepts, type Idea } from "./helpers/engine3";
 
 /** a11-engine v3 Phase 2: the critic's concept review and the 3 picks with roles (design pack §2.5, §2.6, tests 2.5 to 2.16). */
 
-type Idea = { id: string; n: number };
-const scores = { originality: 4, appropriateness: 5, insight: 4, headline: 4, visual: 4, productRelevance: 5, brandRecognition: 3, commercialPurpose: 4, executionPotential: 4 };
-const gates = {
-  falseClaim: false, stereotype: false, raceReligionInCopy: false, misrepresentsProduct: false,
-  inaccurateLogo: false, headlineImageSplit: false, needsRenderDefect: false, noProductOrBrandLink: false,
-};
-const entry = (ideaId: string, verdict = "reject", over: Record<string, unknown> = {}) => ({
-  ideaId, scores, gates, optionB: "pass", ownerGate: "pass",
-  works: "The empty pouch is the proof.", doesNotWork: "The night light is generic.", original: "Nobody in the category shows an empty pack.",
-  insightCredible: "Yes: two reviews say it.", worthPaying: "Yes.", verdict, ...over,
-});
-
-/** An engine 3 batch with the 10 first-round concepts (territories t1 t1 t1 t2 t2 t2 t3 t3 t4 t4). */
-async function withConcepts() {
-  const s = await seeded();
-  const saved = await run(s.env, "ideas_save", firstRound());
-  return { ...s, ideas: saved.ideas as Idea[] };
-}
-/** ideas 0 (t1), 3 (t2) and 6 (t3) selected; 1 and 4 reserves. */
-const select = (ideas: Idea[], over: Record<string, unknown> = {}) => {
-  const ids = [ideas[0]!.id, ideas[3]!.id, ideas[6]!.id];
-  return {
-    batchId: E3,
-    outcome: "select",
-    ids,
-    roles: [{ ideaId: ids[0], role: "tof" }, { ideaId: ids[1], role: "tof" }, { ideaId: ids[2], role: "bof" }],
-    reserves: [ideas[1]!.id, ideas[4]!.id],
-    review: { concepts: ideas.map((i) => entry(i.id, ids.includes(i.id) ? "select" : "reserve")), setVariety: "Three truths: the empty pouch, the hidden pouch, the gift." },
-    promptVersion: "0.2.13",
-    ...over,
-  };
-};
 const rework = (ideas: Idea[]) => ({
   batchId: E3,
   outcome: "rework",
