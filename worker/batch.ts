@@ -487,7 +487,7 @@ export async function batchGet(env: Env, id: string) {
     `SELECT b.*, br.slug AS brand_slug, br.name AS brand_name FROM batches b JOIN brands br ON br.id = b.brand_id WHERE b.id = ?`,
   ).bind(id).first<Record<string, any>>();
   if (!b) throw new Error(`No batch with id ${id}.`);
-  const [subject, ideas, renders, ranks, picks, kit] = await Promise.all([
+  const [subject, ideas, renders, ranks, picks, passes, kit] = await Promise.all([
     env.DB.prepare("SELECT id, kind, title, url, data FROM subjects WHERE id = ?").bind(b.subject_id).first<Record<string, any>>(),
     env.DB.prepare("SELECT * FROM ideas WHERE batch_id = ? ORDER BY n LIMIT 60").bind(id).all<Record<string, any>>(),
     env.DB.prepare(
@@ -495,10 +495,18 @@ export async function batchGet(env: Env, id: string) {
     ).bind(id).all<Record<string, any>>(),
     env.DB.prepare("SELECT render_key, idea_id, rank, reason FROM draft_ranks WHERE batch_id = ? LIMIT 200").bind(id).all<Record<string, any>>(),
     env.DB.prepare("SELECT render_key, idea_id, note, by_owner, final_render_id, created_at FROM picks WHERE batch_id = ? LIMIT 100").bind(id).all<Record<string, any>>(),
+    // The owner's newest full pass on each idea's drafts (docs/design/owner-verdicts.md).
+    env.DB.prepare(
+      "SELECT idea_id, MAX(created_at) AS at FROM verdicts WHERE batch_id = ? AND stage = 'draft' AND mark = 'pass' GROUP BY idea_id LIMIT 60",
+    ).bind(id).all<{ idea_id: string; at: string }>(),
     latestKit(env, b.brand_id, b.kit_version),
   ]);
   const rankBy = new Map(ranks.results.map((r) => [r.render_key, r]));
   const pickBy = new Map(picks.results.map((p) => [p.render_key, p]));
+  // The blind rank is held on the server until the owner decides (a11-engine v3 design pack §4.3): an owner pick on the idea
+  // shows the rank of all its drafts; a full pass shows it only for the drafts that existed when he passed. No flag turns this off.
+  const ownerPicked = new Set(picks.results.filter((p) => p.by_owner === 1).map((p) => p.idea_id as string));
+  const passedAt = new Map(passes.results.map((p) => [p.idea_id, p.at]));
   const img = (key: string) => ({ key, url: fal.mediaUrl(env, key) });
   return {
     id: b.id,
@@ -510,34 +518,47 @@ export async function batchGet(env: Env, id: string) {
     facts: await factsGet(env, b.subject_id),
     insights: JSON.parse(b.insights),
     notes: b.notes,
-    ideas: ideas.results.map((i) => ({
-      id: i.id,
-      n: i.n,
-      format: i.format,
-      insight: i.insight,
-      sourceUrl: i.source_url,
-      visual: i.visual,
-      headline: i.headline,
-      copy: JSON.parse(i.copy),
-      picked: i.picked === 1,
-      finalPrompt: i.final_prompt,
-      finalRefs: JSON.parse(i.final_refs),
-      // Submit order, then image order. Never rank order: the order must not show the critic's rank. rank and reason stay as fields; the board hides them until the owner picks.
-      drafts: renders.results
+    ideas: ideas.results.map((i) => {
+      const drafts = renders.results
         .filter((r) => r.idea === i.id && r.kind === "draft")
-        .flatMap((r) => (r.image_keys ? (JSON.parse(r.image_keys) as string[]) : []))
-        .map((key) => ({ ...img(key), rank: rankBy.get(key)?.rank ?? null, reason: rankBy.get(key)?.reason ?? null, picked: pickBy.has(key) })),
-      finals: renders.results
-        .filter((r) => r.idea === i.id && r.kind === "final")
-        .map((r) => ({
-          id: r.id,
-          status: r.status,
-          error: r.error,
-          images: (r.image_keys ? (JSON.parse(r.image_keys) as string[]) : []).map(img),
-          composed: r.composed_key?.startsWith("renders/") ? img(r.composed_key) : null,
-          composeError: r.composed_key?.startsWith("error:") ? r.composed_key.slice(6) : null,
+        .flatMap((r) => (r.image_keys ? (JSON.parse(r.image_keys) as string[]).map((key) => ({ key, at: r.created_at as string })) : []));
+      const passed = passedAt.get(i.id);
+      const shown = (at: string) => ownerPicked.has(i.id) || (passed !== undefined && at <= passed);
+      // ranked: the blind rank of the idea's current drafts is saved (after a full pass, only the drafts made since count).
+      const current = drafts.filter((d) => passed === undefined || d.at > passed);
+      return {
+        id: i.id,
+        n: i.n,
+        format: i.format,
+        insight: i.insight,
+        sourceUrl: i.source_url,
+        visual: i.visual,
+        headline: i.headline,
+        copy: JSON.parse(i.copy),
+        picked: i.picked === 1,
+        finalPrompt: i.final_prompt,
+        finalRefs: JSON.parse(i.final_refs),
+        ranked: (current.length ? current : drafts).some((d) => rankBy.has(d.key)),
+        // Submit order, then image order. Never rank order: the order must not show the critic's rank.
+        // rank and reason are null until the owner decides on the idea (see shown above).
+        drafts: drafts.map(({ key, at }) => ({
+          ...img(key),
+          rank: shown(at) ? (rankBy.get(key)?.rank ?? null) : null,
+          reason: shown(at) ? (rankBy.get(key)?.reason ?? null) : null,
+          picked: pickBy.has(key),
         })),
-    })),
+        finals: renders.results
+          .filter((r) => r.idea === i.id && r.kind === "final")
+          .map((r) => ({
+            id: r.id,
+            status: r.status,
+            error: r.error,
+            images: (r.image_keys ? (JSON.parse(r.image_keys) as string[]) : []).map(img),
+            composed: r.composed_key?.startsWith("renders/") ? img(r.composed_key) : null,
+            composeError: r.composed_key?.startsWith("error:") ? r.composed_key.slice(6) : null,
+          })),
+      };
+    }),
     picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, byOwner: p.by_owner === 1, finalRenderId: p.final_render_id })),
     drafting: renders.results.filter((r) => r.status === "queued").map((r) => r.id),
   };
