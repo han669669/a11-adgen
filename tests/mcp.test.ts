@@ -141,8 +141,8 @@ describe("mcp handler", () => {
     expect(used.size).toBeGreaterThan(10);
     // Script names in the repo (scripts/<name>.py) are not tools.
     const scripts = new Set(["box_print", "photo_finish", "product_lock"]);
-    // Engine 3 nextStep values (worker/batch.ts nextStepV3) and checks_save kinds are not tools either.
-    const steps = new Set(["concepts_rework", "owner_decision", "draft_check", "final_check"]);
+    // Engine 3 nextStep values (worker/batch.ts nextStepV3), checks_save kinds and the gold scope value are not tools either.
+    const steps = new Set(["concepts_rework", "owner_decision", "draft_check", "final_check", "in_scope"]);
     expect([...used].filter((n) => !known.has(n) && !scripts.has(n) && !steps.has(n))).toEqual([]);
   });
   it("names only tools that exist in the server instructions, and keeps the draft order blind", () => {
@@ -152,8 +152,8 @@ describe("mcp handler", () => {
     expect(used.size).toBeGreaterThan(10);
     // Script names in the repo (scripts/<name>.py) are not tools.
     const scripts = new Set(["box_print", "photo_finish", "product_lock"]);
-    // Engine 3 nextStep values (worker/batch.ts nextStepV3) and checks_save kinds are not tools either.
-    const steps = new Set(["concepts_rework", "owner_decision", "draft_check", "final_check"]);
+    // Engine 3 nextStep values (worker/batch.ts nextStepV3), checks_save kinds and the gold scope value are not tools either.
+    const steps = new Set(["concepts_rework", "owner_decision", "draft_check", "final_check", "in_scope"]);
     expect([...used].filter((n) => !known.has(n) && !scripts.has(n) && !steps.has(n))).toEqual([]);
     expect(INSTRUCTIONS).toContain("in image order");
     expect(INSTRUCTIONS).not.toContain("then tell him");

@@ -278,8 +278,29 @@ describe("gold set", () => {
     const { env } = makeEnv();
     await canon.goldImport(env, items);
     const g = (await canon.goldGet(env, {})).items;
-    await expect(canon.goldScore(env, { note: "easy subset", answers: [{ id: g[0]!.id as string, mark: "pass" }] })).rejects.toThrow(/Answer every gold item: the set has 3 and you sent 1/);
+    await expect(canon.goldScore(env, { note: "easy subset", answers: [{ id: g[0]!.id as string, mark: "pass" }] })).rejects.toThrow(/Answer every gold item of the scope: the set has 3 and you sent 1/);
     expect((await canon.goldRuns(env)).runs).toHaveLength(0);
+  });
+
+  it("the in_scope score leaves out the out-of-scope products and compares only with runs of its own scope", async () => {
+    const { env } = makeEnv();
+    await canon.goldImport(env, [...items, { label: "v1 Poplin Trapeze Dress 2026-10-20 ad1 #x", mark: "pass" as const }, { label: "v1 ErgoTune Joobie 2026-10-21 ad0 #y", mark: "use" as const }]);
+    const full = await canon.goldGet(env, { limit: 500 });
+    const scoped = await canon.goldGet(env, { limit: 500, scope: "in_scope" });
+    expect([full.total, scoped.total, scoped.scope]).toEqual([5, 3, "in_scope"]);
+    expect(scoped.items.map((i) => i.label)).not.toContain("v1 ErgoTune Joobie 2026-10-21 ad0 #y");
+    const pass = (g: typeof full) => g.items.map((i) => ({ id: i.id as string, mark: "pass" as const }));
+    await canon.goldScore(env, { note: "full before", answers: pass(full) });
+    // An out-of-scope item is refused in an in_scope run, and the run must cover the 3 in-scope items.
+    const dress = full.items.find((i) => String(i.label).includes("Poplin"))!.id as string;
+    await expect(canon.goldScore(env, { note: "x y z", scope: "in_scope", answers: [{ id: dress, mark: "pass" }] })).rejects.toThrow(/Not gold items of the in_scope set/);
+    const r = await canon.goldScore(env, { note: "scoped before", scope: "in_scope", answers: pass(scoped) });
+    expect(r).toMatchObject({ scope: "in_scope", n: 3, previous: null });
+    expect((await canon.goldScore(env, { note: "full after", answers: pass(full) })).previous).toMatchObject({ scope: "all", note: "full before" });
+    expect((await canon.goldScore(env, { note: "scoped after", scope: "in_scope", answers: pass(scoped) })).previous).toMatchObject({ scope: "in_scope", note: "scoped before" });
+    expect((await canon.goldRuns(env)).runs.map((x) => `${x.scope}:${x.note}`)).toEqual(["in_scope:scoped after", "all:full after", "in_scope:scoped before", "all:full before"]);
+    // The tag is the server's: a note may not start with it, or an all-scope run would read as an in_scope run.
+    await expect(canon.goldScore(env, { note: "[in_scope] mine", answers: pass(full) })).rejects.toThrow(/may not start with \[in_scope\]/);
   });
 
   it("pages the gold set in a fixed order", async () => {

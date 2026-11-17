@@ -17,7 +17,7 @@ import { brandExtract } from "./brandextract";
 import * as exa from "./exa";
 import * as research from "./research";
 import { CONCEPT_SCHEMA, TERRITORY_SCHEMA } from "./concepts";
-import { calibrationReport } from "./calibration";
+import { calibrationItems, calibrationReport, calibrationSave } from "./calibration";
 import { CHECK_SCHEMA, type Check, checksSave } from "./checks";
 import { DIRECTION_SCHEMA, type Direction, directionSave, dropDirectionServerFields } from "./direction";
 import { REVIEW_SCHEMA } from "./review";
@@ -63,6 +63,9 @@ interface Tool {
 const text = (value: unknown): ToolResult => ({
   content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }],
 });
+
+const GOLD_SCOPE =
+  "all: the full gold set (the guard for a change). in_scope: the second score, without the v1 ads of products outside the product scope (packaged F&B and wellness); answer every item of the scope, and the run compares with the run before it of the same scope.";
 
 export const TOOLS: Tool[] = [
   {
@@ -808,7 +811,11 @@ export const TOOLS: Tool[] = [
       "Gold items without the owner's marks, in the same order every time, so you can judge them blind: for each, say use or pass, as the owner would. Then send the answers to gold_score. An item with an imageKey can be seen with image_get.",
     inputSchema: {
       type: "object",
-      properties: { limit: { type: "integer", minimum: 1, maximum: 500, default: 30 }, offset: { type: "integer", minimum: 0, default: 0 } },
+      properties: {
+        limit: { type: "integer", minimum: 1, maximum: 500, default: 30 },
+        offset: { type: "integer", minimum: 0, default: 0 },
+        scope: { type: "string", enum: ["all", "in_scope"], default: "all", description: GOLD_SCOPE },
+      },
       additionalProperties: false,
     },
     run: async (env, a) => text(await canon.goldGet(env, a)),
@@ -821,6 +828,7 @@ export const TOOLS: Tool[] = [
       type: "object",
       properties: {
         note: { type: "string", minLength: 3, maxLength: 200 },
+        scope: { type: "string", enum: ["all", "in_scope"], default: "all", description: GOLD_SCOPE },
         answers: {
           type: "array",
           minItems: 1,
@@ -836,7 +844,7 @@ export const TOOLS: Tool[] = [
       required: ["note", "answers"],
       additionalProperties: false,
     },
-    run: async (env, a) => text(await canon.goldScore(env, a as { note: string; answers: { id: string; mark: "use" | "pass" }[] })),
+    run: async (env, a) => text(await canon.goldScore(env, a as Parameters<typeof canon.goldScore>[1])),
   },
   {
     name: "calibration_report",
@@ -852,6 +860,67 @@ export const TOOLS: Tool[] = [
       additionalProperties: false,
     },
     run: async (env, a) => text(await calibrationReport(env, a)),
+  },
+  {
+    name: "calibration_items",
+    description:
+      "Read only: the visual evaluation set for a critic replay (design pack §4.5), derived from the owner's saved decisions up to asOf. kind triplet: each draft set that he decided (a pick or a full pass), with the drafts he saw; kind final: each final with his newest verdict. No labels: no pick, verdict, owner words or rank. Each triplet's pictures come in the order of your seed (keep it: calibration_save needs it). An item whose pictures are gone from R2 is left out and counted as lost. split holdout is the newest 30% by decision time (do not tune on it), tuning the rest. Also the size and the class balance: report both with every result. Give the replay critic one item at a time in a fresh context: its pictures (image_get), the idea and taste_log with before set to the item's decidedAt. Not for the critic subagent.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["triplet", "final"] },
+        asOf: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{3})?)?Z)?$", description: "Only decisions at or before this date or UTC time (default: now). Use the same asOf in calibration_save." },
+        split: { type: "string", enum: ["tuning", "holdout", "all"], default: "all" },
+        seed: { type: "string", minLength: 4, maxLength: 64, description: "Any text: it fixes the order of each triplet's pictures." },
+      },
+      required: ["kind", "seed"],
+      additionalProperties: false,
+    },
+    run: async (env, a) => text(await calibrationItems(env, a as Parameters<typeof calibrationItems>[1])),
+  },
+  {
+    name: "calibration_save",
+    description:
+      "Save one critic replay run (design pack §4.6): the server scores the answers against the owner's labels and writes one calibration_runs row with the agreement (n, Wilson interval), the choice of each position (position bias) and each item right or wrong. kind triplet_replay: an answer for every item of the set (kind, asOf, split; a partial run is refused); for each item of calibration_items kind triplet, choice is the key of the picture the critic chose or 'pass'; final_replay: approve, fix or reject; give the same asOf, split and seed. concept_stability: the critic's selections from two fresh contexts on one batch, with no pick saved; the alarm is fewer than 2 of 3 in common. A replay is secondary and marked contaminated (the canon is the current one). Do not show the result to the replay critic.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["triplet_replay", "final_replay", "concept_stability"] },
+        asOf: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{3})?)?Z)?$" },
+        split: { type: "string", enum: ["tuning", "holdout", "all"], default: "all" },
+        seed: { type: "string", minLength: 4, maxLength: 64 },
+        promptVersion: { type: "string", maxLength: 40, description: "The plugin version of the replay critic." },
+        note: { type: "string", maxLength: 500 },
+        answers: {
+          type: "array",
+          minItems: 1,
+          maxItems: 2000,
+          items: {
+            type: "object",
+            properties: {
+              itemId: { type: "string", maxLength: 200 },
+              choice: { type: "string", maxLength: 200 },
+              reason: { type: "string", maxLength: 500 },
+            },
+            required: ["itemId", "choice", "reason"],
+            additionalProperties: false,
+          },
+        },
+        stability: {
+          type: "object",
+          properties: {
+            batchId: { type: "string", pattern: "^[0-9a-f-]{36}$" },
+            first: { type: "array", items: { type: "string", pattern: "^[0-9a-f-]{36}$" }, minItems: 3, maxItems: 3 },
+            second: { type: "array", items: { type: "string", pattern: "^[0-9a-f-]{36}$" }, minItems: 3, maxItems: 3 },
+          },
+          required: ["batchId", "first", "second"],
+          additionalProperties: false,
+        },
+      },
+      required: ["kind"],
+      additionalProperties: false,
+    },
+    run: async (env, a) => text(await calibrationSave(env, a as Parameters<typeof calibrationSave>[1])),
   },
   {
     name: "gold_runs",
