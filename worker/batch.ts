@@ -27,9 +27,14 @@ export async function subjectSave(
   if (input.kind === "product" && input.url && !input.imageUrls?.length && !input.notes) {
     const url = productUrlKey(input.url);
     const earlier = await env.DB.prepare(
-      "SELECT id, title, url, created_at FROM subjects WHERE brand_id = ? AND kind = 'product' AND url IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 500",
-    ).bind(brand.id).all<{ id: string; title: string; url: string; created_at: string }>();
-    const same = earlier.results.find((r) => productUrlKey(r.url) === url);
+      "SELECT id, title, url, data, created_at FROM subjects WHERE brand_id = ? AND kind = 'product' AND url IS NOT NULL ORDER BY created_at DESC, rowid DESC",
+    ).bind(brand.id).all<{ id: string; title: string; url: string; data: string; created_at: string }>();
+    // Only a plain earlier subject (no images, no notes) is the product: images and notes belong to their own batch.
+    const plain = (d: string) => {
+      const x = JSON.parse(d) as { imageKeys?: string[]; notes?: string };
+      return !x.imageKeys?.length && !x.notes;
+    };
+    const same = earlier.results.find((r) => productUrlKey(r.url) === url && plain(r.data));
     if (same) {
       const facts = await env.DB.prepare("SELECT COUNT(*) AS n FROM facts WHERE subject_id = ?").bind(same.id).first<{ n: number }>();
       return { id: same.id, brandSlug: brand.slug, kind: input.kind, title: same.title, imageKeys: [], imageErrors: [], reused: true, since: same.created_at, facts: facts?.n ?? 0 };
@@ -97,7 +102,8 @@ export async function factsSave(env: Env, subjectId: string, facts: FactInput[],
 /** retrievedAt is when the fact was saved. verified: true (quote found on a stored page), false (not found), null (not checked). */
 export async function factsGet(env: Env, subjectId: string) {
   const rows = await env.DB.prepare(
-    "SELECT id, label, value, quote, source_url AS sourceUrl, created_at AS retrievedAt, verified FROM facts WHERE subject_id = ? ORDER BY id LIMIT 200",
+    // The newest 200, oldest first: a lasting product (subject_save reused) keeps growing, and the new facts must show.
+    "SELECT * FROM (SELECT id, label, value, quote, source_url AS sourceUrl, created_at AS retrievedAt, verified FROM facts WHERE subject_id = ? ORDER BY id DESC LIMIT 200) ORDER BY id",
   ).bind(subjectId).all<Record<string, unknown>>();
   return rows.results.map((r) => ({ ...r, verified: r.verified === null || r.verified === undefined ? null : r.verified === 1 }));
 }

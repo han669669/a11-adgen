@@ -34,9 +34,14 @@ describe("subject_save: a lasting product (unit 8)", () => {
     // A batch of the reused subject sees the earlier facts.
     const b = await run(env, "batch_create", { brandSlug: "pasar", subjectId: again.id, label: "W48" });
     expect((await run(env, "batch_get", { id: b.id })).facts.map((f: { value: string }) => f.value)).toEqual(["300 g"]);
+    // A long-lived product: the list shows the newest 200 facts, oldest first.
+    const add = raw.prepare("INSERT INTO facts (subject_id, label, value, quote, source_url, created_at) VALUES (?, 'l', ?, 'q', 'https://shop.example.com/p/granola', 'now')");
+    for (let i = 1; i <= 204; i++) add.run(first.id, `v${i}`);
+    const facts = (await run(env, "batch_get", { id: b.id })).facts.map((f: { value: string }) => f.value);
+    expect([facts.length, facts[0], facts[199]]).toEqual([200, "v5", "v204"]);
   });
 
-  it("makes a new subject for another page, a variant query, another brand, a brand subject, images or notes", async () => {
+  it("makes a new subject for another page, a variant query, another brand, a brand subject or notes, and never reuses a subject with notes", async () => {
     const { env, raw } = makeEnv();
     const first = await run(env, "subject_save", product("https://shop.example.com/p/granola"));
     for (const args of [
@@ -51,5 +56,9 @@ describe("subject_save: a lasting product (unit 8)", () => {
       expect(r.id).not.toBe(first.id);
     }
     expect(raw.prepare("SELECT COUNT(*) AS n FROM subjects").get()).toEqual({ n: 6 });
+    // The subject with notes is newer than the plain one, but only the plain one is reused.
+    expect((await run(env, "subject_save", product("https://shop.example.com/p/granola"))).id).toBe(first.id);
+    raw.prepare("UPDATE subjects SET data = json_set(data, '$.notes', 'old note') WHERE id = ?").run(first.id);
+    expect((await run(env, "subject_save", product("https://shop.example.com/p/granola"))).reused).toBe(false);
   });
 });
