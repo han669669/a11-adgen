@@ -210,7 +210,7 @@ export async function goldImport(env: Env, items: GoldIn[]) {
 
 /**
  * The gold set's scopes (design pack §4.5 rule 7, OD 4.3, the owner's choice of 17-11-2026): "all" is the full set; "in_scope"
- * leaves out the v1 ads of products outside the product scope (packaged F&B and wellness products, decisions 16-11-2026):
+ * leaves out the v1 ads of products outside the product scope (packaged F&B and wellness products, the owner's decision of 17-11-2026 SGT):
  * a dress, a pan and a chair. The scope is a second score beside the full score, never in place of it.
  */
 export type GoldScope = "all" | "in_scope";
