@@ -74,9 +74,9 @@ describe("mcp handler", () => {
   });
   it("sends every critic read without the plugin to the critic view", async () => {
     const { PROMPTS } = await import("../worker/prompts");
-    for (const name of ["batch", "redesign"]) {
+    for (const name of ["batch", "redesign", "final"]) {
       const p = PROMPTS.find((x) => x.name === name)!;
-      const text = p.text({ brand: "b", productTitle: "t", productUrl: "https://x", label: "l", adUrl: "https://x" });
+      const text = p.text({ brand: "b", productTitle: "t", productUrl: "https://x", label: "l", adUrl: "https://x", batchId: "x" });
       expect(text).toContain("rank them yourself in a fresh session, from batch_get with view 'critic'");
     }
   });
