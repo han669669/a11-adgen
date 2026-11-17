@@ -216,7 +216,8 @@ export async function ideasSaveFull(env: Env, batchId: string, ideas: IdeaInput[
   if (batch.engine !== 3 && (territories || promptVersion || ideas.some((i) => i.concept)))
     throw new InputError("territories, concept and promptVersion are for an engine 3 batch only. This batch is engine 2: save the ideas without them.");
   // Read the idea numbers before the checks: a save that commits between this read and the insert takes the same
-  // numbers, so UNIQUE (batch_id, n) refuses this whole save and no check can be out of date.
+  // numbers, so UNIQUE (batch_id, n) refuses this whole save when another ideas save of the batch commits in between.
+  // (A brief saved in between is not caught: the concepts then carry the brief version that they were checked against.)
   const max = await env.DB.prepare("SELECT COALESCE(MAX(n), 0) AS n FROM ideas WHERE batch_id = ?").bind(batchId).first<{ n: number }>();
   const v3 = batch.engine === 3 ? await checkConcepts(env, batch, ideas, territories, promptVersion) : null;
   const at = now();
