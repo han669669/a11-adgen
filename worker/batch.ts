@@ -524,8 +524,10 @@ export async function batchGet(env: Env, id: string) {
         .flatMap((r) => (r.image_keys ? (JSON.parse(r.image_keys) as string[]).map((key) => ({ key, at: r.created_at as string })) : []));
       const passed = passedAt.get(i.id);
       const shown = (at: string) => ownerPicked.has(i.id) || (passed !== undefined && at <= passed);
-      // ranked: the blind rank of the idea's current drafts is saved (after a full pass, only the drafts made since count).
+      // ranked: the critic's rank of the newest 3 current drafts is saved (the critic ranks the newest 3; after a full pass,
+      // only the drafts made since count).
       const current = drafts.filter((d) => passed === undefined || d.at > passed);
+      const newest = (current.length ? current : drafts).slice(-3);
       return {
         id: i.id,
         n: i.n,
@@ -538,7 +540,7 @@ export async function batchGet(env: Env, id: string) {
         picked: i.picked === 1,
         finalPrompt: i.final_prompt,
         finalRefs: JSON.parse(i.final_refs),
-        ranked: (current.length ? current : drafts).some((d) => rankBy.has(d.key)),
+        ranked: newest.length > 0 && newest.every((d) => rankBy.has(d.key)),
         // Submit order, then image order. Never rank order: the order must not show the critic's rank.
         // rank and reason are null until the owner decides on the idea (see shown above).
         drafts: drafts.map(({ key, at }) => ({

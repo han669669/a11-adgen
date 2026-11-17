@@ -197,6 +197,9 @@ describe("batch flow", () => {
       const before = await ideaOf(env, b.id, ideas[0]!.id);
       expect(before.ranked).toBe(false);
       expect(before.drafts.map((d) => [d.rank, d.reason])).toEqual([[null, null], [null, null], [null, null]]);
+      // A rank of only some of the drafts (an interrupted critic) is not done.
+      await rank3(env, b.id, k.slice(0, 2));
+      expect((await ideaOf(env, b.id, ideas[0]!.id)).ranked).toBe(false);
       await rank3(env, b.id, k);
       const after = await ideaOf(env, b.id, ideas[0]!.id);
       expect(after.ranked).toBe(true);
@@ -221,7 +224,7 @@ describe("batch flow", () => {
       expect([decided.ranked, open.ranked]).toEqual([true, true]);
       // Clearing the pick (an empty list) holds the rank again.
       await batch.picksSave(env, b.id, []);
-      expect((await ideaOf(env, b.id, ideas[0]!.id)).drafts.every((d) => d.rank === null)).toBe(true);
+      expect((await ideaOf(env, b.id, ideas[0]!.id)).drafts.every((d) => d.rank === null && d.reason === null)).toBe(true);
     });
 
     it("(d, e2) shows the rank after a full pass, but holds the drafts made after it", async () => {
@@ -231,7 +234,7 @@ describe("batch flow", () => {
       await rank3(env, b.id, [...old]);
       await batch.batchUpdate(env, { id: b.id, ownerVerdicts: [{ stage: "draft", mark: "pass", ideaId: ideas[0]!.id, ownerSaid: "none of these" }] });
       let idea = await ideaOf(env, b.id, ideas[0]!.id);
-      expect(idea.drafts.map((d) => d.rank)).toEqual([1, 2, 3]);
+      expect(idea.drafts.map((d) => [d.rank, d.reason])).toEqual([[1, "reason 1"], [2, "reason 2"], [3, "reason 3"]]);
       const redraft = addDraft(raw, b.id, ideas[0]!.id, "d2222222-2222-2222-2222-222222222222", 3, LATER);
       idea = await ideaOf(env, b.id, ideas[0]!.id);
       // The new drafts are not ranked yet: the old ranks do not count for them.

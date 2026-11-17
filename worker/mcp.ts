@@ -252,7 +252,7 @@ export const TOOLS: Tool[] = [
   {
     name: "batch_get",
     description:
-      "Read everything about a batch: kit, subject, facts, insights, ideas with their drafts (in submit order, then image order: the order the owner sees; each draft's rank and reason are null until the owner picks a draft of that idea or passes on its drafts, and the idea's ranked is true when the critic's rank of its current drafts is saved), picks and finals. Use it to resume a stopped batch.",
+      "Read everything about a batch: kit, subject, facts, insights, ideas with their drafts (in submit order, then image order: the order the owner sees; each draft's rank and reason are null until the owner picks a draft of that idea or passes on its drafts; a pass shows only the drafts made before it; the idea's ranked is true when the critic's rank of its newest 3 drafts is saved), picks and finals. Use it to resume a stopped batch.",
     inputSchema: {
       type: "object",
       properties: { id: { type: "string", pattern: "^[0-9a-f-]{36}$" } },
@@ -415,7 +415,7 @@ export const TOOLS: Tool[] = [
   {
     name: "drafts_rank",
     description:
-      "Save the critic's rank for draft images (1 = best per idea). It is blind: the owner does not see it until he has picked, then the server compares his pick with it (picks_save, taste_log). Keys must be finished drafts of this batch. Give a one-line reason per draft that names what you see (look, light, product shape, food), so taste_log can teach the next batch.",
+      "Save the critic's rank for draft images (1 = best per idea). It is blind: batch_get and the board show it only after the owner picks a draft of that idea or passes on its drafts (a pass shows only the drafts made before it), then the server compares his pick with it (picks_save, taste_log). Keys must be finished drafts of this batch. Give a one-line reason per draft that names what you see (look, light, product shape, food), so taste_log can teach the next batch.",
     inputSchema: {
       type: "object",
       properties: {
