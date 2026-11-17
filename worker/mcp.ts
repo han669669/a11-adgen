@@ -841,13 +841,13 @@ export const TOOLS: Tool[] = [
   {
     name: "calibration_report",
     description:
-      "Read only: the critic's calibration against the owner's choices (design pack §4), computed from the saved rows each time. The draft-pick rank-1 agreement and MRR (the primary measure) by engine and stamp (the plugin version and canon that the critic had; older ranks are unstamped), the owner pass rate, concept acceptance and selection agreement, the draft rework rate, final approval, the final check against the owner (agreement, false acceptance), false rejection, the product defect rate, the copy correction rate and the paid render waste. Every proportion has n and its Wilson 95% interval; under n = 30 it says small sample: direction only, no conclusion. Report it so: never as one number across versions, and never as a visual result from the text gold set. Not for the critic subagent.",
+      "Read only: the critic's calibration against the owner's choices (design pack §4), computed from the saved rows each time. The draft-pick rank-1 agreement and MRR (the primary measure) by engine and stamp (the plugin version and canon that the critic had; older ranks are unstamped), the owner pass rate, concept acceptance and selection agreement, the draft rework rate, final approval, the final check against the owner (agreement, false acceptance), false rejection, the product defect rate, the copy correction rate and the paid render waste (a US$ share of the fal spend ledger, with its job counts). The critic and art-director metrics are by engine and by the prompt version of the record that made the judgement; the owner's own decisions are by engine only. Every proportion has n and its Wilson 95% interval; under n = 30 it says small sample: direction only, no conclusion. Report it so: never as one number across versions, and never as a visual result from the text gold set. Not for the critic subagent.",
     inputSchema: {
       type: "object",
       properties: {
         engine: { type: "integer", minimum: 2, maximum: 3 },
-        since: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}", description: "Only decisions and records from this date (UTC)." },
-        promptVersion: { type: "string", maxLength: 40, description: "Only the draft-pick groups with this plugin version stamp." },
+        since: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "Only decisions and records from this date (UTC)." },
+        promptVersion: { type: "string", maxLength: 40, description: "Only the groups with this plugin version stamp (every stamped metric)." },
       },
       additionalProperties: false,
     },

@@ -92,7 +92,7 @@ export async function conceptReviewGet(env: Env, batchId: string) {
      FROM batch_records WHERE batch_id = ?1 AND kind = 'concept_review' AND idea_id IS NULL ORDER BY version DESC LIMIT 1`,
   ).bind(batchId).first<{ version: number; author: string; created_at: string; body: string; reworks: number }>();
   if (!r) return null;
-  const body = JSON.parse(r.body) as { outcome: string; ids: string[]; reserves: string[]; review: Review; lastN: number; [k: string]: unknown };
+  const body = JSON.parse(r.body) as { outcome: string; ids: string[]; reserves: string[]; review: Review; lastN: number; canonLogId?: number | null; tasteRows?: number; [k: string]: unknown };
   return { version: r.version, author: r.author, savedAt: r.created_at, reworks: r.reworks, ...body };
 }
 
@@ -182,9 +182,10 @@ export async function conceptPick(env: Env, batchId: string, ids: string[], inpu
     roles,
     reserves,
     review,
-    // The rank context stamp (design pack §4.4): the concept review record is the stamp of the critic's selection.
-    canonLogId: canon.canonLogId,
-    tasteRows: canon.tasteRows,
+    // The rank context stamp (design pack §4.4): the concept review record is the stamp of the critic's selection. The
+    // owner's change keeps the critic's review, so it keeps the stamp of that review too.
+    canonLogId: ownerWords ? (last!.canonLogId ?? null) : canon.canonLogId,
+    tasteRows: ownerWords ? (last!.tasteRows ?? null) : canon.tasteRows,
     // The newest idea number the review covered: an idea with a higher number is a concept the critic has not seen.
     lastN: ideas.results.at(-1)?.n ?? 0,
     ...(ownerSwap ? { ownerSwap } : {}),

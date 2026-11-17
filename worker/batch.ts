@@ -494,7 +494,9 @@ async function tasteTally(env: Env, before = "9999") {
  */
 export async function tasteLog(env: Env, limit = 30, before?: string) {
   // before (design pack §4.5 rule 5): only the decisions made before that time, so a replay cannot see its own answer.
-  const cut = before ?? "9999";
+  // The stored times have milliseconds: a time cut is normalised to that form, so a cut at 10:00:00Z keeps out 10:00:00.200Z.
+  // A date cut stays as it is (it sorts before every time of that day).
+  const cut = !before ? "9999" : before.length === 10 ? before : new Date(before).toISOString();
   const picks = await env.DB.prepare(
     `SELECT p.render_key, p.idea_id, p.batch_id, p.note, p.created_at, i.format, i.headline, i.visual, b.label
      FROM picks p JOIN ideas i ON i.id = p.idea_id AND i.batch_id = p.batch_id JOIN batches b ON b.id = p.batch_id
@@ -502,8 +504,8 @@ export async function tasteLog(env: Env, limit = 30, before?: string) {
   ).bind(cut, limit).all<Record<string, any>>();
   const ideaIds = [...new Set(picks.results.map((p) => p.idea_id as string))];
   const ranks = await env.DB.prepare(
-    "SELECT render_key, idea_id, rank, reason FROM draft_ranks WHERE idea_id IN (SELECT value FROM json_each(?)) ORDER BY rank",
-  ).bind(JSON.stringify(ideaIds)).all<{ render_key: string; idea_id: string; rank: number; reason: string | null }>();
+    "SELECT render_key, idea_id, rank, reason FROM draft_ranks WHERE idea_id IN (SELECT value FROM json_each(?)) AND created_at < ? ORDER BY rank",
+  ).bind(JSON.stringify(ideaIds), cut).all<{ render_key: string; idea_id: string; rank: number; reason: string | null }>();
   const verdicts = await env.DB.prepare(
     `SELECT v.created_at, v.stage, v.mark, v.source_mark, v.owner_said, v.notes, v.render_key, b.label, i.format, i.headline, pk.version
      FROM verdicts v LEFT JOIN batches b ON b.id = v.batch_id LEFT JOIN ideas i ON i.id = v.idea_id LEFT JOIN packs pk ON pk.id = v.pack_id

@@ -124,6 +124,8 @@ describe("ideas_pick on an engine 3 batch", () => {
     const { env, raw, ideas } = await withConcepts();
     const first = select(ideas);
     await run(env, "ideas_pick", first);
+    // A verdict after the critic's review: the owner's record still carries the stamp of the critic's review.
+    raw.prepare("INSERT INTO verdicts (id, batch_id, stage, mark, owner_said, created_at) VALUES ('vx', ?, 'final', 'fix', 'x', 'now')").run(E3);
     const ids = [ideas[0]!.id, ideas[4]!.id, ideas[6]!.id];
     const words = "use the hidden pouch one instead of the gift";
     const swap = { batchId: E3, outcome: "select", ids, roles: ids.map((ideaId) => ({ ideaId, role: "bof" })), reserves: [ideas[1]!.id], ownerSwap: words };
@@ -136,7 +138,8 @@ describe("ideas_pick on an engine 3 batch", () => {
     const recs = records(raw);
     expect(recs.map((r) => r.author)).toEqual(["critic", "owner"]);
     // The server keeps the critic's saved review: the owner's record does not carry a new one.
-    expect(JSON.parse(recs[1]!.body)).toMatchObject({ ownerSwap: words, review: JSON.parse(recs[0]!.body).review });
+    const critic = JSON.parse(recs[0]!.body);
+    expect(JSON.parse(recs[1]!.body)).toMatchObject({ ownerSwap: words, review: critic.review, canonLogId: critic.canonLogId, tasteRows: critic.tasteRows });
     await expect(run(env, "ideas_pick", { ...rework(ideas), ownerSwap: words })).rejects.toThrow("ownerSwap is for a select only");
   });
 

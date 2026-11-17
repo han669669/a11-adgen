@@ -44,15 +44,16 @@ type Stamp = { promptVersion?: string; canonLogId?: number | null; tasteRows?: n
 
 /**
  * The critic calibration report (design pack §4.2, §4.7): every metric with n and, for a proportion, its Wilson
- * interval, by engine; the draft-pick agreement also by version stamp. Read only: it computes from D1 each time.
- * since and engine filter every metric; promptVersion filters the stamped draft-pick groups only.
+ * interval, by engine and by the version stamp of the record that made the judgement. Read only: it computes from D1
+ * each time. since and engine filter every metric; promptVersion filters every stamped metric. The owner's own
+ * decisions (pass rate, final approval, copy corrections, render waste) have no critic stamp and are by engine only.
  */
 export async function calibrationReport(env: Env, f: ReportFilter = {}) {
   const since = f.since ?? "";
   const eng = (e: number) => f.engine === undefined || f.engine === e;
   const q = <T>(sql: string, ...binds: unknown[]) => env.DB.prepare(sql).bind(...binds).all<T>().then((r) => r.results);
 
-  const [picks, passes, finalVerdicts, records, ideas, renders, finalPicks] = await Promise.all([
+  const [picks, passes, finalVerdicts, draftFixes, records, ideas, spendRows, finalPicks] = await Promise.all([
     // Every owner pick with the critic's rank of the picked draft, when the rank was made before the pick, and the
     // newest stamp of that idea at or before the pick.
     q<{ batch_id: string; idea_id: string; render_key: string; engine: number; rank: number | null; stamp: string | null }>(
@@ -72,8 +73,13 @@ export async function calibrationReport(env: Env, f: ReportFilter = {}) {
        WHERE v.stage = 'final' AND v.mark IN ('approve', 'fix', 'reject') AND v.created_at >= ? ORDER BY v.created_at, v.rowid`,
       since,
     ),
-    q<{ batch_id: string; kind: string; idea_id: string | null; version: number; body: string; author: string; engine: number }>(
-      `SELECT r.batch_id, r.kind, r.idea_id, r.version, r.body, r.author, b.engine FROM batch_records r JOIN batches b ON b.id = r.batch_id
+    // The owner's fix marks on one draft picture (a defect in a draft that a check may have called eligible).
+    q<{ render_key: string }>(
+      `SELECT render_key FROM verdicts WHERE stage = 'draft' AND mark = 'fix' AND render_key IS NOT NULL AND created_at >= ?`,
+      since,
+    ),
+    q<{ batch_id: string; kind: string; idea_id: string | null; version: number; body: string; author: string; prompt_version: string; engine: number }>(
+      `SELECT r.batch_id, r.kind, r.idea_id, r.version, r.body, r.author, r.prompt_version, b.engine FROM batch_records r JOIN batches b ON b.id = r.batch_id
        WHERE r.kind IN ('concept_review', 'direction', 'draft_check', 'final_check') AND r.created_at >= ? ORDER BY r.rowid`,
       since,
     ),
@@ -82,8 +88,10 @@ export async function calibrationReport(env: Env, f: ReportFilter = {}) {
        WHERE i.picked = 1 AND json_extract(i.copy, '$.ownerApproved') IS NOT NULL AND b.created_at >= ?`,
       since,
     ),
-    q<{ id: string; kind: string; usd_est: number | null; engine: number }>(
-      `SELECT r.id, r.kind, r.usd_est, b.engine FROM renders r JOIN batches b ON b.id = r.batch WHERE r.created_at >= ?`,
+    // The fal spend ledger (each row's ref is its render id); a released row was not billed. A row with no render row has no engine.
+    q<{ ref: string | null; usd_est: number; engine: number | null }>(
+      `SELECT s.ref, s.usd_est, b.engine FROM spend s LEFT JOIN renders r ON r.id = s.ref LEFT JOIN batches b ON b.id = r.batch
+       WHERE s.service = 'fal' AND s.status != 'released' AND s.at >= ?`,
       since,
     ),
     q<{ render_key: string; final_render_id: string | null }>(
@@ -92,7 +100,7 @@ export async function calibrationReport(env: Env, f: ReportFilter = {}) {
   ]);
 
   // Draft-pick agreement and MRR, by engine and stamp (the primary measure, §4.2).
-  const groups = new Map<string, { engine: number; stamp: Stamp | "unstamped"; ranks: number[] }>();
+  const groups = new Map<string, { engine: number; stamp: Stamp | "unstamped"; ranks: number[]; taste: number[] }>();
   let unranked = 0;
   for (const p of picks) {
     if (!eng(p.engine)) continue;
@@ -100,94 +108,124 @@ export async function calibrationReport(env: Env, f: ReportFilter = {}) {
     const s = p.stamp ? (JSON.parse(p.stamp) as Stamp) : null;
     if (f.promptVersion !== undefined && s?.promptVersion !== f.promptVersion) continue;
     const label = `${p.engine}|${s ? `${s.promptVersion ?? ""}|${s.canonLogId ?? ""}` : "unstamped"}`;
-    const g = groups.get(label) ?? { engine: p.engine, stamp: s ? { promptVersion: s.promptVersion ?? "", canonLogId: s.canonLogId ?? null } : "unstamped", ranks: [] };
+    // tasteRows grows by one with each decision, so it is not in the group key (each rank would be a group of 1): the
+    // group shows its range.
+    const g = groups.get(label) ?? { engine: p.engine, stamp: s ? { promptVersion: s.promptVersion ?? "", canonLogId: s.canonLogId ?? null } : "unstamped", ranks: [], taste: [] };
     g.ranks.push(p.rank);
+    if (typeof s?.tasteRows === "number") g.taste.push(s.tasteRows);
     groups.set(label, g);
   }
   const draftPick = [...groups.values()].map((g) => ({
     engine: g.engine,
-    stamp: g.stamp,
+    stamp: g.stamp === "unstamped" ? g.stamp : { ...g.stamp, tasteRows: g.taste.length ? [Math.min(...g.taste), Math.max(...g.taste)] : null },
     n: g.ranks.length,
     rank1: prop(g.ranks.filter((r) => r === 1).length, g.ranks.length),
     mrr: round(g.ranks.reduce((a, r) => a + 1 / r, 0) / g.ranks.length),
     ranksOfPick: Object.fromEntries([...new Set(g.ranks)].sort().map((r) => [r, g.ranks.filter((x) => x === r).length])),
   }));
 
-  const byEngine = <T extends { engine: number }>(rows: T[]) => [2, 3].filter(eng).map((e) => [e, rows.filter((r) => r.engine === e)] as const);
+  type Item = { engine: number; hit: boolean };
+  /** A proportion for each engine (the owner's own decisions, with no critic stamp). */
+  const byEngine = (rows: Item[]) =>
+    [2, 3].filter(eng).map((e) => { const rs = rows.filter((r) => r.engine === e); return { engine: e, ...prop(rs.filter((r) => r.hit).length, rs.length) }; });
+  /** A proportion for each engine and prompt version of the record that made the judgement (§4.2: never one number across versions). */
+  const stamped = (rows: (Item & { pv: string })[]) => {
+    const m = new Map<string, (Item & { pv: string })[]>();
+    for (const r of rows) {
+      if (!eng(r.engine) || (f.promptVersion !== undefined && r.pv !== f.promptVersion)) continue;
+      m.set(`${r.engine}|${r.pv}`, [...(m.get(`${r.engine}|${r.pv}`) ?? []), r]);
+    }
+    return [...m.values()].map((rs) => ({ engine: rs[0]!.engine, promptVersion: rs[0]!.pv, ...prop(rs.filter((r) => r.hit).length, rs.length) }));
+  };
 
   // Owner pass rate: draft sets with a full pass ÷ draft sets shown (a pass, or an owner pick).
-  const passRate = byEngine([...passes.map((p) => ({ ...p, pass: true })), ...picks.map((p) => ({ engine: p.engine, pass: false }))]).map(
-    ([e, rows]) => ({ engine: e, ...prop(rows.filter((r) => r.pass).length, rows.length) }),
-  );
+  const passRate = byEngine([...passes.map((p) => ({ engine: p.engine, hit: true })), ...picks.map((p) => ({ engine: p.engine, hit: false }))]);
 
   // Final approval rate: the owner's newest verdict on each final picture.
   const newestFinal = new Map<string, { engine: number; mark: string }>();
   for (const [i, v] of finalVerdicts.entries()) newestFinal.set(v.render_key ?? `row ${i}`, { engine: v.engine, mark: v.mark });
   const finals = [...newestFinal.values()];
-  const finalApproval = byEngine(finals).map(([e, rows]) => ({ engine: e, ...prop(rows.filter((r) => r.mark === "approve").length, rows.length) }));
+  const finalApproval = byEngine(finals.map((r) => ({ engine: r.engine, hit: r.mark === "approve" })));
 
   // Engine 3 records: the newest check of each render, the concept reviews, the directions.
-  const checks = new Map<string, { kind: string; engine: number; idea: string; body: Record<string, any> }>();
-  const reviews: { batch: string; engine: number; author: string; body: Record<string, any> }[] = [];
-  const rounds = new Map<string, { engine: number; fresh: number }>();
+  const checks = new Map<string, { kind: string; engine: number; pv: string; idea: string; body: Record<string, any> }>();
+  const reviews: { batch: string; engine: number; pv: string; author: string; body: Record<string, any> }[] = [];
+  const rounds = new Map<string, { engine: number; pv: string; fresh: number }>();
   for (const r of records) {
     const body = JSON.parse(r.body) as Record<string, any>;
-    if (r.kind === "draft_check" || r.kind === "final_check") checks.set(body.renderId, { kind: r.kind, engine: r.engine, idea: r.idea_id ?? "", body });
-    else if (r.kind === "concept_review") reviews.push({ batch: r.batch_id, engine: r.engine, author: r.author, body });
+    const pv = r.prompt_version;
+    if (r.kind === "draft_check" || r.kind === "final_check") checks.set(body.renderId, { kind: r.kind, engine: r.engine, pv, idea: r.idea_id ?? "", body });
+    else if (r.kind === "concept_review") reviews.push({ batch: r.batch_id, engine: r.engine, pv, author: r.author, body });
     else if (r.kind === "direction") {
       const k = `${r.batch_id}|${r.idea_id}`;
       const fresh = (body.drafts as { renderId?: string }[]).every((d) => !d.renderId) ? 1 : 0;
-      rounds.set(k, { engine: r.engine, fresh: (rounds.get(k)?.fresh ?? 0) + fresh });
+      rounds.set(k, { engine: r.engine, pv, fresh: (rounds.get(k)?.fresh ?? 0) + fresh });
     }
   }
-  const all = [...checks.values()].filter((c) => eng(c.engine));
+  const all = [...checks.values()];
   const drafts = all.filter((c) => c.kind === "draft_check");
-  const finalChecks = [...checks.entries()].filter(([, c]) => c.kind === "final_check" && eng(c.engine));
+  const finalChecks = [...checks.entries()].filter(([, c]) => c.kind === "final_check");
 
   // Concept acceptance and selection agreement (from the critic's and the owner's concept review records).
-  const critic = reviews.filter((r) => r.author === "critic" && eng(r.engine));
-  const concepts = critic.flatMap((r) => (r.body.review?.concepts ?? []) as { verdict: string }[]);
-  let selected = 0, kept = 0;
+  const critic = reviews.filter((r) => r.author === "critic");
+  const concepts = critic.flatMap((r) => ((r.body.review?.concepts ?? []) as { verdict: string }[]).map((c) => ({
+    engine: r.engine, pv: r.pv, hit: c.verdict === "select" || c.verdict === "reserve",
+  })));
+  // Batches with a rework ÷ batches the critic reviewed, with the version of the batch's newest critic review.
+  const reworkBatches = new Map<string, Item & { pv: string }>();
+  for (const r of critic) reworkBatches.set(r.batch, { engine: r.engine, pv: r.pv, hit: (reworkBatches.get(r.batch)?.hit ?? false) || r.body.outcome === "rework" });
+  const selection: (Item & { pv: string })[] = [];
   for (const [i, r] of reviews.entries()) {
-    if (r.author !== "critic" || r.body.outcome !== "select" || !eng(r.engine)) continue;
+    if (r.author !== "critic" || r.body.outcome !== "select") continue;
     const next = reviews.slice(i + 1).find((x) => x.batch === r.batch);
     // Only a selection that the owner changed or confirmed in his words counts (ownerSwap, ownerReject).
     if (next?.author !== "owner") continue;
-    selected += r.body.ids.length;
-    kept += next.body.outcome === "select" ? (r.body.ids as string[]).filter((id) => (next.body.ids as string[]).includes(id)).length : 0;
+    for (const id of r.body.ids as string[])
+      selection.push({ engine: r.engine, pv: r.pv, hit: next.body.outcome === "select" && (next.body.ids as string[]).includes(id) });
   }
 
   // Final approval agreement and false acceptance: the newest final check of the final against the owner's newest verdict.
   const finalMark = new Map<string, string>();
   for (const v of finalVerdicts) { const id = renderOf(v.render_key); if (id) finalMark.set(id, v.mark); }
   const both = finalChecks.filter(([id]) => finalMark.has(id)).map(([id, c]) => ({
+    engine: c.engine,
+    pv: c.pv,
     ready: finalReady(c.body as Check),
     approved: finalMark.get(id) === "approve",
   }));
 
   // Copy correction: picked ideas whose approved words differ from the words as written.
-  const copies = ideas.filter((i) => eng(i.engine)).map((i) => {
+  const copies = ideas.map((i) => {
     const c = JSON.parse(i.copy) as { subline?: string; written?: { headline: string; subline: string } };
-    return !!c.written && (c.written.headline !== i.headline || (c.written.subline ?? "") !== (c.subline ?? ""));
+    return { engine: i.engine, hit: !!c.written && (c.written.headline !== i.headline || (c.written.subline ?? "") !== (c.subline ?? "")) };
   });
 
   // Paid render waste: fal spend on renders outside an approved final's line (the approved final and its picked draft).
   const approvedFinals = new Set([...finalMark].filter(([, m]) => m === "approve").map(([id]) => id));
   const line = new Set(approvedFinals);
   for (const p of finalPicks) if (p.final_render_id && approvedFinals.has(p.final_render_id)) { const d = renderOf(p.render_key); if (d) line.add(d); }
-  const spend = renders.filter((r) => eng(r.engine));
-  const total = spend.reduce((a, r) => a + (r.usd_est ?? 0), 0);
-  const waste = spend.filter((r) => !line.has(r.id)).reduce((a, r) => a + (r.usd_est ?? 0), 0);
+  // A spend row with no render row (no engine) counts only in a report for every engine, and always as waste.
+  const spend = spendRows.filter((r) => (r.engine === null ? f.engine === undefined : eng(r.engine)));
+  const wasted = spend.filter((r) => !r.ref || !line.has(r.ref));
+  const total = spend.reduce((a, r) => a + r.usd_est, 0);
+  const waste = wasted.reduce((a, r) => a + r.usd_est, 0);
 
   const productFail = (c: { kind: string; body: Record<string, any> }) =>
     c.kind === "draft_check"
       ? ["productShape", "label", "logo"].some((k) => c.body.points?.[k] === "fail")
       : c.body.finalPoints?.productTruth === "fail";
-  const directions = [...rounds.values()].filter((r) => eng(r.engine));
+  const directions = [...rounds.values()];
   // False rejection: drafts not eligible that the owner picked ÷ drafts not eligible in the sets he decided (picked or passed).
   const decided = new Set([...picks.map((p) => p.idea_id), ...passes.map((p) => p.idea_id)]);
   const ownerPicked = new Set(picks.map((p) => renderOf(p.render_key)));
-  const rejected = [...checks.entries()].filter(([, c]) => c.kind === "draft_check" && eng(c.engine) && c.body.eligible === false && decided.has(c.idea));
+  const seen = [...checks.entries()].filter(([, c]) => c.kind === "draft_check" && decided.has(c.idea));
+  const rejected = seen.filter(([, c]) => c.body.eligible === false);
+  // False acceptance: ready finals that the owner did not approve, and eligible drafts he marked fix, ÷ items marked ready or eligible.
+  const fixed = new Set(draftFixes.map((v) => renderOf(v.render_key)));
+  const accepted = [
+    ...both.filter((b) => b.ready).map((b) => ({ engine: b.engine, pv: b.pv, hit: !b.approved })),
+    ...seen.filter(([, c]) => c.body.eligible === true).map(([id, c]) => ({ engine: c.engine, pv: c.pv, hit: fixed.has(id) })),
+  ];
 
   return {
     filter: f,
@@ -202,19 +240,29 @@ export async function calibrationReport(env: Env, f: ReportFilter = {}) {
     ownerPassRate: passRate,
     finalApproval,
     conceptAcceptance: {
-      concepts: prop(concepts.filter((c) => c.verdict === "select" || c.verdict === "reserve").length, concepts.length),
-      reworkReviews: prop(critic.filter((r) => r.body.outcome === "rework").length, critic.length),
+      concepts: stamped(concepts),
+      reworkBatches: stamped([...reworkBatches.values()]),
     },
-    conceptSelectionAgreement: { ...prop(kept, selected), scope: "selected concepts of the selections that the owner changed or confirmed with his words (ownerSwap, ownerReject)" },
+    conceptSelectionAgreement: {
+      groups: stamped(selection),
+      scope: "selected concepts of the selections that the owner changed or confirmed with his words (ownerSwap, ownerReject)",
+    },
     draftRework: {
-      redos: prop(drafts.filter((c) => c.body.attempt === 2).length, drafts.length),
-      newDirections: prop(directions.filter((d) => d.fresh > 1).length, directions.length),
+      redos: stamped(drafts.map((c) => ({ engine: c.engine, pv: c.pv, hit: c.body.attempt === 2 }))),
+      newDirections: stamped(directions.map((d) => ({ engine: d.engine, pv: d.pv, hit: d.fresh > 1 }))),
     },
-    finalApprovalAgreement: prop(both.filter((b) => b.ready === b.approved).length, both.length),
-    falseAcceptance: prop(both.filter((b) => b.ready && !b.approved).length, both.filter((b) => b.ready).length),
-    falseRejection: prop(rejected.filter(([id]) => ownerPicked.has(id)).length, rejected.length),
-    productDefectRate: prop(all.filter(productFail).length, all.length),
-    copyCorrectionRate: prop(copies.filter(Boolean).length, copies.length),
-    paidRenderWaste: { usdWaste: round(waste), usdTotal: round(total), share: total ? round(waste / total) : null },
+    finalApprovalAgreement: stamped(both.map((b) => ({ engine: b.engine, pv: b.pv, hit: b.ready === b.approved }))),
+    falseAcceptance: stamped(accepted),
+    falseRejection: stamped(rejected.map(([id, c]) => ({ engine: c.engine, pv: c.pv, hit: ownerPicked.has(id) }))),
+    productDefectRate: stamped(all.map((c) => ({ engine: c.engine, pv: c.pv, hit: productFail(c) }))),
+    copyCorrectionRate: byEngine(copies),
+    paidRenderWaste: {
+      usdWaste: round(waste),
+      usdTotal: round(total),
+      share: total ? round(waste / total) : null,
+      jobs: spend.length,
+      wastedJobs: wasted.length,
+      note: "A share of US$, not a count of items: no Wilson interval. Read it with the number of jobs.",
+    },
   };
 }
