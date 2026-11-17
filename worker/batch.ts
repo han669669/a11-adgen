@@ -617,7 +617,7 @@ export async function batchGet(env: Env, id: string) {
     subject: subject && { ...subject, data: JSON.parse(subject.data) },
     facts: await factsGet(env, b.subject_id),
     // a11-engine v3 Phase 1: the engine (2 for every batch made before engine 3), the newest brief and the research
-    // sources (no text). An engine 2 batch has brief null.
+    // sources (no text). brief is null when no brief is saved (the usual case for an engine 2 batch).
     engine,
     brief,
     sources: await sourcesList(env, id),
