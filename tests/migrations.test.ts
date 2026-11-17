@@ -228,3 +228,68 @@ describe("0015_engine_v3", () => {
     expect(triggers.map((t) => t.name)).toEqual(["ideas_pick_limit_insert", "ideas_pick_limit_update"]);
   });
 });
+
+describe("0016_canon_scopes", () => {
+  const before = readdirSync(new URL("../migrations/", import.meta.url))
+    .filter((n) => n.endsWith(".sql") && n < "0016")
+    .sort();
+  /** A database at 0015 with the seeded canon and a log row, then 0016 in one transaction. */
+  const migrated = () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec("PRAGMA foreign_keys = ON");
+    for (const f of before) db.exec(sql(f));
+    db.exec(`
+      INSERT INTO brands (id, slug, name, created_at, updated_at) VALUES ('br', 'wongi', 'WonGi', 't', 't');
+      INSERT INTO canon_log (rule_id, action, detail, at) SELECT id, 'add', '{}', 't' FROM canon_rules LIMIT 1;
+      UPDATE canon_rules SET status = 'retired', retired_at = 't', retired_reason = 'r' WHERE rowid = 1;
+    `);
+    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[]).map((t) => t.name);
+    const snapshot = Object.fromEntries(tables.map((t) => [t, db.prepare(`SELECT * FROM "${t}" ORDER BY rowid`).all()]));
+    db.exec("BEGIN");
+    db.exec(sql("0016_canon_scopes.sql"));
+    db.exec("COMMIT");
+    return { db, snapshot };
+  };
+  const add = (db: DatabaseSync, id: string, scope = "owner", brand: string | null = null) =>
+    db.prepare("INSERT INTO canon_rules (id, stage, scope, brand_slug, text, created_at, updated_at, last_evidence_at) VALUES (?, 'all', ?, ?, 'x', 't', 't', 't')").run(id, scope, brand);
+  const fill = (db: DatabaseSync) => {
+    const active = (db.prepare("SELECT COUNT(*) AS n FROM canon_rules WHERE status = 'active'").get() as { n: number }).n;
+    for (let n = active; n < 40; n++) add(db, `o${n}`);
+  };
+
+  it("keeps every row and gives every rule scope owner and no brand", () => {
+    const { db, snapshot } = migrated();
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(snapshot.canon_rules!.length).toBeGreaterThan(20);
+    const added: Record<string, Record<string, unknown>> = { canon_rules: { scope: "owner", brand_slug: null } };
+    for (const [t, rows] of Object.entries(snapshot)) {
+      expect(db.prepare(`SELECT * FROM "${t}" ORDER BY rowid`).all()).toEqual(rows.map((r) => ({ ...r, ...added[t] })));
+    }
+  });
+
+  it("keeps 40 for the rules of every batch and 10 for each brand, checked by the database", () => {
+    const { db } = migrated();
+    expect(() => add(db, "x1", "brand", "nobody")).toThrow("canon scope");
+    expect(() => add(db, "x2", "creative", "wongi")).toThrow("canon scope");
+    fill(db);
+    expect(() => add(db, "o40")).toThrow("canon is full: 40 active rules");
+    for (let n = 0; n < 10; n++) add(db, `b${n}`, "brand", "wongi");
+    expect(() => add(db, "b10", "brand", "wongi")).toThrow("brand canon is full");
+    // The retired seed rule cannot come back into a full canon, and a brand rule cannot move into it.
+    expect(() => db.exec("UPDATE canon_rules SET status = 'active' WHERE rowid = 1")).toThrow("canon is full");
+    expect(() => db.exec("UPDATE canon_rules SET scope = 'owner', brand_slug = NULL WHERE id = 'b0'")).toThrow("canon is full");
+    db.exec("UPDATE canon_rules SET text = 'y', scope = 'owner' WHERE id = 'o39'");
+  });
+
+  it("rolls back to 40 active rules of every scope, and keeps the rows", () => {
+    const { db } = migrated();
+    for (let n = 0; n < 3; n++) add(db, `b${n}`, "brand", "wongi");
+    db.exec(sql("rollback/0016_canon_scopes.down.sql"));
+    const active = (db.prepare("SELECT COUNT(*) AS n FROM canon_rules WHERE status = 'active'").get() as { n: number }).n;
+    for (let n = active; n < 40; n++) add(db, `o${n}`);
+    expect(() => add(db, "o40")).toThrow("canon is full: 40 active rules");
+    expect(db.prepare("SELECT COUNT(*) AS n FROM canon_rules WHERE scope = 'brand'").get()).toEqual({ n: 3 });
+    const triggers = db.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'canon_rules' ORDER BY name").all();
+    expect(triggers.map((t) => t.name)).toEqual(["canon_active_limit_insert", "canon_active_limit_restore"]);
+  });
+});

@@ -602,12 +602,14 @@ export const TOOLS: Tool[] = [
   {
     name: "canon_get",
     description:
-      "The taste canon: plain-word rules about what this owner loves and hates, each with its evidence count and its hit rate on his picks. Read it before you write ideas, prompts, ranks or checks (they are the owner's taste, learned, not guesses). retireDue lists rules with no evidence for 60 days. At most 40 active rules.",
+      "The taste canon: plain-word rules about what this owner loves and hates, each with its evidence count and its hit rate on his picks. Read it before you write ideas, prompts, ranks or checks (they are the owner's taste, learned, not guesses). Each rule has a scope: owner (his taste), brand (one brand's lesson), creative (a creative principle) or performance (a lesson from ad results). For a batch, give brandSlug (batch_get brand.slug): you get every rule that is not a brand rule, plus that brand's rules; without it, no brand rules. Never use one brand's rules for another brand. retireDue lists rules with no evidence for 60 days. At most 40 active rules that are not brand rules, and 10 for each brand.",
     inputSchema: {
       type: "object",
       properties: {
         stage: { type: "string", enum: ["tof", "mof", "bof"], description: "Only rules for this stage, plus the rules for every stage." },
         includeRetired: { type: "boolean", default: false },
+        brandSlug: { type: "string", pattern: SLUG, description: "The batch's brand: adds its brand rules." },
+        scope: { type: "string", enum: [...canon.SCOPES], description: "Only this scope (to review the canon, not for a batch). scope brand without brandSlug lists every brand's rules." },
       },
       additionalProperties: false,
     },
@@ -616,7 +618,7 @@ export const TOOLS: Tool[] = [
   {
     name: "canon_update",
     description:
-      "Change the taste canon, one change per call, and say where it comes from. add: a new rule (rule, source, the owner's quote when you have one). edit: reword a rule (rule, source). evidence: a pick or result agreed (kind hit) or disagreed (kind miss) with a rule (source). retire: drop a rule (reason): no evidence in 60 days, or the owner contradicted it. restore: bring one back (reason). Write rules in plain words about taste, never as a pattern to match. Every change is logged and the owner can undo it. The owner's own words are the best evidence; never invent a quote.",
+      "Change the taste canon, one change per call, and say where it comes from. add: a new rule (rule, source, the owner's quote when you have one, scope). edit: reword a rule or change its scope (rule, source). evidence: a pick or result agreed (kind hit) or disagreed (kind miss) with a rule (source). retire: drop a rule (reason): no evidence in 60 days, or the owner contradicted it. restore: bring one back (reason). Scope: owner for his taste on every brand (the default); brand with brandSlug for a lesson about one brand (a correction about one brand stays a brand rule until evidence shows it holds for other brands); creative for a creative principle; performance for a lesson from ad results only. Product truth (a product's shape, facts or real food) is never a rule: it stays in the facts and the kit. Write rules in plain words about taste, never as a pattern to match. Every change is logged and the owner can undo it. The owner's own words are the best evidence; never invent a quote.",
     inputSchema: {
       type: "object",
       properties: {
@@ -624,6 +626,8 @@ export const TOOLS: Tool[] = [
         id: { type: "string", pattern: "^[0-9a-f]{8}$", description: "The rule id (edit, evidence, retire, restore)." },
         rule: { type: "string", minLength: 8, maxLength: 400 },
         stage: { type: "string", enum: ["all", "tof", "mof", "bof"], description: "add: defaults to all. edit: leave out to keep the rule's stage." },
+        scope: { type: "string", enum: [...canon.SCOPES], description: "add: defaults to owner. edit: leave out to keep the rule's scope." },
+        brandSlug: { type: "string", pattern: SLUG, description: "The brand of a brand rule (scope brand only)." },
         source: { type: "string", minLength: 3, maxLength: 300, description: "Where the taste came from: a batch, a pick, a message date." },
         quote: { type: "string", maxLength: 500, description: "The owner's own words, copied exactly." },
         kind: { type: "string", enum: ["hit", "miss"] },

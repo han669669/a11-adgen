@@ -6,9 +6,18 @@ const DAY = 86_400_000;
 /** A rule with no new evidence for this many days is due for retirement (docs/blueprint.md section 4). */
 export const STALE_DAYS = 60;
 
+/** Canon scopes (a11-engine v3 Phase 5, migration 0016): owner taste, one brand's lessons, creative principles, performance lessons. */
+export const SCOPES = ["owner", "brand", "creative", "performance"] as const;
+export type Scope = (typeof SCOPES)[number];
+/** Active rules for every batch (not brand rules), and for each brand (database triggers enforce both). */
+export const MAX_ACTIVE = 40;
+export const MAX_BRAND = 10;
+
 interface Rule {
   id: string;
   stage: string;
+  scope: Scope;
+  brand_slug: string | null;
   text: string;
   status: string;
   evidence: string;
@@ -25,6 +34,8 @@ const view = (r: Rule, at = Date.now()) => {
   return {
     id: r.id,
     stage: r.stage,
+    scope: r.scope,
+    ...(r.brand_slug ? { brandSlug: r.brand_slug } : {}),
     rule: r.text,
     status: r.status,
     evidenceCount: evidence.length,
@@ -39,14 +50,44 @@ const view = (r: Rule, at = Date.now()) => {
 };
 const hitsTotal = (r: Rule) => r.hits + r.misses;
 
-export async function canonGet(env: Env, a: { stage?: string; includeRetired?: boolean }) {
+const brandExists = async (env: Env, slug: string) => {
+  const b = await env.DB.prepare("SELECT 1 AS ok FROM brands WHERE slug = ?").bind(slug).first();
+  need(b, `No brand ${slug}.`);
+};
+
+/**
+ * The canon for one job. Without scope: every rule that is not a brand rule, plus the rules of brandSlug (none without it),
+ * so a brand's lessons never reach another brand's batch (specification §9.7). With scope: that scope only; scope brand
+ * without brandSlug lists the rules of every brand (to review them, never for a batch).
+ */
+export async function canonGet(env: Env, a: { stage?: string; includeRetired?: boolean; brandSlug?: string; scope?: Scope }) {
+  if (a.brandSlug) await brandExists(env, a.brandSlug);
+  need(!(a.brandSlug && a.scope && a.scope !== "brand"), "brandSlug goes with scope brand, or with no scope.");
+  const brand = a.brandSlug ?? null;
+  // Which rules this call may see: the same filter for the rules and for the recent changes.
+  const seen = a.scope
+    ? `r.scope = ? AND (r.scope != 'brand' OR ? IS NULL OR r.brand_slug = ?)`
+    : `(r.scope != 'brand' OR r.brand_slug = ?)`;
+  const seenArgs = a.scope ? [a.scope, brand, brand] : [brand];
   const rows = await env.DB.prepare(
-    `SELECT * FROM canon_rules WHERE (? IS NULL OR stage IN ('all', ?)) AND (? = 1 OR status = 'active') ORDER BY status, created_at, rowid`,
-  ).bind(a.stage ?? null, a.stage ?? null, a.includeRetired ? 1 : 0).all<Rule>();
+    `SELECT * FROM canon_rules r WHERE ${seen} AND (? IS NULL OR r.stage IN ('all', ?)) AND (? = 1 OR r.status = 'active') ORDER BY r.status, r.created_at, r.rowid`,
+  ).bind(...seenArgs, a.stage ?? null, a.stage ?? null, a.includeRetired ? 1 : 0).all<Rule>();
   const rules = rows.results.map((r) => view(r));
-  const active = await env.DB.prepare("SELECT COUNT(*) AS n FROM canon_rules WHERE status = 'active'").first<{ n: number }>();
-  const log = await env.DB.prepare("SELECT rule_id, action, detail, at FROM canon_log ORDER BY id DESC LIMIT 10").all();
-  return { activeRules: active?.n ?? 0, max: 40, retireDue: rules.filter((r) => r.retireDue).map((r) => r.id), rules, recentChanges: log.results };
+  const active = await env.DB.prepare("SELECT COUNT(*) AS n FROM canon_rules WHERE status = 'active' AND scope != 'brand'").first<{ n: number }>();
+  const mine = brand
+    ? await env.DB.prepare("SELECT COUNT(*) AS n FROM canon_rules WHERE status = 'active' AND scope = 'brand' AND brand_slug = ?").bind(brand).first<{ n: number }>()
+    : null;
+  const log = await env.DB.prepare(
+    `SELECT l.rule_id, l.action, l.detail, l.at FROM canon_log l JOIN canon_rules r ON r.id = l.rule_id WHERE ${seen} ORDER BY l.id DESC LIMIT 10`,
+  ).bind(...seenArgs).all();
+  return {
+    activeRules: active?.n ?? 0,
+    max: MAX_ACTIVE,
+    ...(brand ? { brandRules: { brandSlug: brand, active: mine?.n ?? 0, max: MAX_BRAND } } : {}),
+    retireDue: rules.filter((r) => r.retireDue).map((r) => r.id),
+    rules,
+    recentChanges: log.results,
+  };
 }
 
 export interface CanonChange {
@@ -54,6 +95,10 @@ export interface CanonChange {
   id?: string;
   rule?: string;
   stage?: string;
+  /** add: defaults to owner. edit: leave out to keep the rule's scope. */
+  scope?: Scope;
+  /** A brand rule's brand (brands.slug): with scope brand only. */
+  brandSlug?: string;
   source?: string;
   quote?: string;
   kind?: "hit" | "miss";
@@ -63,6 +108,24 @@ export interface CanonChange {
 const need = (cond: unknown, msg: string) => {
   if (!cond) throw new InputError(msg);
 };
+
+/** The two limits as owner-readable errors; any other error is not changed. */
+const full = (e: unknown, next: string) => {
+  if (/brand canon is full/.test(String(e))) return new InputError(`This brand has ${MAX_BRAND} active rules. ${next}`);
+  if (/canon is full/.test(String(e))) return new InputError(`The canon is full (${MAX_ACTIVE} active rules). ${next}`);
+  return e;
+};
+
+/** The scope and brand of a rule after a change, checked: a brand rule needs a brand that exists; no other rule has one. */
+async function scopeOf(env: Env, scope: Scope, brandSlug: string | null) {
+  if (scope === "brand") {
+    need(brandSlug, "A brand rule needs brandSlug.");
+    await brandExists(env, brandSlug!);
+    return { scope, brand: brandSlug };
+  }
+  need(!brandSlug, "Only a brand rule has brandSlug.");
+  return { scope, brand: null };
+}
 
 /**
  * One change to the canon. Every change keeps its evidence or reason and is logged, so the owner can undo it.
@@ -74,20 +137,20 @@ export async function canonUpdate(env: Env, c: CanonChange) {
     env.DB.prepare("INSERT INTO canon_log (rule_id, action, detail, at) VALUES (?, ?, ?, ?)").bind(id, action, JSON.stringify(detail), at);
   if (c.action === "add") {
     need(c.rule && c.source, "add needs rule and source.");
+    const s = await scopeOf(env, c.scope ?? "owner", c.brandSlug ?? null);
     const id = crypto.randomUUID().slice(0, 8);
     const evidence = JSON.stringify([{ at, source: c.source, ...(c.quote ? { quote: c.quote } : {}) }]);
     try {
       await env.DB.batch([
         env.DB.prepare(
-          `INSERT INTO canon_rules (id, stage, text, evidence, created_at, updated_at, last_evidence_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        ).bind(id, c.stage ?? "all", c.rule, evidence, at, at, at),
-        log(id, "add", { rule: c.rule, source: c.source }),
+          `INSERT INTO canon_rules (id, stage, scope, brand_slug, text, evidence, created_at, updated_at, last_evidence_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(id, c.stage ?? "all", s.scope, s.brand, c.rule, evidence, at, at, at),
+        log(id, "add", { rule: c.rule, source: c.source, scope: s.scope, ...(s.brand ? { brandSlug: s.brand } : {}) }),
       ]);
     } catch (e) {
-      if (/canon is full/.test(String(e))) throw new InputError("The canon is full (40 active rules). Retire a rule that has no recent evidence first.");
-      throw e;
+      throw full(e, "Retire a rule that has no recent evidence first.");
     }
-    return { id, added: true };
+    return { id, added: true, scope: s.scope, ...(s.brand ? { brandSlug: s.brand } : {}) };
   }
   need(c.id, `${c.action} needs id.`);
   const r = await env.DB.prepare("SELECT * FROM canon_rules WHERE id = ?").bind(c.id).first<Rule>();
@@ -95,12 +158,26 @@ export async function canonUpdate(env: Env, c: CanonChange) {
   if (c.action === "edit") {
     need(c.rule && c.source, "edit needs rule and source.");
     need(r!.status === "active", "A retired rule cannot be edited. Restore it first.");
+    // A scope other than brand drops the brand; a brand rule keeps its brand unless brandSlug names another.
+    const scope = c.scope ?? r!.scope;
+    const s = await scopeOf(env, scope, c.brandSlug ?? (scope === "brand" ? r!.brand_slug : null));
+    const moved = s.scope !== r!.scope || s.brand !== r!.brand_slug;
     // An edit is not evidence: it does not refresh the 60-day clock. The source is kept in the log.
-    await env.DB.batch([
-      env.DB.prepare("UPDATE canon_rules SET text = ?, stage = ?, updated_at = ? WHERE id = ?").bind(c.rule, c.stage ?? r!.stage, at, c.id),
-      log(c.id!, "edit", { from: r!.text, to: c.rule, source: c.source, ...(c.quote ? { quote: c.quote } : {}) }),
-    ]);
-    return { id: c.id, edited: true };
+    try {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE canon_rules SET text = ?, stage = ?, scope = ?, brand_slug = ?, updated_at = ? WHERE id = ?").bind(c.rule, c.stage ?? r!.stage, s.scope, s.brand, at, c.id),
+        log(c.id!, "edit", {
+          from: r!.text,
+          to: c.rule,
+          source: c.source,
+          ...(c.quote ? { quote: c.quote } : {}),
+          ...(moved ? { fromScope: r!.scope, toScope: s.scope, ...(r!.brand_slug ? { fromBrand: r!.brand_slug } : {}), ...(s.brand ? { toBrand: s.brand } : {}) } : {}),
+        }),
+      ]);
+    } catch (e) {
+      throw full(e, "Retire a rule of that scope first.");
+    }
+    return { id: c.id, edited: true, scope: s.scope, ...(s.brand ? { brandSlug: s.brand } : {}) };
   }
   if (c.action === "evidence") {
     need(c.kind && c.source, "evidence needs kind (hit or miss) and source.");
@@ -131,8 +208,7 @@ export async function canonUpdate(env: Env, c: CanonChange) {
       log(c.id!, "restore", { reason: c.reason }),
     ]);
   } catch (e) {
-    if (/canon is full/.test(String(e))) throw new InputError("The canon is full (40 active rules). Retire another rule first.");
-    throw e;
+    throw full(e, "Retire another rule first.");
   }
   return { id: c.id, restored: true };
 }
