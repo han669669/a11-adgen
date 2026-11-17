@@ -1,5 +1,6 @@
 import { brandBySlug, latestKit } from "./brand";
 import type { Env } from "./env";
+import { briefGet, factMarks, sourcesList } from "./research";
 import * as fal from "./fal";
 import { storeSubjectImages } from "./subjectimages";
 
@@ -40,25 +41,36 @@ export interface FactInput {
   sourceUrl: string;
 }
 
-export async function factsSave(env: Env, subjectId: string, facts: FactInput[]) {
+/**
+ * Add facts to a subject. With batchId (a batch of this subject), each fact's quote is looked for in the stored source
+ * text of that batch with the same URL (design pack §1.4): verified 1 or 0, or NULL when the page is not stored.
+ */
+export async function factsSave(env: Env, subjectId: string, facts: FactInput[], batchId?: string) {
   const subject = await env.DB.prepare("SELECT id FROM subjects WHERE id = ?").bind(subjectId).first();
   if (!subject) throw new Error(`No subject with id ${subjectId}.`);
+  let marks: (number | null)[] = facts.map(() => null);
+  if (batchId) {
+    const b = await env.DB.prepare("SELECT subject_id FROM batches WHERE id = ?").bind(batchId).first<{ subject_id: string }>();
+    if (!b || b.subject_id !== subjectId) throw new Error(`Batch ${batchId} is not a batch of subject ${subjectId}.`);
+    marks = await factMarks(env, batchId, facts);
+  }
   const at = now();
   await env.DB.batch(
-    facts.map((f) =>
-      env.DB.prepare("INSERT INTO facts (subject_id, label, value, quote, source_url, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(
-        subjectId, f.label, f.value, f.quote, f.sourceUrl, at,
+    facts.map((f, i) =>
+      env.DB.prepare("INSERT INTO facts (subject_id, label, value, quote, source_url, created_at, verified) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(
+        subjectId, f.label, f.value, f.quote, f.sourceUrl, at, marks[i],
       ),
     ),
   );
   return factsGet(env, subjectId);
 }
 
+/** retrievedAt is when the fact was saved. verified: true (quote found on a stored page), false (not found), null (not checked). */
 export async function factsGet(env: Env, subjectId: string) {
   const rows = await env.DB.prepare(
-    "SELECT id, label, value, quote, source_url AS sourceUrl FROM facts WHERE subject_id = ? ORDER BY id LIMIT 200",
-  ).bind(subjectId).all();
-  return rows.results;
+    "SELECT id, label, value, quote, source_url AS sourceUrl, created_at AS retrievedAt, verified FROM facts WHERE subject_id = ? ORDER BY id LIMIT 200",
+  ).bind(subjectId).all<Record<string, unknown>>();
+  return rows.results.map((r) => ({ ...r, verified: r.verified === null || r.verified === undefined ? null : r.verified === 1 }));
 }
 
 export async function batchCreate(env: Env, input: { brandSlug: string; subjectId: string; label: string }) {
@@ -557,6 +569,11 @@ export async function batchGet(env: Env, id: string) {
     kit: kit?.kit ?? null,
     subject: subject && { ...subject, data: JSON.parse(subject.data) },
     facts: await factsGet(env, b.subject_id),
+    // a11-engine v3 Phase 1: the engine (2 for every batch made before engine 3), the newest brief and the research
+    // sources (no text). An engine 2 batch has brief null. A missing table (before migration 0015) does not fail the read.
+    engine: (b.engine as number | undefined) ?? 2,
+    brief: await briefGet(env, id).catch(() => null),
+    sources: await sourcesList(env, id).catch(() => []),
     insights: JSON.parse(b.insights),
     notes: b.notes,
     ideas: ideas.results.map((i) => {
