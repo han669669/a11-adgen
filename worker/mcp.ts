@@ -50,6 +50,8 @@ interface Tool {
   name: string;
   description: string;
   inputSchema: ObjectSchema;
+  /** Drops fields that the server sets, so a value read back with batch_get can be sent again as it is. Runs before validate. */
+  prepare?: (args: unknown) => unknown;
   run(env: Env, args: Record<string, any>): Promise<ToolResult>;
 }
 
@@ -282,7 +284,7 @@ export const TOOLS: Tool[] = [
   {
     name: "brief_save",
     description:
-      "a11-engine v3: save a new version of the Creative Strategy Brief of a batch (old versions stay). Each claim has a basis: evidence (a source says it; copy the exact words), interpretation (your reading of named evidence) or hypothesis (no quote). Give each evidence item the sourceId that exa_search or exa_contents returned with the batchId: the server checks that the quote is in the stored text and sets verified (owner_supplied and client_supplied: null). What you cannot verify goes in unknowns, never a guess; a price, size, offer or claim that is not in the facts is an unknown. Refused only for a wrong shape: an evidence id or fact id that is not there. Returns version, unverified (evidence ids whose quote was not found: correct the quote or lower the basis, then save again) and warnings. Public research is never customer data.",
+      "a11-engine v3: save a new version of the Creative Strategy Brief of a batch (old versions stay). Each claim has a basis: evidence (a source says it; copy the exact words), interpretation (your reading of named evidence) or hypothesis (no quote). Give each evidence item the sourceId that exa_search or exa_contents returned with the batchId: the server checks that the quote is in the stored text and sets verified (owner_supplied and client_supplied: null). What you cannot verify goes in unknowns, never a guess; a price, size, offer or claim that is not in the facts is an unknown. Refused only for a wrong shape: an evidence id or fact id that is not there. The server sets each evidence item's verified and retrievedAt, and its url and publishedDate from the stored source: a brief read back with batch_get can be saved again as it is. Returns version, unverified (evidence ids whose quote was not found: correct the quote or lower the basis, then save again) and warnings. Public research is never customer data.",
     inputSchema: {
       type: "object",
       properties: {
@@ -293,6 +295,7 @@ export const TOOLS: Tool[] = [
       required: ["batchId", "brief"],
       additionalProperties: false,
     },
+    prepare: research.dropServerFields,
     run: async (env, a) => text(await research.briefSave(env, a.batchId, a.brief as research.Brief, a.promptVersion)),
   },
   {
@@ -1099,7 +1102,7 @@ async function callTool(env: Env, params: any): Promise<ToolResult> {
   const tool = TOOLS.find((t) => t.name === params?.name);
   if (!tool) return { isError: true, content: [{ type: "text", text: `Unknown tool: ${params?.name}` }] };
   try {
-    return await tool.run(env, validate(tool.inputSchema, params?.arguments));
+    return await tool.run(env, validate(tool.inputSchema, tool.prepare ? tool.prepare(params?.arguments) : params?.arguments));
   } catch (e) {
     const msg =
       e instanceof BudgetError ? `BUDGET: ${e.message}` : e instanceof InputError ? `Bad input: ${e.message}` : e instanceof Error ? e.message : String(e);

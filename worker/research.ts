@@ -284,9 +284,11 @@ export async function briefSave(env: Env, batchId: string, input: Brief, promptV
   for (const e of brief.evidence) {
     const s = e.sourceId ? sourceById.get(e.sourceId) : undefined;
     if (s) {
-      e.url ??= s.url;
+      // The stored source decides the provenance, so the url, the date and the quote check always agree.
+      e.url = s.url;
       e.retrievedAt = s.retrieved_at;
       if (s.published_date) e.publishedDate = s.published_date;
+      else delete e.publishedDate;
       e.verified = quoteIn(e.quote, s.text);
     } else {
       delete e.retrievedAt;
@@ -319,7 +321,7 @@ export async function briefSave(env: Env, batchId: string, input: Brief, promptV
       warnings.push(`Fact ${id} (${f.label}) is not verified: its quote was ${f.verified === 0 ? "not found on" : "not checked against"} a stored page. Do not use it as a claim until it is, or until the owner approves that copy after he saw this mark.`);
   }
 
-  // A new version; two saves at once: the unique index refuses one, which tries once more with the next number.
+  // A new version; saves at the same time: the unique index refuses all but one, and each other tries again with the next number.
   const insert = async () => {
     const last = await env.DB.prepare("SELECT MAX(version) AS v FROM batch_records WHERE batch_id = ? AND kind = 'brief' AND idea_id IS NULL")
       .bind(batchId)
@@ -331,14 +333,22 @@ export async function briefSave(env: Env, batchId: string, input: Brief, promptV
     ).bind(crypto.randomUUID(), batchId, version, JSON.stringify(brief), promptVersion, now()).run();
     return version;
   };
-  let version: number;
-  try {
-    version = await insert();
-  } catch (e) {
-    if (!/UNIQUE/i.test((e as Error).message)) throw e;
-    version = await insert();
+  let version = 0;
+  for (let attempt = 1; !version; attempt++) {
+    try {
+      version = await insert();
+    } catch (e) {
+      if (!/UNIQUE/i.test((e as Error).message) || attempt >= 5) throw e;
+    }
   }
   return { batchId, version, unverified, warnings, ...(b.engine === 2 ? { note: "This is an engine 2 batch: its flow does not read the brief." } : {}) };
+}
+
+/** brief_save input: drop the evidence fields that the server sets (verified, retrievedAt), so a brief read back can be saved again. */
+export function dropServerFields(args: unknown): unknown {
+  const ev = (args as { brief?: { evidence?: unknown } } | null)?.brief?.evidence;
+  if (Array.isArray(ev)) for (const e of ev) if (e && typeof e === "object") for (const k of ["verified", "retrievedAt"]) delete (e as Record<string, unknown>)[k];
+  return args;
 }
 
 /** The newest brief of a batch, or null. */

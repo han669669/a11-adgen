@@ -561,7 +561,12 @@ export async function batchGet(env: Env, id: string) {
   const ownerPicked = new Set(picks.results.filter((p) => p.by_owner === 1).map((p) => p.idea_id as string));
   const passedAt = new Map(passes.results.map((p) => [p.idea_id, p.at]));
   const img = (key: string) => ({ key, url: fal.mediaUrl(env, key) });
-  const brief = await briefGet(env, id).catch(() => null);
+  // Before migration 0015 the table is not there: then there is no brief. Any other error is a real failure.
+  const noTable = (e: unknown) => /no such table/i.test(e instanceof Error ? e.message : String(e));
+  const brief = await briefGet(env, id).catch((e) => {
+    if (noTable(e)) return null;
+    throw e;
+  });
   const currentDrafts = new Map<string, number>();
   const ideasOut = ideas.results.map((i) => {
     const drafts = renders.results
@@ -620,7 +625,10 @@ export async function batchGet(env: Env, id: string) {
     // sources (no text). An engine 2 batch has brief null. A missing table (before migration 0015) does not fail the read.
     engine,
     brief,
-    sources: await sourcesList(env, id).catch(() => []),
+    sources: await sourcesList(env, id).catch((e) => {
+      if (noTable(e)) return [];
+      throw e;
+    }),
     insights: JSON.parse(b.insights),
     notes: b.notes,
     ideas: ideasOut,
@@ -631,7 +639,7 @@ export async function batchGet(env: Env, id: string) {
   };
 }
 
-type IdeaState = { id: string; picked: boolean; copy: { ownerApproved?: unknown }; ranked: boolean; currentDrafts: number; finals: unknown[] };
+type IdeaState = { id: string; picked: boolean; copy: { ownerApproved?: unknown }; ranked: boolean; currentDrafts: number; finals: { status: unknown }[] };
 
 /** The first step of an engine 3 batch that is not done yet. Pure: it reads only the rows that batchGet has read. */
 export function nextStepV3(status: string, hasBrief: boolean, ideas: IdeaState[], ownerPicked: Set<string>): string {
@@ -644,7 +652,8 @@ export function nextStepV3(status: string, hasBrief: boolean, ideas: IdeaState[]
   if (picked.some((i) => !i.ranked)) return "draft_rank";
   if (!["board", "finals", "done"].includes(status)) return "board";
   if (picked.some((i) => !ownerPicked.has(i.id))) return "owner_pick";
-  if (picked.some((i) => i.finals.length === 0)) return "finals";
+  // A queued or failed final is not a final: the step is done only when each picked idea has a finished one.
+  if (picked.some((i) => !i.finals.some((f) => f.status === "done"))) return "finals";
   return "done";
 }
 

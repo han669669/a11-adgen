@@ -21,7 +21,7 @@ function makeEnv() {
 }
 const run = async (env: Env, name: string, args: unknown) => {
   const t = TOOLS.find((x) => x.name === name)!;
-  const c = (await t.run(env, validate(t.inputSchema, args))).content[0]!;
+  const c = (await t.run(env, validate(t.inputSchema, t.prepare ? t.prepare(args) : args))).content[0]!;
   return JSON.parse(c.type === "text" ? c.text : "{}");
 };
 
@@ -233,6 +233,22 @@ describe("brief_save", () => {
     expect(raw.prepare("SELECT COUNT(*) AS n FROM batch_records").get()).toEqual({ n: 0 });
   });
 
+  it("saves a brief read back with batch_get again as it is, and takes the url and date from the stored source", async () => {
+    const { env, subjectId, batchId, factIds } = await seeded();
+    const brief = exampleBrief(subjectId, factIds);
+    brief.evidence[0] = { ...brief.evidence[0]!, url: "https://wrong.example/x", publishedDate: "1999-01-01" } as (typeof brief.evidence)[0];
+    brief.evidence.push({ id: "e6", sourceId: undefined as unknown as string, sourceType: "owner_supplied", quote: "We bake on Tuesdays.", speaker: "brand", market: "SG" });
+    await save(env, batchId, brief);
+    const read = await run(env, "batch_get", { id: batchId });
+    const e1 = read.brief.brief.evidence.find((e: { id: string }) => e.id === "e1");
+    expect(e1).toMatchObject({ url: "https://example.com/about", verified: true });
+    expect(e1).not.toHaveProperty("publishedDate");
+    expect(read.brief.brief.evidence.find((e: { id: string }) => e.id === "e6").verified).toBeNull();
+    // The brief as batch_get gave it, with verified null and retrievedAt, is a valid input.
+    const again = await save(env, batchId, read.brief.brief);
+    expect(again).toMatchObject({ version: 2, unverified: [] });
+  });
+
   it("(1.12) an engine 2 batch has brief null and keeps every old field", async () => {
     const { env, batchId } = await seeded();
     const got = await batch.batchGet(env, batchId);
@@ -252,7 +268,7 @@ describe("brief_save", () => {
 
 describe("nextStepV3", () => {
   const idea = (id: string, over: Record<string, unknown> = {}) => ({
-    id, picked: true, copy: { ownerApproved: "ok" }, ranked: true, currentDrafts: 3, finals: [{}], ...over,
+    id, picked: true, copy: { ownerApproved: "ok" }, ranked: true, currentDrafts: 3, finals: [{ status: "done" }], ...over,
   });
   const three = (over: Record<string, unknown> = {}) => [idea("a", over), idea("b"), idea("c"), idea("d", { picked: false })];
   const all = new Set(["a", "b", "c"]);
@@ -267,6 +283,8 @@ describe("nextStepV3", () => {
     expect(batch.nextStepV3("drafts", true, three(), all)).toBe("board");
     expect(batch.nextStepV3("board", true, three(), new Set(["b", "c"]))).toBe("owner_pick");
     expect(batch.nextStepV3("finals", true, three({ finals: [] }), all)).toBe("finals");
+    // A queued or failed final is not done.
+    expect(batch.nextStepV3("finals", true, three({ finals: [{ status: "queued" }, { status: "failed" }] }), all)).toBe("finals");
     expect(batch.nextStepV3("done", true, three(), all)).toBe("done");
   });
 
