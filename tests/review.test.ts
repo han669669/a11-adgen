@@ -171,6 +171,25 @@ describe("ideas_pick on an engine 3 batch", () => {
     await expect(run(env, "ideas_pick", { ...rework(ideas), ownerSwap: words })).rejects.toThrow("ownerSwap is for a select only");
   });
 
+  it("the owner's rejection at the copy review: a rework with his words, author owner, not one of the critic's rounds", async () => {
+    const { env, raw, ideas } = await withConcepts();
+    const words = "none of these feel like us, too jokey";
+    await expect(run(env, "ideas_pick", { batchId: E3, outcome: "rework", ownerReject: words })).rejects.toThrow("ownerReject changes a saved selection, and this batch has none.");
+    await run(env, "ideas_pick", select(ideas));
+    await expect(run(env, "ideas_pick", { ...select(ideas), ownerReject: words })).rejects.toThrow("ownerReject is for a rework only");
+    await expect(run(env, "ideas_pick", { ...rework(ideas), ownerReject: words })).rejects.toThrow("send no review with ownerSwap or ownerReject");
+    const schema = TOOLS.find((t) => t.name === "ideas_pick")!.inputSchema;
+    expect(() => validate(schema, { batchId: E3, outcome: "rework", ownerReject: " " })).toThrow("ownerReject has the wrong format");
+    await expect(run(env, "ideas_pick", { batchId: E3, outcome: "rework", ownerReject: words })).resolves.toMatchObject({ outcome: "rework", picked: [], version: 2 });
+    expect(pickedRows(raw)).toHaveLength(0);
+    const recs = records(raw);
+    expect(recs.map((r) => r.author)).toEqual(["critic", "owner"]);
+    expect(JSON.parse(recs[1]!.body)).toMatchObject({ outcome: "rework", ownerReject: words, review: JSON.parse(recs[0]!.body).review });
+    const got = await run(env, "batch_get", { id: E3 });
+    expect(got.conceptReview).toMatchObject({ author: "owner", ownerReject: words, reworks: 0 });
+    expect(got.nextStep).toBe("concepts_rework");
+  });
+
   it("sends concepts saved after a select back to the critic, until a picked idea has a draft", async () => {
     const { env, raw, ideas } = await withConcepts();
     await run(env, "ideas_pick", select(ideas));
@@ -286,6 +305,11 @@ describe("the words of the pick rule (design pack §2.11, risk R5)", () => {
     const text = PROMPTS.find((p) => p.name === "batch")!.text({ brand: "pasar", batchId: E3 });
     const e3 = text.slice(text.indexOf("(engine 3) CONCEPTS"), text.indexOf("(every other batch)"));
     expect(e3).toContain("concepts_rework");
+    expect(e3).toContain("the critic's reserves (batch_get conceptReview.reserves, up to 3) as the spares");
+    expect(e3).toContain("ownerReject (his exact words)");
+    expect(e3).toContain("Never suggest a swap.");
+    expect(INSTRUCTIONS).toContain("spares (engine 2: 2 per stage; engine 3: the critic's reserves)");
+    expect(INSTRUCTIONS).not.toContain("copy review is not built yet");
     expect(e3).toContain("owner_decision");
     expect(e3).not.toMatch(stageRule);
     const critic = readFileSync("plugin/agents/critic.md", "utf8");
