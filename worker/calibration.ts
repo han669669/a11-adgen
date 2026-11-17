@@ -1,5 +1,6 @@
 import { type Check, finalReady } from "./checks";
 import type { Env } from "./env";
+import { InputError } from "./schema";
 
 /**
  * a11-engine v3 Phase 4: critic calibration (design pack §4). The server stamps each rank with the critic's context, and
@@ -256,6 +257,7 @@ export async function calibrationReport(env: Env, f: ReportFilter = {}) {
     falseRejection: stamped(rejected.map(([id, c]) => ({ engine: c.engine, pv: c.pv, hit: ownerPicked.has(id) }))),
     productDefectRate: stamped(all.map((c) => ({ engine: c.engine, pv: c.pv, hit: productFail(c) }))),
     copyCorrectionRate: byEngine(copies),
+    replays: await replaySummary(env),
     paidRenderWaste: {
       usdWaste: round(waste),
       usdTotal: round(total),
@@ -264,5 +266,242 @@ export async function calibrationReport(env: Env, f: ReportFilter = {}) {
       wastedJobs: wasted.length,
       note: "A share of US$, not a count of items: no Wilson interval. Read it with the number of jobs.",
     },
+  };
+}
+
+/*
+ * The visual evaluation set (design pack §4.5) and the replay runs (§4.6). The set is derived from the owner's saved
+ * decisions up to asOf, never written by hand, and never holds the critic's ranks. No tool returns the labels: the
+ * replay critic gets the items without them, and calibration_save scores the answers on the server, so neither the
+ * critic nor the main session needs to see the owner's choice before the run is saved.
+ */
+
+export type ItemKind = "triplet" | "final";
+export type Split = "tuning" | "holdout" | "all";
+/** The newest share of the decided items, by decision time, is the holdout (OD 4.1, the pack's default). */
+export const HOLDOUT_SHARE = 0.3;
+
+type Derived = {
+  id: string;
+  kind: ItemKind;
+  engine: number;
+  batchId: string;
+  ideaId: string;
+  decidedAt: string;
+  keys: string[];
+  idea: { stage: string; insight: string; visual: string; headline: string; subline: string; concept: unknown };
+  label: string; // the picked key or "pass" (triplet); approve, fix or reject (final)
+  ownerSaid: string;
+};
+
+/** The end of the asOf day (a date) or the time itself, in the stored millisecond form. */
+function asOfCut(asOf?: string) {
+  if (!asOf) return new Date().toISOString();
+  const d = new Date(asOf);
+  if (Number.isNaN(d.valueOf()) || d.toISOString().slice(0, 10) !== asOf.slice(0, 10)) throw new InputError("asOf must be a real UTC date or time.");
+  return asOf.length === 10 ? `${asOf}T23:59:59.999Z` : d.toISOString();
+}
+
+/** Every decided item up to asOf, oldest first, with its label, and the items whose pictures are no longer in R2. */
+async function deriveItems(env: Env, kind: ItemKind, asOf?: string) {
+  const cut = asOfCut(asOf);
+  const q = <T>(sql: string, ...b: unknown[]) => env.DB.prepare(sql).bind(...b).all<T>().then((r) => r.results);
+  const ideaCols = "i.format, i.insight, i.visual, i.headline, i.copy, i.concept, b.engine";
+  type IdeaRow = { format: string; insight: string; visual: string; headline: string; copy: string | null; concept: string | null; engine: number };
+  const ideaOf = (r: IdeaRow) => {
+    const copy = r.copy ? (JSON.parse(r.copy) as { subline?: string }) : {};
+    return { stage: r.format, insight: r.insight, visual: r.visual, headline: r.headline, subline: copy.subline ?? "", concept: r.concept ? JSON.parse(r.concept) : null };
+  };
+  let items: Derived[];
+  if (kind === "triplet") {
+    // A decision on a draft set: the owner's pick, or his full pass. The drafts he saw are the finished drafts of that idea made before it.
+    const decisions = await q<IdeaRow & { batch_id: string; idea_id: string; at: string; label: string; said: string }>(
+      `SELECT d.batch_id, d.idea_id, d.at, d.label, d.said, ${ideaCols} FROM (
+         SELECT batch_id, idea_id, created_at AS at, render_key AS label, COALESCE(note, '') AS said FROM picks WHERE by_owner = 1 AND created_at <= ?1
+         UNION ALL
+         SELECT batch_id, idea_id, created_at, 'pass', owner_said FROM verdicts WHERE stage = 'draft' AND mark = 'pass' AND idea_id IS NOT NULL AND created_at <= ?1
+       ) d JOIN ideas i ON i.id = d.idea_id AND i.batch_id = d.batch_id JOIN batches b ON b.id = d.batch_id ORDER BY d.at, d.idea_id`,
+      cut,
+    );
+    const drafts = await q<{ batch: string; idea: string; image_keys: string; created_at: string }>(
+      `SELECT batch, idea, image_keys, created_at FROM renders WHERE kind = 'draft' AND status = 'done' AND created_at <= ? ORDER BY created_at, id`,
+      cut,
+    );
+    items = decisions.map((d) => ({
+      id: `t:${d.batch_id}:${d.idea_id}:${d.at}`,
+      kind,
+      engine: d.engine,
+      batchId: d.batch_id,
+      ideaId: d.idea_id,
+      decidedAt: d.at,
+      keys: drafts.filter((r) => r.batch === d.batch_id && r.idea === d.idea_id && r.created_at <= d.at).flatMap((r) => JSON.parse(r.image_keys) as string[]),
+      idea: ideaOf(d),
+      label: d.label,
+      ownerSaid: d.said,
+    }));
+  } else {
+    // A final with the owner's newest verdict on it (the verdict at or before asOf).
+    const rows = await q<IdeaRow & { batch_id: string; idea_id: string; render_key: string; mark: string; owner_said: string; created_at: string }>(
+      `SELECT v.batch_id, v.idea_id, v.render_key, v.mark, v.owner_said, v.created_at, ${ideaCols} FROM verdicts v
+       JOIN ideas i ON i.id = v.idea_id AND i.batch_id = v.batch_id JOIN batches b ON b.id = v.batch_id
+       WHERE v.stage = 'final' AND v.mark IN ('approve', 'fix', 'reject') AND v.render_key IS NOT NULL AND v.created_at <= ? ORDER BY v.created_at, v.rowid`,
+      cut,
+    );
+    const newest = new Map<string, (typeof rows)[number]>();
+    for (const r of rows) newest.set(r.render_key, r);
+    items = [...newest.values()].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((r) => ({
+      id: `f:${r.render_key}`,
+      kind,
+      engine: r.engine,
+      batchId: r.batch_id,
+      ideaId: r.idea_id,
+      decidedAt: r.created_at,
+      keys: [r.render_key],
+      idea: ideaOf(r),
+      label: r.mark,
+      ownerSaid: r.owner_said,
+    }));
+  }
+  // Rule 1: an item enters the set only when all its pictures are still in R2.
+  const present = new Map<string, boolean>();
+  for (const key of new Set(items.flatMap((i) => i.keys))) present.set(key, (await env.MEDIA.head(key)) !== null);
+  const kept = items.filter((i) => i.keys.length > 0 && i.keys.every((k) => present.get(k)));
+  const holdoutFrom = kept.length - Math.round(kept.length * HOLDOUT_SHARE);
+  return { cut, kept, lost: items.length - kept.length, holdoutFrom, splitDate: kept[holdoutFrom]?.decidedAt ?? null };
+}
+
+const inSplit = (i: number, holdoutFrom: number, split: Split) => split === "all" || (split === "holdout" ? i >= holdoutFrom : i < holdoutFrom);
+
+/** The pictures of an item in the order of the seed: the same seed gives the same order, so the server can check a position. */
+async function shuffled(keys: string[], seed: string) {
+  const h = async (k: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${seed}|${k}`)))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const hashed = await Promise.all(keys.map(async (k) => [await h(k), k] as const));
+  return hashed.sort((a, b) => a[0].localeCompare(b[0])).map(([, k]) => k);
+}
+
+/**
+ * calibration_items (design pack §4.7): the derived set for asOf and split, WITHOUT labels (no pick, verdict, owner words
+ * or rank), with each triplet's pictures in the order of the seed. Also the size, the class balance and the lost count.
+ */
+export async function calibrationItems(env: Env, a: { kind: ItemKind; asOf?: string; split?: Split; seed: string }) {
+  const split = a.split ?? "all";
+  const d = await deriveItems(env, a.kind, a.asOf);
+  const chosen = d.kept.filter((_, i) => inSplit(i, d.holdoutFrom, split));
+  const balance = a.kind === "triplet"
+    ? { picked: chosen.filter((i) => i.label !== "pass").length, passed: chosen.filter((i) => i.label === "pass").length }
+    : Object.fromEntries(["approve", "fix", "reject"].map((m) => [m, chosen.filter((i) => i.label === m).length]));
+  return {
+    kind: a.kind,
+    asOf: d.cut,
+    split,
+    splitDate: d.splitDate,
+    holdoutShare: HOLDOUT_SHARE,
+    size: { items: chosen.length, decided: d.kept.length + d.lost, lost: d.lost },
+    classBalance: balance,
+    notes: [
+      SMALL_SET,
+      "Contamination: the critic's canon is the current one and may hold lessons from these items. Give the replay critic taste_log with before set to each item's decidedAt.",
+    ],
+    items: await Promise.all(chosen.map(async (i) => ({
+      id: i.id,
+      engine: i.engine,
+      decidedAt: i.decidedAt,
+      idea: i.idea,
+      pictures: a.kind === "triplet" ? await shuffled(i.keys, a.seed) : i.keys,
+    }))),
+  };
+}
+const SMALL_SET = "The set is small: report its size and class balance with every result, and do not act on a replay alone.";
+
+export type ReplayAnswer = { itemId: string; choice: string; reason: string };
+
+/**
+ * calibration_save (design pack §4.6, §4.7): score a replay on the server against the owner's labels and write one
+ * calibration_runs row. triplet_replay: choice is a picture key or "pass"; final_replay: approve, fix or reject;
+ * concept_stability: two selections of the same batch (no labels).
+ */
+export async function calibrationSave(
+  env: Env,
+  a: {
+    kind: "triplet_replay" | "final_replay" | "concept_stability";
+    asOf?: string;
+    split?: Split;
+    seed?: string;
+    promptVersion?: string;
+    note?: string;
+    answers?: ReplayAnswer[];
+    stability?: { batchId: string; first: string[]; second: string[] };
+  },
+) {
+  const stamp = await rankStamp(env);
+  const split = a.split ?? "all";
+  let n: number, result: Record<string, unknown>, asOf: string;
+  if (a.kind === "concept_stability") {
+    if (!a.stability) throw new InputError("concept_stability needs stability: the batch id and the two selections.");
+    const common = a.stability.first.filter((id) => a.stability!.second.includes(id)).length;
+    asOf = new Date().toISOString();
+    n = 1;
+    result = { batchId: a.stability.batchId, common, alarm: common < 2, first: a.stability.first, second: a.stability.second };
+  } else {
+    if (!a.answers?.length) throw new InputError("A replay needs answers: one for each item, with the item id, the choice and a reason.");
+    if (!a.seed) throw new InputError("A replay needs the seed that calibration_items used, so the server can check each position.");
+    const kind: ItemKind = a.kind === "triplet_replay" ? "triplet" : "final";
+    const d = await deriveItems(env, kind, a.asOf);
+    asOf = d.cut;
+    const set = new Map(d.kept.map((i, x) => [i.id, { item: i, x }]));
+    const ids = a.answers.map((x) => x.itemId);
+    if (new Set(ids).size !== ids.length) throw new InputError("Each item may be answered once.");
+    const unknown = ids.filter((id) => !set.has(id) || !inSplit(set.get(id)!.x, d.holdoutFrom, split));
+    if (unknown.length) throw new InputError(`Not items of this set (kind, asOf, split): ${unknown.slice(0, 3).join(", ")}.`);
+    const scored = await Promise.all(a.answers.map(async (ans) => {
+      const it = set.get(ans.itemId)!.item;
+      let position: number | "pass" | null = null;
+      if (kind === "triplet") {
+        const order = await shuffled(it.keys, a.seed!);
+        if (ans.choice === "pass") position = "pass";
+        else {
+          const p = order.indexOf(ans.choice);
+          if (p < 0) throw new InputError(`The choice for ${ans.itemId} is not one of its pictures, and not "pass".`);
+          position = p + 1;
+        }
+      } else if (!["approve", "fix", "reject"].includes(ans.choice)) throw new InputError(`The choice for ${ans.itemId} must be approve, fix or reject.`);
+      return { id: it.id, engine: it.engine, right: ans.choice === it.label, position, pictures: it.keys.length, reason: ans.reason };
+    }));
+    n = scored.length;
+    const right = scored.filter((s) => s.right).length;
+    const positions: Record<string, number> = {};
+    for (const s of scored) if (s.position !== null) positions[String(s.position)] = (positions[String(s.position)] ?? 0) + 1;
+    result = {
+      agreement: prop(right, n),
+      chance: kind === "triplet" ? "1 in the number of pictures (1/3 for 3 drafts), or the class balance for a pass" : "the class balance",
+      positions,
+      contaminated: true,
+      stamp,
+      items: scored.map(({ reason: _r, ...s }) => s),
+    };
+  }
+  const id = crypto.randomUUID();
+  await env.DB.prepare(
+    `INSERT INTO calibration_runs (id, kind, as_of, split, canon_log_id, prompt_version, n, result, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(id, a.kind, asOf, split, stamp.canonLogId === null ? null : String(stamp.canonLogId), a.promptVersion ?? "", n, JSON.stringify(result), a.note ?? "", new Date().toISOString()).run();
+  return { id, kind: a.kind, asOf, split, n, ...result };
+}
+
+/** The replay runs for the report: the newest runs and the position bias of the triplet replays (design pack §4.9). */
+export async function replaySummary(env: Env) {
+  const runs = await env.DB.prepare(
+    "SELECT id, kind, as_of, split, canon_log_id, prompt_version, n, result, created_at FROM calibration_runs ORDER BY created_at DESC LIMIT 10",
+  ).all<{ id: string; kind: string; as_of: string; split: string; canon_log_id: string | null; prompt_version: string; n: number; result: string; created_at: string }>();
+  const all = await env.DB.prepare("SELECT result FROM calibration_runs WHERE kind = 'triplet_replay'").all<{ result: string }>();
+  const counts: Record<string, number> = {};
+  for (const r of all.results) for (const [p, c] of Object.entries((JSON.parse(r.result) as { positions?: Record<string, number> }).positions ?? {})) counts[p] = (counts[p] ?? 0) + c;
+  const chose = ["1", "2", "3"].reduce((s, p) => s + (counts[p] ?? 0), 0);
+  const share = Object.fromEntries(["1", "2", "3"].map((p) => [p, chose ? round((counts[p] ?? 0) / chose) : null]));
+  return {
+    runs: runs.results.map((r) => {
+      const res = JSON.parse(r.result) as { agreement?: unknown; common?: number; alarm?: boolean };
+      return { id: r.id, kind: r.kind, asOf: r.as_of, split: r.split, canonLogId: r.canon_log_id, promptVersion: r.prompt_version, n: r.n, agreement: res.agreement ?? null, common: res.common, alarm: res.alarm, at: r.created_at };
+    }),
+    positionBias: { choices: chose, share, alarm: chose >= 20 && Object.values(share).some((s) => (s ?? 0) > 0.5) },
   };
 }

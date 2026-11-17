@@ -208,13 +208,26 @@ export async function goldImport(env: Env, items: GoldIn[]) {
   return { imported: added, skippedAsKnown: items.length - added, goldItems: n?.n ?? 0 };
 }
 
+/**
+ * The gold set's scopes (design pack §4.5 rule 7, OD 4.3, the owner's choice of 17-11-2026): "all" is the full set; "in_scope"
+ * leaves out the v1 ads of products outside the product scope (packaged F&B and wellness products, decisions 16-11-2026):
+ * a dress, a pan and a chair. The scope is a second score beside the full score, never in place of it.
+ */
+export type GoldScope = "all" | "in_scope";
+const OUT_OF_SCOPE = ["v1 Poplin Trapeze Dress %", "v1 Ceramic Nonstick Always Pan %", "v1 ErgoTune Joobie %"];
+const scopeWhere = (scope: GoldScope = "all") =>
+  scope === "in_scope" ? { sql: `WHERE ${OUT_OF_SCOPE.map(() => "label NOT LIKE ?").join(" AND ")}`, binds: OUT_OF_SCOPE } : { sql: "", binds: [] as string[] };
+/** The run's note carries its scope, so a run compares only with an earlier run of the same scope. */
+const SCOPE_TAG = "[in_scope] ";
+
 /** The gold items WITHOUT the owner's marks, so the critic judges them blind. Same order every time, so runs compare. */
-export async function goldGet(env: Env, a: { limit?: number; offset?: number }) {
+export async function goldGet(env: Env, a: { limit?: number; offset?: number; scope?: GoldScope }) {
+  const w = scopeWhere(a.scope);
   const rows = await env.DB.prepare(
-    "SELECT id, label, stage, headline, image_key FROM gold_items ORDER BY id LIMIT ? OFFSET ?",
-  ).bind(a.limit ?? 30, a.offset ?? 0).all<Record<string, string | null>>();
-  const total = await env.DB.prepare("SELECT COUNT(*) AS n FROM gold_items").first<{ n: number }>();
-  return { total: total?.n ?? 0, items: rows.results };
+    `SELECT id, label, stage, headline, image_key FROM gold_items ${w.sql} ORDER BY id LIMIT ? OFFSET ?`,
+  ).bind(...w.binds, a.limit ?? 30, a.offset ?? 0).all<Record<string, string | null>>();
+  const total = await env.DB.prepare(`SELECT COUNT(*) AS n FROM gold_items ${w.sql}`).bind(...w.binds).first<{ n: number }>();
+  return { scope: a.scope ?? "all", total: total?.n ?? 0, items: rows.results };
 }
 
 /** Compare the critic's use/pass answers with the owner's marks. Saves the run so before and after a change can be compared. */
@@ -236,7 +249,15 @@ interface RunRow {
  * A change must not lower balancedAccuracy. Runs saved before migration 0008 have no use counts, so they show agreement only.
  */
 function runStats(r: RunRow) {
-  const out: Record<string, unknown> = { note: r.note, n: r.n, agreed: r.agreed, agreement: r3(r.agreed / r.n), at: r.at };
+  const inScope = r.note.startsWith(SCOPE_TAG);
+  const out: Record<string, unknown> = {
+    scope: inScope ? "in_scope" : "all",
+    note: inScope ? r.note.slice(SCOPE_TAG.length) : r.note,
+    n: r.n,
+    agreed: r.agreed,
+    agreement: r3(r.agreed / r.n),
+    at: r.at,
+  };
   if (r.use_agreed !== null && r.use_truth !== null) {
     const passTruth = r.n - r.use_truth;
     const passAgreed = r.agreed - r.use_agreed;
@@ -251,26 +272,30 @@ function runStats(r: RunRow) {
 }
 
 /** Compare the critic's use/pass answers with the owner's marks. Saves the run so before and after a change can be compared. */
-export async function goldScore(env: Env, a: { note: string; answers: { id: string; mark: "use" | "pass" }[] }) {
+export async function goldScore(env: Env, a: { note: string; answers: { id: string; mark: "use" | "pass" }[]; scope?: GoldScope }) {
+  const w = scopeWhere(a.scope);
   const ids = a.answers.map((x) => x.id);
   if (new Set(ids).size !== ids.length) throw new InputError("Each gold item may be answered once.");
-  const marks = await env.DB.prepare("SELECT id, mark FROM gold_items WHERE id IN (SELECT value FROM json_each(?))")
-    .bind(JSON.stringify(ids)).all<{ id: string; mark: string }>();
+  const marks = await env.DB.prepare(`SELECT id, mark FROM gold_items ${w.sql ? `${w.sql} AND` : "WHERE"} id IN (SELECT value FROM json_each(?))`)
+    .bind(...w.binds, JSON.stringify(ids)).all<{ id: string; mark: string }>();
   const truth = new Map(marks.results.map((m) => [m.id, m.mark]));
   const unknown = ids.filter((id) => !truth.has(id));
-  if (unknown.length) throw new InputError(`Not gold items: ${unknown.slice(0, 3).join(", ")}.`);
-  // A run must cover the whole gold set, or the guard could pass on an easy subset. Ids are unique and all known, so equal counts mean full cover.
-  const total = (await env.DB.prepare("SELECT COUNT(*) AS n FROM gold_items").first<{ n: number }>())?.n ?? 0;
-  if (ids.length !== total) throw new InputError(`Answer every gold item: the set has ${total} and you sent ${ids.length}.`);
+  if (unknown.length) throw new InputError(`Not gold items${a.scope === "in_scope" ? " of the in_scope set" : ""}: ${unknown.slice(0, 3).join(", ")}.`);
+  // A run must cover the whole set of its scope, or the guard could pass on an easy subset. Ids are unique and all known, so equal counts mean full cover.
+  const total = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM gold_items ${w.sql}`).bind(...w.binds).first<{ n: number }>())?.n ?? 0;
+  if (ids.length !== total) throw new InputError(`Answer every gold item of the scope: the set has ${total} and you sent ${ids.length}.`);
+  const note = a.scope === "in_scope" ? `${SCOPE_TAG}${a.note}` : a.note;
   const agreed = a.answers.filter((x) => truth.get(x.id) === x.mark).length;
   const useAgreed = a.answers.filter((x) => x.mark === "use" && truth.get(x.id) === "use").length;
   const useTruth = a.answers.filter((x) => truth.get(x.id) === "use").length;
   const at = now();
   const r = await env.DB.prepare("INSERT INTO gold_runs (note, n, agreed, use_agreed, use_truth, at) VALUES (?, ?, ?, ?, ?, ?)")
-    .bind(a.note, a.answers.length, agreed, useAgreed, useTruth, at).run();
-  const previous = await env.DB.prepare("SELECT note, n, agreed, use_agreed, use_truth, at FROM gold_runs WHERE id < ? ORDER BY id DESC LIMIT 1")
-    .bind(r.meta.last_row_id).first<RunRow>();
-  const { note: _n, at: _a, ...run } = runStats({ note: a.note, n: a.answers.length, agreed, use_agreed: useAgreed, use_truth: useTruth, at });
+    .bind(note, a.answers.length, agreed, useAgreed, useTruth, at).run();
+  // The run before it, of the same scope.
+  const previous = await env.DB.prepare(
+    `SELECT note, n, agreed, use_agreed, use_truth, at FROM gold_runs WHERE id < ? AND (substr(note, 1, ${SCOPE_TAG.length}) = ?) = ? ORDER BY id DESC LIMIT 1`,
+  ).bind(r.meta.last_row_id, SCOPE_TAG, a.scope === "in_scope" ? 1 : 0).first<RunRow>();
+  const { note: _n, at: _a, ...run } = runStats({ note, n: a.answers.length, agreed, use_agreed: useAgreed, use_truth: useTruth, at });
   return { ...run, previous: previous ? runStats(previous) : null };
 }
 
