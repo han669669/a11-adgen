@@ -17,6 +17,15 @@ This document uses ASD-STE100 Simplified Technical English with British spelling
 8. `docs/security-checklist.md`: the standing security gate. Run it on every change. The owner must not need to ask.
 9. `docs/backlog.md`: ideas the owner parked, and ideas the owner declined. Do not start a parked item without the owner's say. Do not suggest a declined item again.
 
+For work on a11-engine v3, also read these files in this order. The owner wrote the specification on 15-11-2026.
+
+1. `docs/a11-engine-v3.md`: the target specification (the owner's text).
+2. `docs/a11-engine-v3-phase-0.md`: the repository audit.
+3. `docs/a11-engine-v3-fable-design-pack.md`: the design for Phases 1 to 4.
+4. `docs/a11-engine-v3-opus-kickoff.md`: the implementation instructions and the first task.
+
+These four files are a plan. They do not describe the live system. Until a v3 unit is merged and verified, `docs/blueprint.md` and the rules in this file describe what is live.
+
 The plan started in a Claude Code session on 2026-11-06 SGT. The plan page is in the owner's Claude account (private; its link is not kept in this public repo). The files in `docs/` are the source of truth. When the page and the files disagree, the files win.
 
 ---
