@@ -1,5 +1,5 @@
 ---
-description: "Run one batch (3 ads; engine 2: top, middle, bottom of funnel, to the point where the owner picks drafts; engine 3: the best 3 concepts, any mix, for now to the owner's copy approval). Resumes a batch that has started."
+description: "Run one batch (3 ads; engine 2: top, middle, bottom of funnel, to the point where the owner picks drafts; engine 3: the best 3 concepts, any mix, for now to the art direction of each concept). Resumes a batch that has started."
 argument-hint: <brand> [batchId] [productUrl] [productTitle] [label]
 ---
 Run the a11 `batch` prompt. Its text lives on the a11 server, so this command always runs the current version.
