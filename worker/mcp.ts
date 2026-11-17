@@ -264,13 +264,16 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "batch_create",
-    description: "Start a batch for a brand and subject. It uses the brand's latest kit version. Returns the batch id (use it as render_submit's batch).",
+    description:
+      "Start a batch for a brand and subject. It uses the brand's latest kit version. Returns the batch id (use it as render_submit's batch). Engine 2 unless the owner asks for engine 3 in his own words: then give engine 3 and ownerStart (his exact words); the batch notes keep them. The engine of a batch is fixed.",
     inputSchema: {
       type: "object",
       properties: {
         brandSlug: { type: "string", pattern: SLUG },
         subjectId: { type: "string", pattern: "^[0-9a-f-]{36}$" },
         label: { type: "string", minLength: 1, maxLength: 80, description: "For example W46 WonGi Pop Barley" },
+        engine: { type: "integer", minimum: 2, maximum: 3, description: "3 only on the owner's word (ownerStart). Leave out for engine 2." },
+        ownerStart: { type: "string", minLength: 1, maxLength: 500, description: "Engine 3: the owner's own words that start it, copied exactly." },
       },
       required: ["brandSlug", "subjectId", "label"],
       additionalProperties: false,

@@ -108,7 +108,16 @@ export async function factsGet(env: Env, subjectId: string) {
   return rows.results.map((r) => ({ ...r, verified: r.verified === null || r.verified === undefined ? null : r.verified === 1 }));
 }
 
-export async function batchCreate(env: Env, input: { brandSlug: string; subjectId: string; label: string }) {
+const START = "Engine 3 started by the owner";
+
+/**
+ * A new batch. Engine 2 by default. Engine 3 (a11-engine v3 Phase 7, the controlled rollout) only with the owner's own
+ * words that start it (ownerStart): the batch notes keep them, so every engine 3 batch shows who started it and how.
+ */
+export async function batchCreate(env: Env, input: { brandSlug: string; subjectId: string; label: string; engine?: 2 | 3; ownerStart?: string }) {
+  const engine = input.engine ?? 2;
+  if (engine === 3 && !input.ownerStart?.trim()) throw new InputError("An engine 3 batch needs ownerStart: the owner's own words that start engine 3 for this batch.");
+  if (engine === 2 && input.ownerStart) throw new InputError("ownerStart goes with engine 3 only.");
   const brand = await brandBySlug(env, input.brandSlug);
   const kit = await latestKit(env, brand.id);
   if (!kit) throw new Error(`Brand ${brand.slug} has no kit yet. Save one with brand_save first.`);
@@ -116,12 +125,14 @@ export async function batchCreate(env: Env, input: { brandSlug: string; subjectI
   if (!subject || subject.brand_id !== brand.id) throw new Error(`Subject ${input.subjectId} does not belong to ${brand.slug}.`);
   const id = crypto.randomUUID();
   const at = now();
+  // One line, so a later note can keep it (batchUpdate).
+  const notes = engine === 3 ? `${START} (${at}): "${input.ownerStart!.trim().replace(/\s+/g, " ")}"` : null;
   await env.DB.prepare(
-    "INSERT INTO batches (id, brand_id, subject_id, kit_version, label, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'research', ?, ?)",
+    "INSERT INTO batches (id, brand_id, subject_id, kit_version, label, status, engine, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'research', ?, ?, ?, ?)",
   )
-    .bind(id, brand.id, input.subjectId, kit.version, input.label, at, at)
+    .bind(id, brand.id, input.subjectId, kit.version, input.label, engine, notes, at, at)
     .run();
-  return { id, label: input.label, kitVersion: kit.version, status: "research" };
+  return { id, label: input.label, kitVersion: kit.version, status: "research", engine };
 }
 
 /** The marks of each stage (docs/design/owner-verdicts.md 2.1). The table has the same CHECK rule. */
@@ -228,7 +239,13 @@ export async function batchUpdate(
   const args: unknown[] = [];
   if (input.status) (sets.push("status = ?"), args.push(input.status));
   if (input.insights) (sets.push("insights = ?"), args.push(JSON.stringify(input.insights)));
-  if (input.notes !== undefined) (sets.push("notes = ?"), args.push(input.notes));
+  if (input.notes !== undefined) {
+    // The first line of an engine 3 batch's notes is the owner's start (batchCreate): a new note keeps it.
+    const old = await env.DB.prepare("SELECT notes FROM batches WHERE id = ? AND engine = 3").bind(input.id).first<{ notes: string | null }>();
+    const start = old?.notes?.startsWith(START) ? old.notes.split("\n")[0]! : null;
+    sets.push("notes = ?");
+    args.push(start && !(input.notes ?? "").startsWith(start) ? `${start}\n${input.notes ?? ""}` : input.notes);
+  }
   const verdicts = input.ownerVerdicts ?? [];
   if (sets.length === 0 && verdicts.length === 0) throw new Error("Nothing to update.");
   // An unknown batch is refused, and every verdict is checked, before anything is written.
