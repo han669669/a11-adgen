@@ -561,12 +561,7 @@ export async function batchGet(env: Env, id: string) {
   const ownerPicked = new Set(picks.results.filter((p) => p.by_owner === 1).map((p) => p.idea_id as string));
   const passedAt = new Map(passes.results.map((p) => [p.idea_id, p.at]));
   const img = (key: string) => ({ key, url: fal.mediaUrl(env, key) });
-  // Before migration 0015 the table is not there: then there is no brief. Any other error is a real failure.
-  const noTable = (e: unknown) => /no such table/i.test(e instanceof Error ? e.message : String(e));
-  const brief = await briefGet(env, id).catch((e) => {
-    if (noTable(e)) return null;
-    throw e;
-  });
+  const brief = await briefGet(env, id);
   const currentDrafts = new Map<string, number>();
   const ideasOut = ideas.results.map((i) => {
     const drafts = renders.results
@@ -622,13 +617,10 @@ export async function batchGet(env: Env, id: string) {
     subject: subject && { ...subject, data: JSON.parse(subject.data) },
     facts: await factsGet(env, b.subject_id),
     // a11-engine v3 Phase 1: the engine (2 for every batch made before engine 3), the newest brief and the research
-    // sources (no text). An engine 2 batch has brief null. A missing table (before migration 0015) does not fail the read.
+    // sources (no text). An engine 2 batch has brief null.
     engine,
     brief,
-    sources: await sourcesList(env, id).catch((e) => {
-      if (noTable(e)) return [];
-      throw e;
-    }),
+    sources: await sourcesList(env, id),
     insights: JSON.parse(b.insights),
     notes: b.notes,
     ideas: ideasOut,
