@@ -90,8 +90,26 @@ export async function canonGet(env: Env, a: { stage?: string; includeRetired?: b
   };
 }
 
+/**
+ * The learning record of a canon change (a11-engine v3 specification §9.7): what was seen, the examples it explains
+ * and the ones against it, how sure, and what it should change. The store is the rule's scope; the lesson is the rule;
+ * the source is the change's source; the test result is the gold run before it, then the test action after it.
+ */
+export interface Learning {
+  observation: string;
+  examples: string[];
+  counterexamples: string[];
+  evidenceCount: number;
+  confidence: "low" | "medium" | "high";
+  expectedEffect: string;
+  /** The gold run (gold_score runId) made before the change, when there is one. */
+  goldBefore?: number;
+  /** The owner's own words that make this one piece of evidence a rule for every brand. */
+  ownerApproval?: string;
+}
+
 export interface CanonChange {
-  action: "add" | "edit" | "evidence" | "retire" | "restore";
+  action: "add" | "edit" | "evidence" | "retire" | "restore" | "test";
   id?: string;
   rule?: string;
   stage?: string;
@@ -103,6 +121,12 @@ export interface CanonChange {
   quote?: string;
   kind?: "hit" | "miss";
   reason?: string;
+  /** add and edit: required. retire and restore: optional. */
+  learning?: Learning;
+  /** test: the gold run made after the change. */
+  goldAfter?: number;
+  /** test: why the gold set cannot test this rule (it is text only and has no brand). */
+  untestable?: string;
 }
 
 const need = (cond: unknown, msg: string) => {
@@ -127,6 +151,26 @@ async function scopeOf(env: Env, scope: Scope, brandSlug: string | null) {
   return { scope, brand: null };
 }
 
+/** The stats of a gold run by id, for the learning record (a snapshot, so the record does not depend on a later read). */
+type GoldRunView = Record<string, unknown> & { runId: number; scope: string; balancedAccuracy?: number | null };
+async function goldRun(env: Env, id: number): Promise<GoldRunView> {
+  const r = await env.DB.prepare("SELECT id, note, n, agreed, use_agreed, use_truth, at FROM gold_runs WHERE id = ?").bind(id).first<RunRow & { id: number }>();
+  need(r, `No gold run ${id}.`);
+  return { runId: id, ...runStats(r!) } as GoldRunView;
+}
+
+/**
+ * The learning record, checked (specification §9.7: one correction is not enough to create a global rule).
+ * global: the change makes a rule that every batch reads (an add, or a brand rule moved out of its brand). Such a rule
+ * needs 2 pieces of evidence or more, or the owner's own words that make it a rule.
+ */
+async function learningOf(env: Env, l: Learning | undefined, global: boolean, action: string) {
+  need(l, `${action} needs learning: the observation, examples, counterexamples, evidenceCount, confidence and expectedEffect.`);
+  need(!global || l!.evidenceCount >= 2 || l!.ownerApproval, "One piece of evidence is not enough for a rule that every brand reads: make it a brand rule, wait for more evidence, or give the owner's own words that approve it (learning.ownerApproval).");
+  need(l!.evidenceCount >= l!.examples.length, "evidenceCount must count every example.");
+  return { ...l!, ...(l!.goldBefore !== undefined ? { goldBefore: await goldRun(env, l!.goldBefore) } : {}) };
+}
+
 /**
  * One change to the canon. Every change keeps its evidence or reason and is logged, so the owner can undo it.
  * add and edit need a source (where the taste came from: the owner's words, a pick, a result); the owner's quote is best.
@@ -138,6 +182,7 @@ export async function canonUpdate(env: Env, c: CanonChange) {
   if (c.action === "add") {
     need(c.rule && c.source, "add needs rule and source.");
     const s = await scopeOf(env, c.scope ?? "owner", c.brandSlug ?? null);
+    const learning = await learningOf(env, c.learning, s.scope !== "brand", "add");
     const id = crypto.randomUUID().slice(0, 8);
     const evidence = JSON.stringify([{ at, source: c.source, ...(c.quote ? { quote: c.quote } : {}) }]);
     try {
@@ -145,7 +190,7 @@ export async function canonUpdate(env: Env, c: CanonChange) {
         env.DB.prepare(
           `INSERT INTO canon_rules (id, stage, scope, brand_slug, text, evidence, created_at, updated_at, last_evidence_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).bind(id, c.stage ?? "all", s.scope, s.brand, c.rule, evidence, at, at, at),
-        log(id, "add", { rule: c.rule, source: c.source, scope: s.scope, ...(s.brand ? { brandSlug: s.brand } : {}) }),
+        log(id, "add", { rule: c.rule, source: c.source, scope: s.scope, ...(s.brand ? { brandSlug: s.brand } : {}), learning }),
       ]);
     } catch (e) {
       throw full(e, "Retire a rule that has no recent evidence first.");
@@ -162,6 +207,7 @@ export async function canonUpdate(env: Env, c: CanonChange) {
     const scope = c.scope ?? r!.scope;
     const s = await scopeOf(env, scope, c.brandSlug ?? (scope === "brand" ? r!.brand_slug : null));
     const moved = s.scope !== r!.scope || s.brand !== r!.brand_slug;
+    const learning = await learningOf(env, c.learning, r!.scope === "brand" && s.scope !== "brand", "edit");
     // An edit is not evidence: it does not refresh the 60-day clock. The source is kept in the log.
     try {
       await env.DB.batch([
@@ -172,6 +218,7 @@ export async function canonUpdate(env: Env, c: CanonChange) {
           source: c.source,
           ...(c.quote ? { quote: c.quote } : {}),
           ...(moved ? { fromScope: r!.scope, toScope: s.scope, ...(r!.brand_slug ? { fromBrand: r!.brand_slug } : {}), ...(s.brand ? { toBrand: s.brand } : {}) } : {}),
+          learning,
         }),
       ]);
     } catch (e) {
@@ -196,16 +243,36 @@ export async function canonUpdate(env: Env, c: CanonChange) {
     need(r!.status === "active", "That rule is already retired.");
     await env.DB.batch([
       env.DB.prepare("UPDATE canon_rules SET status = 'retired', retired_at = ?, retired_reason = ?, updated_at = ? WHERE id = ?").bind(at, c.reason, at, c.id),
-      log(c.id!, "retire", { reason: c.reason }),
+      log(c.id!, "retire", { reason: c.reason, ...(c.learning ? { learning: await learningOf(env, c.learning, false, "retire") } : {}) }),
     ]);
     return { id: c.id, retired: true };
   }
+  if (c.action === "test") {
+    // The test result of the newest change of this rule (specification §9.7 item 10, §9.8): the gold run after it,
+    // compared with the run before it, or why the text gold set cannot test it.
+    need(c.goldAfter !== undefined || c.untestable, "test needs goldAfter (the gold run after the change) or untestable (why the gold set cannot test this rule).");
+    const last = await env.DB.prepare("SELECT action, detail, at FROM canon_log WHERE rule_id = ? AND action IN ('add', 'edit', 'retire', 'restore') ORDER BY id DESC LIMIT 1")
+      .bind(c.id).first<{ action: string; detail: string; at: string }>();
+    need(last, "That rule has no change to test.");
+    const before = (JSON.parse(last!.detail) as { learning?: { goldBefore?: GoldRunView } }).learning?.goldBefore;
+    const after = c.goldAfter !== undefined ? await goldRun(env, c.goldAfter) : undefined;
+    // A run from before the change cannot test it.
+    need(!after || String(after.at) > last!.at, "goldAfter must be a run made after the change.");
+    need(!(after && before) || after.runId > before.runId, "goldAfter must be a run made after the run before the change.");
+    need(!(after && before) || after.scope === before.scope, "goldAfter must have the same scope (all or in_scope) as the run before the change.");
+    const delta = after?.balancedAccuracy != null && before?.balancedAccuracy != null ? Math.round((after.balancedAccuracy - before.balancedAccuracy) * 1000) / 1000 : null;
+    // The gate of docs/blueprint.md: a fall of 0.04 or more in balanced accuracy undoes the change; a smaller move is noise.
+    const result = after ? (delta === null ? "no_baseline" : delta <= -0.04 ? "fell" : "held") : "untestable";
+    await log(c.id!, "test", { of: last!.action, ...(after ? { goldAfter: after } : {}), ...(before ? { goldBefore: before.runId } : {}), delta, result, ...(c.untestable ? { untestable: c.untestable } : {}) }).run();
+    return { id: c.id, tested: last!.action, result, delta };
+  }
   need(c.reason, "restore needs reason.");
   need(r!.status === "retired", "That rule is already active.");
+  const learning = c.learning ? await learningOf(env, c.learning, false, "restore") : undefined;
   try {
     await env.DB.batch([
       env.DB.prepare("UPDATE canon_rules SET status = 'active', retired_at = NULL, retired_reason = NULL, updated_at = ? WHERE id = ?").bind(at, c.id),
-      log(c.id!, "restore", { reason: c.reason }),
+      log(c.id!, "restore", { reason: c.reason, ...(learning ? { learning } : {}) }),
     ]);
   } catch (e) {
     throw full(e, "Retire another rule first.");
@@ -373,10 +440,10 @@ export async function goldScore(env: Env, a: { note: string; answers: { id: stri
     `SELECT note, n, agreed, use_agreed, use_truth, at FROM gold_runs WHERE id < ? AND (substr(note, 1, ${SCOPE_TAG.length}) = ?) = ? ORDER BY id DESC LIMIT 1`,
   ).bind(r.meta.last_row_id, SCOPE_TAG, a.scope === "in_scope" ? 1 : 0).first<RunRow>();
   const { note: _n, at: _a, ...run } = runStats({ note, n: a.answers.length, agreed, use_agreed: useAgreed, use_truth: useTruth, at });
-  return { ...run, previous: previous ? runStats(previous) : null };
+  return { runId: r.meta.last_row_id, ...run, previous: previous ? runStats(previous) : null };
 }
 
 export async function goldRuns(env: Env) {
-  const rows = await env.DB.prepare("SELECT note, n, agreed, use_agreed, use_truth, at FROM gold_runs ORDER BY id DESC LIMIT 20").all<RunRow>();
-  return { runs: rows.results.map(runStats) };
+  const rows = await env.DB.prepare("SELECT id, note, n, agreed, use_agreed, use_truth, at FROM gold_runs ORDER BY id DESC LIMIT 20").all<RunRow & { id: number }>();
+  return { runs: rows.results.map((r) => ({ runId: r.id, ...runStats(r) }) as GoldRunView) };
 }

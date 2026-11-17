@@ -543,9 +543,24 @@ export async function tasteLog(env: Env, limit = 30, before?: string) {
      FROM verdicts v LEFT JOIN batches b ON b.id = v.batch_id LEFT JOIN ideas i ON i.id = v.idea_id LEFT JOIN packs pk ON pk.id = v.pack_id
      WHERE v.created_at < ? ORDER BY v.created_at DESC, v.rowid DESC LIMIT ?`,
   ).bind(cut, limit).all<Record<string, any>>();
+  // Copy corrections (store 1, owner taste): the words as written and the words he approved, when they differ.
+  const copies = await env.DB.prepare(
+    `SELECT i.format, i.copy, b.label FROM ideas i JOIN batches b ON b.id = i.batch_id
+     WHERE json_extract(i.copy, '$.written') IS NOT NULL AND json_extract(i.copy, '$.ownerApproved.at') < ?
+       AND (json_extract(i.copy, '$.ownerApproved.headline') IS NOT json_extract(i.copy, '$.written.headline')
+         OR json_extract(i.copy, '$.ownerApproved.subline') IS NOT json_extract(i.copy, '$.written.subline'))
+     ORDER BY json_extract(i.copy, '$.ownerApproved.at') DESC LIMIT ?`,
+  ).bind(cut, limit).all<{ format: string; copy: string; label: string }>();
+  // The query keeps only the ideas whose words changed, so the limit counts corrections.
+  const corrections = copies.results.map((r) => {
+    const c = JSON.parse(r.copy) as { written: { headline: string; subline: string }; ownerApproved: { headline: string; subline: string; ownerSaid: string; at: string } };
+    const a = c.ownerApproved;
+    return { at: a.at, batch: r.label, stage: r.format, written: c.written, approved: { headline: a.headline, subline: a.subline }, ownerSaid: a.ownerSaid };
+  });
   return {
     ...(before ? { before } : {}),
     tally: await tasteTally(env, cut),
+    copyCorrections: corrections,
     verdicts: verdicts.results.map((v) => ({
       at: v.created_at,
       batch: v.label ?? null,
