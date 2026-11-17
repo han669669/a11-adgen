@@ -623,7 +623,12 @@ export async function batchGet(env: Env, id: string) {
   const ownerPicked = new Set(picks.results.filter((p) => p.by_owner === 1).map((p) => p.idea_id as string));
   const passedAt = new Map(passes.results.map((p) => [p.idea_id, p.at]));
   const img = (key: string) => ({ key, url: fal.mediaUrl(env, key) });
-  const [brief, conceptReview] = await Promise.all([briefGet(env, id), conceptReviewGet(env, id)]);
+  const [brief, conceptReview, directions] = await Promise.all([
+    briefGet(env, id),
+    conceptReviewGet(env, id),
+    env.DB.prepare("SELECT DISTINCT idea_id FROM batch_records WHERE batch_id = ? AND kind = 'direction' AND idea_id IS NOT NULL LIMIT 60").bind(id).all<{ idea_id: string }>(),
+  ]);
+  const directed = new Set(directions.results.map((d) => d.idea_id));
   const currentDrafts = new Map<string, number>();
   const ideasOut = ideas.results.map((i) => {
     const drafts = renders.results
@@ -695,7 +700,7 @@ export async function batchGet(env: Env, id: string) {
     picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, byOwner: p.by_owner === 1, finalRenderId: p.final_render_id })),
     drafting: renders.results.filter((r) => r.status === "queued").map((r) => r.id),
     // Engine 3 only: the next step of the batch, from its rows (design pack §1.11). Engine 2 batches have none.
-    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, currentDrafts: currentDrafts.get(i.id) ?? 0, rendered: renders.results.some((r) => r.idea === i.id) })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.n > conceptReview.lastN) }) } : {}),
+    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, currentDrafts: currentDrafts.get(i.id) ?? 0, rendered: renders.results.some((r) => r.idea === i.id), directed: directed.has(i.id) })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.n > conceptReview.lastN) }) } : {}),
   };
 }
 
@@ -708,6 +713,8 @@ type IdeaState = {
   finals: { status: unknown }[];
   /** Any render row of the idea, also a queued or failed one (ideas_pick freezes the picks then). */
   rendered?: boolean;
+  /** The idea has a direction record (design pack §1.11 step 6). */
+  directed: boolean;
 };
 
 /** The first step of an engine 3 batch that is not done yet. Pure: it reads only the rows that batchGet has read. */
@@ -728,6 +735,7 @@ export function nextStepV3(
   if (review?.newIdeas && !picked.some((i) => i.rendered)) return "concept_review";
   if (picked.length < 3) return "concept_review";
   if (picked.some((i) => !i.copy.ownerApproved)) return "copy_review";
+  if (picked.some((i) => !i.directed)) return "direction";
   if (picked.some((i) => i.currentDrafts < 3)) return "drafts";
   if (picked.some((i) => !i.ranked)) return "draft_rank";
   if (!["board", "finals", "done"].includes(status)) return "board";
