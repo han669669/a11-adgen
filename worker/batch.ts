@@ -1,5 +1,6 @@
 import { brandBySlug, latestKit } from "./brand";
 import type { Env } from "./env";
+import { briefGet, factMarks, sourcesList } from "./research";
 import * as fal from "./fal";
 import { storeSubjectImages } from "./subjectimages";
 
@@ -40,25 +41,36 @@ export interface FactInput {
   sourceUrl: string;
 }
 
-export async function factsSave(env: Env, subjectId: string, facts: FactInput[]) {
+/**
+ * Add facts to a subject. With batchId (a batch of this subject), each fact's quote is looked for in the stored source
+ * text of that batch with the same URL (design pack §1.4): verified 1 or 0, or NULL when the page is not stored.
+ */
+export async function factsSave(env: Env, subjectId: string, facts: FactInput[], batchId?: string) {
   const subject = await env.DB.prepare("SELECT id FROM subjects WHERE id = ?").bind(subjectId).first();
   if (!subject) throw new Error(`No subject with id ${subjectId}.`);
+  let marks: (number | null)[] = facts.map(() => null);
+  if (batchId) {
+    const b = await env.DB.prepare("SELECT subject_id FROM batches WHERE id = ?").bind(batchId).first<{ subject_id: string }>();
+    if (!b || b.subject_id !== subjectId) throw new Error(`Batch ${batchId} is not a batch of subject ${subjectId}.`);
+    marks = await factMarks(env, batchId, facts);
+  }
   const at = now();
   await env.DB.batch(
-    facts.map((f) =>
-      env.DB.prepare("INSERT INTO facts (subject_id, label, value, quote, source_url, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(
-        subjectId, f.label, f.value, f.quote, f.sourceUrl, at,
+    facts.map((f, i) =>
+      env.DB.prepare("INSERT INTO facts (subject_id, label, value, quote, source_url, created_at, verified) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(
+        subjectId, f.label, f.value, f.quote, f.sourceUrl, at, marks[i],
       ),
     ),
   );
   return factsGet(env, subjectId);
 }
 
+/** retrievedAt is when the fact was saved. verified: true (quote found on a stored page), false (not found), null (not checked). */
 export async function factsGet(env: Env, subjectId: string) {
   const rows = await env.DB.prepare(
-    "SELECT id, label, value, quote, source_url AS sourceUrl FROM facts WHERE subject_id = ? ORDER BY id LIMIT 200",
-  ).bind(subjectId).all();
-  return rows.results;
+    "SELECT id, label, value, quote, source_url AS sourceUrl, created_at AS retrievedAt, verified FROM facts WHERE subject_id = ? ORDER BY id LIMIT 200",
+  ).bind(subjectId).all<Record<string, unknown>>();
+  return rows.results.map((r) => ({ ...r, verified: r.verified === null || r.verified === undefined ? null : r.verified === 1 }));
 }
 
 export async function batchCreate(env: Env, input: { brandSlug: string; subjectId: string; label: string }) {
@@ -549,6 +561,53 @@ export async function batchGet(env: Env, id: string) {
   const ownerPicked = new Set(picks.results.filter((p) => p.by_owner === 1).map((p) => p.idea_id as string));
   const passedAt = new Map(passes.results.map((p) => [p.idea_id, p.at]));
   const img = (key: string) => ({ key, url: fal.mediaUrl(env, key) });
+  const brief = await briefGet(env, id);
+  const currentDrafts = new Map<string, number>();
+  const ideasOut = ideas.results.map((i) => {
+    const drafts = renders.results
+      .filter((r) => r.idea === i.id && r.kind === "draft")
+      .flatMap((r) => (r.image_keys ? (JSON.parse(r.image_keys) as string[]).map((key) => ({ key, at: r.created_at as string })) : []));
+    const passed = passedAt.get(i.id);
+    const shown = (at: string) => ownerPicked.has(i.id) || (passed !== undefined && at <= passed);
+    // ranked: the critic's rank of the newest 3 current drafts is saved (the critic ranks the newest 3; after a full pass,
+    // only the drafts made since count).
+    const current = drafts.filter((d) => passed === undefined || d.at > passed);
+    const newest = (current.length ? current : drafts).slice(-3);
+    currentDrafts.set(i.id, current.length);
+    return {
+      id: i.id,
+      n: i.n,
+      format: i.format,
+      insight: i.insight,
+      sourceUrl: i.source_url,
+      visual: i.visual,
+      headline: i.headline,
+      copy: JSON.parse(i.copy),
+      picked: i.picked === 1,
+      finalPrompt: i.final_prompt,
+      finalRefs: JSON.parse(i.final_refs),
+      ranked: newest.length > 0 && newest.every((d) => rankBy.has(d.key)),
+      // Submit order, then image order. Never rank order: the order must not show the critic's rank.
+      // rank and reason are null until the owner decides on the idea (see shown above).
+      drafts: drafts.map(({ key, at }) => ({
+        ...img(key),
+        rank: shown(at) ? (rankBy.get(key)?.rank ?? null) : null,
+        reason: shown(at) ? (rankBy.get(key)?.reason ?? null) : null,
+        picked: pickBy.has(key),
+      })),
+      finals: renders.results
+        .filter((r) => r.idea === i.id && r.kind === "final")
+        .map((r) => ({
+          id: r.id,
+          status: r.status,
+          error: r.error,
+          images: (r.image_keys ? (JSON.parse(r.image_keys) as string[]) : []).map(img),
+          composed: r.composed_key?.startsWith("renders/") ? img(r.composed_key) : null,
+          composeError: r.composed_key?.startsWith("error:") ? r.composed_key.slice(6) : null,
+        })),
+    };
+  });
+  const engine = (b.engine as number | undefined) ?? 2;
   return {
     id: b.id,
     label: b.label,
@@ -557,53 +616,36 @@ export async function batchGet(env: Env, id: string) {
     kit: kit?.kit ?? null,
     subject: subject && { ...subject, data: JSON.parse(subject.data) },
     facts: await factsGet(env, b.subject_id),
+    // a11-engine v3 Phase 1: the engine (2 for every batch made before engine 3), the newest brief and the research
+    // sources (no text). brief is null when no brief is saved (the usual case for an engine 2 batch).
+    engine,
+    brief,
+    sources: await sourcesList(env, id),
     insights: JSON.parse(b.insights),
     notes: b.notes,
-    ideas: ideas.results.map((i) => {
-      const drafts = renders.results
-        .filter((r) => r.idea === i.id && r.kind === "draft")
-        .flatMap((r) => (r.image_keys ? (JSON.parse(r.image_keys) as string[]).map((key) => ({ key, at: r.created_at as string })) : []));
-      const passed = passedAt.get(i.id);
-      const shown = (at: string) => ownerPicked.has(i.id) || (passed !== undefined && at <= passed);
-      // ranked: the critic's rank of the newest 3 current drafts is saved (the critic ranks the newest 3; after a full pass,
-      // only the drafts made since count).
-      const current = drafts.filter((d) => passed === undefined || d.at > passed);
-      const newest = (current.length ? current : drafts).slice(-3);
-      return {
-        id: i.id,
-        n: i.n,
-        format: i.format,
-        insight: i.insight,
-        sourceUrl: i.source_url,
-        visual: i.visual,
-        headline: i.headline,
-        copy: JSON.parse(i.copy),
-        picked: i.picked === 1,
-        finalPrompt: i.final_prompt,
-        finalRefs: JSON.parse(i.final_refs),
-        ranked: newest.length > 0 && newest.every((d) => rankBy.has(d.key)),
-        // Submit order, then image order. Never rank order: the order must not show the critic's rank.
-        // rank and reason are null until the owner decides on the idea (see shown above).
-        drafts: drafts.map(({ key, at }) => ({
-          ...img(key),
-          rank: shown(at) ? (rankBy.get(key)?.rank ?? null) : null,
-          reason: shown(at) ? (rankBy.get(key)?.reason ?? null) : null,
-          picked: pickBy.has(key),
-        })),
-        finals: renders.results
-          .filter((r) => r.idea === i.id && r.kind === "final")
-          .map((r) => ({
-            id: r.id,
-            status: r.status,
-            error: r.error,
-            images: (r.image_keys ? (JSON.parse(r.image_keys) as string[]) : []).map(img),
-            composed: r.composed_key?.startsWith("renders/") ? img(r.composed_key) : null,
-            composeError: r.composed_key?.startsWith("error:") ? r.composed_key.slice(6) : null,
-          })),
-      };
-    }),
+    ideas: ideasOut,
     picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, byOwner: p.by_owner === 1, finalRenderId: p.final_render_id })),
     drafting: renders.results.filter((r) => r.status === "queued").map((r) => r.id),
+    // Engine 3 only: the next step of the batch, from its rows (design pack §1.11). Engine 2 batches have none.
+    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, currentDrafts: currentDrafts.get(i.id) ?? 0 })), ownerPicked) } : {}),
   };
+}
+
+type IdeaState = { id: string; picked: boolean; copy: { ownerApproved?: unknown }; ranked: boolean; currentDrafts: number; finals: { status: unknown }[] };
+
+/** The first step of an engine 3 batch that is not done yet. Pure: it reads only the rows that batchGet has read. */
+export function nextStepV3(status: string, hasBrief: boolean, ideas: IdeaState[], ownerPicked: Set<string>): string {
+  const picked = ideas.filter((i) => i.picked);
+  if (!hasBrief) return "brief";
+  if (ideas.length === 0) return "concepts";
+  if (picked.length < 3) return "concept_review";
+  if (picked.some((i) => !i.copy.ownerApproved)) return "copy_review";
+  if (picked.some((i) => i.currentDrafts < 3)) return "drafts";
+  if (picked.some((i) => !i.ranked)) return "draft_rank";
+  if (!["board", "finals", "done"].includes(status)) return "board";
+  if (picked.some((i) => !ownerPicked.has(i.id))) return "owner_pick";
+  // A queued or failed final is not a final: the step is done only when each picked idea has a finished one.
+  if (picked.some((i) => !i.finals.some((f) => f.status === "done"))) return "finals";
+  return "done";
 }
 

@@ -85,7 +85,8 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 |---|---|
 | Brand | `brand_extract` (built: fetch-based), `brand_get`, `brand_list`, `brand_save` (each save makes a new kit version) |
 | Subject | `subject_save`, `facts_save`; redesign images are kept under `subjects/` and shown by `image_get`. `exa_contents` reads product-page text |
-| Research | `exa_search`, `exa_contents`, a Meta Ad Library tool (later; paid, asks first) |
+| Research | `exa_search`, `exa_contents` (with `batchId`, each result is kept as a research source of the batch), a Meta Ad Library tool (later; paid, asks first) |
+| Brief (a11-engine v3) | `brief_save` (the Creative Strategy Brief, one new version per save; the server checks the quote of each evidence item with a `sourceId` against the stored text of that source and marks it `verified` true or false; owner- and client-supplied evidence is `null` (not checked), and other public evidence without a stored source is `false`); `facts_save` with `batchId` checks each fact's quote the same way; `batch_get` returns `engine`, `brief` and `sources`, and for an engine 3 batch `nextStep` (the first step not done) |
 | Ideas | `ideas_save` (the whole burst, none picked), `ideas_pick` (the critic picks its 3; it cannot unpick or write a prompt), `ideas_update` (the final prompt; before the owner's first change of the words it keeps the written words in `copy.written`), `drafts_rank` (the critic's blind rank); the critic reads with `batch_get` `view: "critic"` (no notes, picks, owner words or ranks; ideas shuffled) |
 | Images | `render_submit` (drafts, only for a picked idea), `final_render`, `food_fix`, `region_fix`, `render_status`, `compose_final`, `image_get` (returns the image) |
 | Human step | `picks_save` (saves the owner's draft picks with his own words; the board saves the same picks) |
