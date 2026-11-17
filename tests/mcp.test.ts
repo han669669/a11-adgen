@@ -79,6 +79,7 @@ describe("mcp handler", () => {
       const text = p.text({ brand: "b", productTitle: "t", productUrl: "https://x", label: "l", adUrl: "https://x", batchId: "x" });
       expect(text).toContain("rank them yourself in a fresh session, from batch_get with view 'critic'");
     }
+    expect(PROMPTS.find((x) => x.name === "final")!.text({ batchId: "x" })).toContain("rank only the 3 new drafts, the last 3 in the idea's list");
   });
   it("runs the gold test inline, in the full set, and never asks to run another prompt", async () => {
     const { PROMPTS } = await import("../worker/prompts");
