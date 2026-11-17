@@ -176,12 +176,17 @@ describe("ideas_pick on an engine 3 batch", () => {
     const words = "none of these feel like us, too jokey";
     await expect(run(env, "ideas_pick", { batchId: E3, outcome: "rework", ownerReject: words })).rejects.toThrow("ownerReject changes a saved selection, and this batch has none.");
     await run(env, "ideas_pick", select(ideas));
+    // He approved the words of the 3 picks first: the next step is the art direction.
+    raw.prepare(`UPDATE ideas SET copy = json_set(copy, '$.ownerApproved', json('{"headline":"h","subline":"s"}')) WHERE batch_id = ? AND picked = 1`).run(E3);
+    expect((await run(env, "batch_get", { id: E3 })).nextStep).toBe("direction");
     await expect(run(env, "ideas_pick", { ...select(ideas), ownerReject: words })).rejects.toThrow("ownerReject is for a rework only");
     await expect(run(env, "ideas_pick", { ...rework(ideas), ownerReject: words })).rejects.toThrow("send no review with ownerSwap or ownerReject");
     const schema = TOOLS.find((t) => t.name === "ideas_pick")!.inputSchema;
     expect(() => validate(schema, { batchId: E3, outcome: "rework", ownerReject: " " })).toThrow("ownerReject has the wrong format");
     await expect(run(env, "ideas_pick", { batchId: E3, outcome: "rework", ownerReject: words })).resolves.toMatchObject({ outcome: "rework", picked: [], version: 2 });
     expect(pickedRows(raw)).toHaveLength(0);
+    // His approval of the old picks' words is taken back, so a concept selected again goes to the copy review again.
+    expect(raw.prepare("SELECT COUNT(*) AS c FROM ideas WHERE batch_id = ? AND json_extract(copy, '$.ownerApproved') IS NOT NULL").get(E3)).toEqual({ c: 0 });
     const recs = records(raw);
     expect(recs.map((r) => r.author)).toEqual(["critic", "owner"]);
     expect(JSON.parse(recs[1]!.body)).toMatchObject({ outcome: "rework", ownerReject: words, review: JSON.parse(recs[0]!.body).review });

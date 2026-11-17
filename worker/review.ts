@@ -199,6 +199,11 @@ export async function conceptPick(env: Env, batchId: string, ids: string[], inpu
        WHERE NOT EXISTS (SELECT 1 FROM renders r JOIN ideas i ON i.id = r.idea AND i.batch_id = r.batch WHERE r.batch = ? AND i.picked = 1)
          AND (SELECT COUNT(*) FROM ideas WHERE batch_id = ?) = ?`,
     ).bind(recordId, batchId, JSON.stringify(body), ownerWords ? "owner" : "critic", promptVersion, new Date().toISOString(), batchId, batchId, batchId, all.size),
+    // A rework takes back the owner's approval of the words of the old picks: if the critic selects one again, the owner
+    // sees its words again at the copy review.
+    ...(outcome === "rework"
+      ? [env.DB.prepare(`UPDATE ideas SET copy = json_remove(copy, '$.ownerApproved') WHERE batch_id = ? AND picked = 1 AND ${gate}`).bind(batchId, recordId)]
+      : []),
     // Unpick first: the pick-cap trigger allows 3 picked ideas for each batch.
     env.DB.prepare(
       `UPDATE ideas SET picked = 0 WHERE batch_id = ? AND picked = 1 AND id NOT IN (SELECT value FROM json_each(?)) AND ${gate}`,
