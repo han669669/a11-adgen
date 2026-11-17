@@ -475,6 +475,16 @@ export async function picksSave(env: Env, batchId: string, picks: { key: string;
   const keys = await draftKeys(env, batchId);
   const at = now();
   for (const p of picks) if (!keys.has(p.key)) throw new Error(`${p.key} is not a finished draft of batch ${batchId}.`);
+  // Engine 3 (design pack §3.6): the owner picks from the eligible current drafts, the drafts the board shows.
+  // A pick that already has a final stays valid, even after a later round.
+  const eng = await env.DB.prepare("SELECT engine FROM batches WHERE id = ?").bind(batchId).first<{ engine: number }>();
+  if (eng?.engine === 3 && picks.length) {
+    const ok = await eligibleKeys(env, batchId);
+    const done = await env.DB.prepare("SELECT render_key FROM picks WHERE batch_id = ? AND final_render_id IS NOT NULL").bind(batchId).all<{ render_key: string }>();
+    for (const r of done.results) ok.add(r.render_key);
+    const bad = picks.find((p) => !ok.has(p.key));
+    if (bad) throw new InputError(`${bad.key} is not an eligible current draft: pick from the drafts the board shows.`);
+  }
   // One draft per idea in a call: each pick becomes a paid final.
   const ideaIds = picks.map((p) => keys.get(p.key)!);
   if (new Set(ideaIds).size !== ideaIds.length) throw new Error("Pick one draft per idea.");
@@ -687,6 +697,20 @@ export async function batchGetCritic(env: Env, id: string) {
         return { ...i, copy: words, drafts: shown.map(({ key, url }) => ({ key, url })) };
       })
       .sort((a, b) => shuffleKey(`${id}:${a.id}`) - shuffleKey(`${id}:${b.id}`)),
+  };
+}
+
+/**
+ * The owner's board (worker/api.ts). Engine 3 (design pack §3.6): each idea shows only its eligible current drafts,
+ * and any draft that is already picked, so a failed draft or an old round never reaches the owner. Engine 2: batch_get.
+ */
+export async function batchGetOwner(env: Env, id: string) {
+  const g = await batchGet(env, id);
+  if (g.engine !== 3) return g;
+  const picked = new Set(g.picks.map((p) => p.key));
+  return {
+    ...g,
+    ideas: g.ideas.map((i) => ({ ...i, drafts: i.drafts.filter((d) => picked.has(d.key) || (d.eligible === true && d.current === true)) })),
   };
 }
 

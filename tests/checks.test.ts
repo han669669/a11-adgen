@@ -203,3 +203,29 @@ describe("checks_save", () => {
     expect(raw.prepare("SELECT COUNT(*) AS c FROM batch_records WHERE batch_id = ? AND kind IN ('draft_check', 'final_check')").get(e2)).toEqual({ c: 0 });
   });
 });
+
+describe("the owner's board for engine 3 (v3 Phase 6)", () => {
+  it("shows only the eligible current drafts, and picks_save refuses the others; engine 2 is unchanged", async () => {
+    const { env, raw, picks, e2 } = await boardReady();
+    const idea = picks[0]!.id;
+    // A draft that failed its check, and a draft with no check yet.
+    addRender(raw, renderId(1, 4), idea, "draft", "2026-11-17T07:10:00.000Z");
+    await saveCheck(env, idea, draftCheck(renderId(1, 4), { eligible: false, items: [{ code: "D4", found: true, note: "The pouch floats." }], points: { ...draftCheck("x").points, physics: "fail" }, reason: "The pouch floats (D4)." }));
+    addRender(raw, renderId(1, 5), idea, "draft", "2026-11-17T07:11:00.000Z");
+    const full = ideaOf(await batch.batchGet(env, E3), idea).drafts.map((d: { key: string }) => d.key);
+    expect(full).toHaveLength(5);
+    const board = await batch.batchGetOwner(env, E3);
+    const shown = ideaOf(board, idea).drafts.map((d: { key: string }) => d.key);
+    expect(shown).toEqual([1, 2, 3].map((n) => `renders/${renderId(1, n)}/0.jpg`));
+    await expect(batch.picksSave(env, E3, [{ key: `renders/${renderId(1, 4)}/0.jpg` }])).rejects.toThrow("is not an eligible current draft");
+    await expect(batch.picksSave(env, E3, [{ key: `renders/${renderId(1, 5)}/0.jpg` }])).rejects.toThrow("is not an eligible current draft");
+    await batch.picksSave(env, E3, [{ key: shown[1]!, note: "the second" }]);
+    // A pick with a final stays on the board and stays valid after the drafts change.
+    raw.prepare("UPDATE picks SET final_render_id = 'f1' WHERE render_key = ?").run(shown[1]);
+    await saveCheck(env, idea, draftCheck(renderId(1, 2), { eligible: false, items: [{ code: "D4", found: true, note: "Seen again." }], points: { ...draftCheck("x").points, physics: "fail" }, reason: "Seen again (D4)." }));
+    expect(ideaOf(await batch.batchGetOwner(env, E3), idea).drafts.map((d: { key: string }) => d.key)).toContain(shown[1]);
+    await batch.picksSave(env, E3, [{ key: shown[1]! }]);
+    // Engine 2: the board is batch_get, as before.
+    expect(await batch.batchGetOwner(env, e2)).toEqual(await batch.batchGet(env, e2));
+  });
+});

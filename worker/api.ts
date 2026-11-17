@@ -106,7 +106,7 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
     if (path === "/api/batches" && method === "GET") return json(await batch.batchList(env));
 
     let m = path.match(new RegExp(`^/api/batches/(${UUID})$`));
-    if (m && method === "GET") return json(await batch.batchGet(env, m[1]!));
+    if (m && method === "GET") return json(await batch.batchGetOwner(env, m[1]!));
 
     // The one human step: the owner picks 1 draft per idea. This only saves the picks. Claude then runs the final
     // (house recipe, creative-playbook §7). Note: the board's refresh still draws the logo on any finished final, so a raw
