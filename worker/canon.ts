@@ -251,11 +251,13 @@ export async function canonUpdate(env: Env, c: CanonChange) {
     // The test result of the newest change of this rule (specification §9.7 item 10, §9.8): the gold run after it,
     // compared with the run before it, or why the text gold set cannot test it.
     need(c.goldAfter !== undefined || c.untestable, "test needs goldAfter (the gold run after the change) or untestable (why the gold set cannot test this rule).");
-    const last = await env.DB.prepare("SELECT action, detail FROM canon_log WHERE rule_id = ? AND action IN ('add', 'edit', 'retire', 'restore') ORDER BY id DESC LIMIT 1")
-      .bind(c.id).first<{ action: string; detail: string }>();
+    const last = await env.DB.prepare("SELECT action, detail, at FROM canon_log WHERE rule_id = ? AND action IN ('add', 'edit', 'retire', 'restore') ORDER BY id DESC LIMIT 1")
+      .bind(c.id).first<{ action: string; detail: string; at: string }>();
     need(last, "That rule has no change to test.");
     const before = (JSON.parse(last!.detail) as { learning?: { goldBefore?: GoldRunView } }).learning?.goldBefore;
     const after = c.goldAfter !== undefined ? await goldRun(env, c.goldAfter) : undefined;
+    // A run from before the change cannot test it.
+    need(!after || String(after.at) > last!.at, "goldAfter must be a run made after the change.");
     need(!(after && before) || after.runId > before.runId, "goldAfter must be a run made after the run before the change.");
     need(!(after && before) || after.scope === before.scope, "goldAfter must have the same scope (all or in_scope) as the run before the change.");
     const delta = after?.balancedAccuracy != null && before?.balancedAccuracy != null ? Math.round((after.balancedAccuracy - before.balancedAccuracy) * 1000) / 1000 : null;

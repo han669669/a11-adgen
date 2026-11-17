@@ -265,8 +265,9 @@ describe("canon scopes (migration 0016)", () => {
 
 describe("learning records (specification 9.7, 9.8)", () => {
   /** A gold run row: balanced accuracy = mean of use recall (useAgreed / 30) and pass recall ((agreed - useAgreed) / 70). */
-  const goldRow = (raw: DatabaseSync, agreed: number, useAgreed: number, note = "a run") =>
-    Number(raw.prepare("INSERT INTO gold_runs (note, n, agreed, use_agreed, use_truth, at) VALUES (?, 100, ?, ?, 30, 't')").run(note, agreed, useAgreed).lastInsertRowid);
+  const OLD = "2000-01-01T00:00:00.000Z";
+  const goldRow = (raw: DatabaseSync, agreed: number, useAgreed: number, note = "a run", at = "2999-01-01T00:00:00.000Z") =>
+    Number(raw.prepare("INSERT INTO gold_runs (note, n, agreed, use_agreed, use_truth, at) VALUES (?, 100, ?, ?, 30, ?)").run(note, agreed, useAgreed, at).lastInsertRowid);
   const one = { ...L, examples: ["W47 mof note"], evidenceCount: 1 };
   const logOf = (raw: DatabaseSync, id: string) =>
     (raw.prepare("SELECT action, detail FROM canon_log WHERE rule_id = ? ORDER BY id").all(id) as { action: string; detail: string }[]).map((l) => ({ action: l.action, ...JSON.parse(l.detail) }));
@@ -276,7 +277,7 @@ describe("learning records (specification 9.7, 9.8)", () => {
     await expect(canon.canonUpdate(env, { action: "add", rule: "A rule with no record.", source: "s" })).rejects.toThrow(/add needs learning/);
     await expect(canon.canonUpdate(env, { action: "add", rule: "A rule with a lost run.", source: "s", learning: { ...L, goldBefore: 99 } })).rejects.toThrow(/No gold run 99/);
     await expect(canon.canonUpdate(env, { action: "add", rule: "More examples than evidence.", source: "s", learning: { ...L, evidenceCount: 1, ownerApproval: "yes" } })).rejects.toThrow(/evidenceCount must count every example/);
-    const before = goldRow(raw, 76, 20);
+    const before = goldRow(raw, 76, 20, "before", OLD);
     const { id } = await canon.canonUpdate(env, { action: "add", rule: "Calm ads win.", source: "B41", learning: { ...L, goldBefore: before } }) as { id: string };
     await expect(canon.canonUpdate(env, { action: "edit", id, rule: "Calm ads win, always.", source: "s" })).rejects.toThrow(/edit needs learning/);
     const [add] = logOf(raw, id);
@@ -305,10 +306,12 @@ describe("learning records (specification 9.7, 9.8)", () => {
 
   it("tests the newest change against the gold run before it: held, fell, untestable or no baseline", async () => {
     const { env, raw } = makeEnv();
-    const before = goldRow(raw, 76, 20);
+    const before = goldRow(raw, 76, 20, "before", OLD);
     const { id } = await canon.canonUpdate(env, { action: "add", rule: "Calm ads win.", source: "B41", learning: { ...L, goldBefore: before } }) as { id: string };
     await expect(canon.canonUpdate(env, { action: "test", id })).rejects.toThrow(/goldAfter .* or untestable/);
     await expect(canon.canonUpdate(env, { action: "test", id, goldAfter: before })).rejects.toThrow(/made after/);
+    // A newer row id is not enough: the run must be made after the change.
+    await expect(canon.canonUpdate(env, { action: "test", id, goldAfter: goldRow(raw, 75, 19, "stale", OLD) })).rejects.toThrow("goldAfter must be a run made after the change.");
     const inScope = goldRow(raw, 75, 19, "[in_scope] after");
     await expect(canon.canonUpdate(env, { action: "test", id, goldAfter: inScope })).rejects.toThrow(/same scope/);
     expect(await canon.canonUpdate(env, { action: "test", id, goldAfter: goldRow(raw, 75, 19) })).toEqual({ id, tested: "add", result: "held", delta: -0.016 });

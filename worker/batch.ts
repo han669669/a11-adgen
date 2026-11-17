@@ -547,13 +547,15 @@ export async function tasteLog(env: Env, limit = 30, before?: string) {
   const copies = await env.DB.prepare(
     `SELECT i.format, i.copy, b.label FROM ideas i JOIN batches b ON b.id = i.batch_id
      WHERE json_extract(i.copy, '$.written') IS NOT NULL AND json_extract(i.copy, '$.ownerApproved.at') < ?
+       AND (json_extract(i.copy, '$.ownerApproved.headline') IS NOT json_extract(i.copy, '$.written.headline')
+         OR json_extract(i.copy, '$.ownerApproved.subline') IS NOT json_extract(i.copy, '$.written.subline'))
      ORDER BY json_extract(i.copy, '$.ownerApproved.at') DESC LIMIT ?`,
   ).bind(cut, limit).all<{ format: string; copy: string; label: string }>();
-  const corrections = copies.results.flatMap((r) => {
+  // The query keeps only the ideas whose words changed, so the limit counts corrections.
+  const corrections = copies.results.map((r) => {
     const c = JSON.parse(r.copy) as { written: { headline: string; subline: string }; ownerApproved: { headline: string; subline: string; ownerSaid: string; at: string } };
     const a = c.ownerApproved;
-    if (a.headline === c.written.headline && a.subline === c.written.subline) return [];
-    return [{ at: a.at, batch: r.label, stage: r.format, written: c.written, approved: { headline: a.headline, subline: a.subline }, ownerSaid: a.ownerSaid }];
+    return { at: a.at, batch: r.label, stage: r.format, written: c.written, approved: { headline: a.headline, subline: a.subline }, ownerSaid: a.ownerSaid };
   });
   return {
     ...(before ? { before } : {}),

@@ -724,7 +724,7 @@ describe("copy review", () => {
     await batch.ideasUpdate(env, [{ id: changed, headline: "Wait, there's ten?", copyApproved: "yes, with my headline" }]);
     // Changed, then changed back to the words as written before he approved: no correction.
     await batch.ideasUpdate(env, [{ id: same, subline: "One price.", copyApproved: "yes" }]);
-    raw.prepare("UPDATE ideas SET copy = json_set(copy, '$.written', json_object('headline', headline, 'subline', 'One price.')) WHERE id = ?").run(same);
+    raw.prepare("UPDATE ideas SET copy = json_set(copy, '$.written', json_object('headline', headline, 'subline', 'One price.'), '$.ownerApproved.at', '2999-01-01T00:00:00.000Z') WHERE id = ?").run(same);
     const log = await batch.tasteLog(env);
     expect(log.copyCorrections).toEqual([{
       at: expect.any(String), batch: b.label, stage: "tof",
@@ -733,6 +733,8 @@ describe("copy review", () => {
       ownerSaid: "yes, with my headline",
     }]);
     expect((await batch.tasteLog(env, 30, "2026-01-01")).copyCorrections).toEqual([]);
+    // The limit counts corrections only: the newer approval with unchanged words does not push the correction out.
+    expect((await batch.tasteLog(env, 1)).copyCorrections).toHaveLength(1);
   });
 
   it("reports an unknown idea on approval, and the schema takes only his words", async () => {
