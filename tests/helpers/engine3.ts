@@ -181,11 +181,18 @@ export function addRender(raw: DatabaseSync, id: string, ideaId: string, kind = 
 }
 export const renderId = (pick: number, n: number) => `${pick}${n}000000-0000-4000-8000-000000000000`.slice(0, 36);
 
+/** The critic's rank of every draft that the critic view shows (the eligible current drafts). */
+export async function rankAll(env: Env) {
+  const critic = await run(env, "batch_get", { id: E3, view: "critic" });
+  const ranks = (critic.ideas as { drafts: { key: string }[] }[]).flatMap((i) => i.drafts.map((d, n) => ({ key: d.key, rank: n + 1, reason: "The pouch reads first." })));
+  return run(env, "drafts_rank", { batchId: E3, ranks });
+}
+
 /**
  * An engine 3 batch ready for the board: 3 picks with approved words and a direction each, 3 finished drafts each, all
- * checked eligible, and a final prompt.
+ * checked eligible, a final prompt, and (with rank) the critic's rank.
  */
-export async function boardReady() {
+export async function boardReady({ rank = true } = {}) {
   const s = await approved();
   const picks = [s.ideas[0]!, s.ideas[3]!, s.ideas[6]!];
   for (const [p, idea] of picks.entries()) {
@@ -196,5 +203,6 @@ export async function boardReady() {
     }
   }
   s.raw.prepare("UPDATE ideas SET final_prompt = 'final' WHERE batch_id = ? AND picked = 1").run(E3);
+  if (rank) await rankAll(s.env);
   return { ...s, picks };
 }

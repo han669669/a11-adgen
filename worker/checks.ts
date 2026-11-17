@@ -81,14 +81,40 @@ export type Check = {
   logoCentred?: boolean;
   copyMatchesApproved?: boolean;
   reason: string;
+  /** Set by the server: the direction round of the idea when the check was saved (directionRounds). */
+  round?: number;
 };
 
 const DRAFT_ONLY = ["eligible", "attempt", "points"] as const;
 const FINAL_ONLY = ["finalPoints", "notes", "checkedAt", "logoCentred", "copyMatchesApproved"] as const;
 
-/** A final is ready for the owner when no point failed, the words match the approved words and the logo sits right. */
+/** The render-checklist rule (§3 of docs/render-checklist.md): any D item, or two F items, rejects a draft or a final. */
+const checklistFault = (c: Check) => {
+  const found = (c.items ?? []).filter((i) => i.found).map((i) => i.code);
+  return found.some((k) => k.startsWith("D")) || found.filter((k) => k.startsWith("F")).length >= 2;
+};
+
+/**
+ * A final is ready for the owner when every point passes (foodAuthenticity may be na when no food shows), the checklist
+ * finds no D item and fewer than two F items, the words match the approved words and the logo sits right.
+ */
 export const finalReady = (c: Check) =>
-  !Object.values(c.finalPoints ?? {}).includes("fail") && c.copyMatchesApproved === true && c.logoCentred === true;
+  Object.entries(c.finalPoints ?? {}).every(([k, v]) => v === "pass" || (k === "foodAuthenticity" && v === "na")) &&
+  !checklistFault(c) && c.copyMatchesApproved === true && c.logoCentred === true;
+
+/**
+ * The direction round of an idea: the newest direction version that has no draft renderId yet. A direction saved again
+ * with the renderIds stays in its round; a new direction (for example the one lower-risk redo of design pack §3.6) starts
+ * a new round, and the checks of the drafts of an older round no longer count.
+ */
+export async function directionRounds(env: Env, batchId: string) {
+  const rows = await env.DB.prepare(
+    `SELECT idea_id, MAX(version) AS v FROM batch_records d WHERE batch_id = ? AND kind = 'direction' AND idea_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM json_each(d.body, '$.drafts') WHERE json_extract(value, '$.renderId') IS NOT NULL)
+     GROUP BY idea_id`,
+  ).bind(batchId).all<{ idea_id: string; v: number }>();
+  return new Map(rows.results.map((r) => [r.idea_id, r.v]));
+}
 
 /** Save one check of a draft or a final render of a picked idea (design pack §3.6, §3.7). */
 export async function checksSave(env: Env, batchId: string, ideaId: string, kind: "draft_check" | "final_check", check: Check, promptVersion = "") {
@@ -112,10 +138,11 @@ export async function checksSave(env: Env, batchId: string, ideaId: string, kind
   if (kind === "draft_check") {
     for (const k of DRAFT_ONLY) if (check[k] === undefined) throw new InputError(`draft_check needs ${k}.`);
     if (!check.measured) throw new InputError("draft_check needs measured: the product shape from a grid.");
-    const found = (check.items ?? []).filter((i) => i.found && i.code.startsWith("D")).map((i) => i.code);
+    const found = (check.items ?? []).filter((i) => i.found).map((i) => i.code);
+    const faults = [...found.filter((k) => k.startsWith("D")), ...(found.filter((k) => k.startsWith("F")).length >= 2 ? found.filter((k) => k.startsWith("F")) : [])];
     const failed = Object.entries(check.points!).filter(([, v]) => v === "fail").map(([k]) => k);
-    if (check.eligible && (found.length || failed.length))
-      throw new InputError(`A draft with ${[...found, ...failed.map((p) => `${p} fail`)].join(", ")} is not eligible: set eligible false and give the fault in reason.`);
+    if (check.eligible && (faults.length || failed.length))
+      throw new InputError(`A draft with ${[...faults, ...failed.map((p) => `${p} fail`)].join(", ")} is not eligible (any D item, two F items or a failed point): set eligible false and give the fault in reason.`);
   } else {
     for (const k of FINAL_ONLY.filter((k) => k !== "notes")) if (check[k] === undefined) throw new InputError(`final_check needs ${k}.`);
     if (new Set(check.checkedAt).size !== 2) throw new InputError("final_check needs checkedAt full and phone: look at both sizes.");
@@ -125,6 +152,7 @@ export async function checksSave(env: Env, batchId: string, ideaId: string, kind
     if (missing.length) throw new InputError(`Give a note for each failed point: ${missing.join(", ")}.`);
   }
 
+  const body = JSON.stringify({ ...check, round: (await directionRounds(env, batchId)).get(ideaId) ?? 0 });
   const recordId = crypto.randomUUID();
   for (let attempt = 1; ; attempt++) {
     try {
@@ -134,7 +162,7 @@ export async function checksSave(env: Env, batchId: string, ideaId: string, kind
          SELECT ?, ?, ?, ?, v, ?, 'art-director', ?, ? FROM
            (SELECT COALESCE(MAX(version), 0) + 1 AS v FROM batch_records WHERE batch_id = ? AND kind = ? AND idea_id = ?)
          WHERE EXISTS (SELECT 1 FROM ideas WHERE id = ? AND batch_id = ? AND picked = 1)`,
-      ).bind(recordId, batchId, kind, ideaId, JSON.stringify(check), promptVersion, new Date().toISOString(), batchId, kind, ideaId, ideaId, batchId).run();
+      ).bind(recordId, batchId, kind, ideaId, body, promptVersion, new Date().toISOString(), batchId, kind, ideaId, ideaId, batchId).run();
       if (r.meta.changes !== 1) throw new InputError(`Idea ${idea.n} was unpicked while the check was written. Nothing was saved.`);
       break;
     } catch (e) {
@@ -150,14 +178,16 @@ export async function checksSave(env: Env, batchId: string, ideaId: string, kind
 
 /** The newest check of each render of a batch, as render id → check (with its version and time). */
 export async function checksGet(env: Env, batchId: string) {
+  // One row for each render (its newest check), so the rows are bounded by the renders of the batch.
   const rows = await env.DB.prepare(
-    "SELECT kind, version, body, created_at FROM batch_records WHERE batch_id = ? AND kind IN ('draft_check', 'final_check') ORDER BY rowid DESC LIMIT 500",
-  ).bind(batchId).all<{ kind: string; version: number; body: string; created_at: string }>();
+    `SELECT version, body, created_at FROM batch_records WHERE rowid IN (
+       SELECT MAX(rowid) FROM batch_records WHERE batch_id = ? AND kind IN ('draft_check', 'final_check')
+       GROUP BY json_extract(body, '$.renderId'))`,
+  ).bind(batchId).all<{ version: number; body: string; created_at: string }>();
   const out = new Map<string, Check & { version: number; savedAt: string }>();
-  // Newest first, so the limit can only drop old checks, and the first check of each render is its newest.
   for (const r of rows.results) {
     const c = JSON.parse(r.body) as Check;
-    if (!out.has(c.renderId)) out.set(c.renderId, { ...c, version: r.version, savedAt: r.created_at });
+    out.set(c.renderId, { ...c, version: r.version, savedAt: r.created_at });
   }
   return out;
 }

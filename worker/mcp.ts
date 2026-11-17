@@ -523,7 +523,7 @@ export const TOOLS: Tool[] = [
   {
     name: "drafts_rank",
     description:
-      "Save the critic's rank for draft images (1 = best per idea). It is blind: batch_get and the board show it only after the owner picks a draft of that idea or passes on its drafts (a pass shows only the drafts made before it), then the server compares his pick with it (picks_save, taste_log). Keys must be finished drafts of this batch; for an engine 3 batch, eligible drafts only (their check says eligible). Give a one-line reason per draft that names what you see (look, light, product shape, food), so taste_log can teach the next batch.",
+      "Save the critic's rank for draft images (1 = best per idea). It is blind: batch_get and the board show it only after the owner picks a draft of that idea or passes on its drafts (a pass shows only the drafts made before it), then the server compares his pick with it (picks_save, taste_log). Keys must be finished drafts of this batch; for an engine 3 batch, the eligible current drafts only (the drafts that the critic view shows). Give a one-line reason per draft that names what you see (look, light, product shape, food), so taste_log can teach the next batch.",
     inputSchema: {
       type: "object",
       properties: {

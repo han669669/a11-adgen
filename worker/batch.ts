@@ -2,7 +2,7 @@ import { brandBySlug, latestKit } from "./brand";
 import type { Env } from "./env";
 import { checkConcepts, type Concept, type Territory, territoriesGet } from "./concepts";
 import { briefGet, factMarks, sourcesList } from "./research";
-import { checksGet, finalReady } from "./checks";
+import { checksGet, directionRounds, finalReady } from "./checks";
 import { directionsGet } from "./direction";
 import { conceptPick, conceptReviewGet, type PickInput } from "./review";
 import { InputError } from "./schema";
@@ -151,7 +151,7 @@ async function verdictInserts(env: Env, batchId: string, verdicts: OwnerVerdict[
 }
 
 /** The engine 3 steps that come before the board (nextStepV3). */
-const BEFORE_BOARD = ["brief", "concepts", "concepts_rework", "owner_decision", "concept_review", "copy_review", "direction", "drafts"];
+const BEFORE_BOARD = ["brief", "concepts", "concepts_rework", "owner_decision", "concept_review", "copy_review", "direction", "drafts", "draft_rank"];
 
 /** The engine 3 board checks again, in the status write: exactly 3 picks, and each picked idea with drafts has its final prompt. */
 const BOARD3_GUARD = ` AND (SELECT COUNT(*) FROM ideas WHERE batch_id = batches.id AND picked = 1) = 3
@@ -391,15 +391,10 @@ async function draftKeys(env: Env, batchId: string): Promise<Map<string, string>
   return map;
 }
 
-/** Engine 3: the draft image keys whose render's newest check says eligible. */
+/** Engine 3: the keys of the drafts that count now (current) and whose newest check says eligible: the drafts the critic sees. */
 async function eligibleKeys(env: Env, batchId: string): Promise<Set<string>> {
-  const [rows, checks] = await Promise.all([
-    env.DB.prepare(`SELECT id, image_keys FROM renders WHERE batch = ? AND kind = 'draft' AND image_keys IS NOT NULL LIMIT ${MAX_BATCH_RENDERS}`)
-      .bind(batchId)
-      .all<{ id: string; image_keys: string }>(),
-    checksGet(env, batchId),
-  ]);
-  return new Set(rows.results.filter((r) => checks.get(r.id)?.eligible === true).flatMap((r) => JSON.parse(r.image_keys) as string[]));
+  const g = (await batchGet(env, batchId)) as { ideas: { drafts: { key: string; eligible?: boolean | null; current?: boolean }[] }[] };
+  return new Set(g.ideas.flatMap((i) => i.drafts.filter((d) => d.eligible === true && d.current === true).map((d) => d.key)));
 }
 
 export async function draftsRank(env: Env, batchId: string, ranks: { key: string; rank: number; reason?: string }[]) {
@@ -412,7 +407,7 @@ export async function draftsRank(env: Env, batchId: string, ranks: { key: string
     const ideaId = keys.get(r.key);
     if (!ideaId) throw new Error(`${r.key} is not a finished draft of batch ${batchId}.`);
     if (eligible && !eligible.has(r.key))
-      throw new InputError(`${r.key} is not an eligible draft: rank only the drafts whose check says eligible (batch_get view 'critic').`);
+      throw new InputError(`${r.key} is not an eligible current draft: rank only the drafts that batch_get view 'critic' shows.`);
     return env.DB.prepare(
       `INSERT INTO draft_ranks (render_key, batch_id, idea_id, rank, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT (render_key) DO UPDATE SET rank = excluded.rank, reason = excluded.reason, created_at = excluded.created_at`,
@@ -650,29 +645,40 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
   const ownerPicked = new Set(picks.results.filter((p) => p.by_owner === 1).map((p) => p.idea_id as string));
   const passedAt = new Map(passes.results.map((p) => [p.idea_id, p.at]));
   const img = (key: string) => ({ key, url: fal.mediaUrl(env, key) });
-  const [brief, conceptReview, directions, checks] = await Promise.all([
+  const [brief, conceptReview, directions, checks, rounds] = await Promise.all([
     briefGet(env, id),
     conceptReviewGet(env, id),
     directionsGet(env, id, withPlans),
     checksGet(env, id),
+    directionRounds(env, id),
   ]);
   const e3 = b.engine === 3;
   const draftsDone = new Map<string, boolean>();
+  const redirect = new Map<string, boolean>();
   const ideasOut = ideas.results.map((i) => {
     const drafts = renders.results
       .filter((r) => r.idea === i.id && r.kind === "draft")
       .flatMap((r) => (r.image_keys ? (JSON.parse(r.image_keys) as string[]).map((key) => ({ key, at: r.created_at as string, check: checks.get(r.id) })) : []));
     const passed = passedAt.get(i.id);
     const shown = (at: string) => ownerPicked.has(i.id) || (passed !== undefined && at <= passed);
+    // Engine 3: a draft whose check is from an older direction round (a new direction came after it) does not count now.
+    const round = rounds.get(i.id) ?? 0;
+    const counts = (d: { at: string; check?: { round?: number } }) =>
+      (passed === undefined || d.at > passed) && (!e3 || !d.check || (d.check.round ?? 0) >= round);
     // ranked: the critic's rank of the newest 3 current drafts is saved (the critic ranks the newest 3; after a full pass,
     // only the drafts made since count).
-    const current = drafts.filter((d) => passed === undefined || d.at > passed);
+    const current = drafts.filter(counts);
     const newest = (current.length ? current : drafts).slice(-3);
-    // Engine 3 (design pack §3.6): the owner and the critic see the eligible drafts. The drafts are done when every current
-    // draft is checked and 3 are eligible, or 1 or 2 are and each missing one had its redo (attempt 2) and failed again.
+    // Engine 3 (design pack §3.6): the owner and the critic see the eligible drafts. Each missing eligible draft has its one
+    // redo (attempt 2). After the redos, 3 or 2 eligible drafts are done (the owner is told why there are 2); 0 or 1 mean the
+    // direction is wrong: one new direction (a new round), and after it 1 eligible draft is done. 0 after the new round
+    // stays at drafts: the main session tells the owner.
     const eligible = current.filter((d) => d.check?.eligible === true);
     const failedRedos = current.filter((d) => d.check?.eligible === false && d.check.attempt === 2).length;
-    draftsDone.set(i.id, current.every((d) => d.check) && eligible.length >= 1 && (eligible.length >= 3 || failedRedos >= 3 - eligible.length));
+    const settled = current.every((d) => d.check) && (eligible.length >= 3 || failedRedos >= 3 - eligible.length);
+    const redirected = drafts.some((d) => (passed === undefined || d.at > passed) && d.check && (d.check.round ?? 0) < round);
+    draftsDone.set(i.id, settled && (eligible.length >= 2 || (eligible.length === 1 && redirected)));
+    redirect.set(i.id, settled && eligible.length <= 1 && !redirected);
     // Engine 3: ranked is the critic's rank of every eligible current draft (it ranks eligible drafts only).
     const ranked = e3 ? eligible.length > 0 && eligible.every((d) => rankBy.has(d.key)) : newest.length > 0 && newest.every((d) => rankBy.has(d.key));
     return {
@@ -698,8 +704,8 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
       drafts: drafts.map(({ key, at, check }) => ({
         ...img(key),
         // Engine 3: the art director's newest check of the draft (design pack §3.6), or null when it has none yet.
-        // current: made after the owner's newest full pass on the idea's drafts (the drafts that count now).
-        ...(e3 ? { eligible: check?.eligible ?? null, check: check ?? null, current: passed === undefined || at > passed } : {}),
+        // current: made after the owner's newest full pass, and not checked in an older direction round (they count now).
+        ...(e3 ? { eligible: check?.eligible ?? null, check: check ?? null, current: counts({ at, check }) } : {}),
         rank: shown(at) ? (rankBy.get(key)?.rank ?? null) : null,
         reason: shown(at) ? (rankBy.get(key)?.reason ?? null) : null,
         picked: pickBy.has(key),
@@ -742,7 +748,7 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
     picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, byOwner: p.by_owner === 1, finalRenderId: p.final_render_id })),
     drafting: renders.results.filter((r) => r.status === "queued").map((r) => r.id),
     // Engine 3 only: the next step of the batch, from its rows (design pack §1.11). Engine 2 batches have none.
-    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, draftsDone: draftsDone.get(i.id) === true, rendered: renders.results.some((r) => r.idea === i.id), directed: directions.get(i.id)?.current === true })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.n > conceptReview.lastN) }) } : {}),
+    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, draftsDone: draftsDone.get(i.id) === true, redirect: redirect.get(i.id) === true, rendered: renders.results.some((r) => r.idea === i.id), directed: directions.get(i.id)?.current === true })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.n > conceptReview.lastN) }) } : {}),
   };
 }
 
@@ -754,6 +760,8 @@ type IdeaState = {
   finals: { status: unknown; ready?: boolean }[];
   /** Every current draft is checked, with 3 eligible, or fewer after a failed redo for each missing one (design pack §3.6). */
   draftsDone: boolean;
+  /** Engine 3: 0 or 1 eligible drafts after the redos, and no new direction yet: the art director writes one (§3.6). */
+  redirect?: boolean;
   /** Any render row of the idea, also a queued or failed one (ideas_pick freezes the picks then). */
   rendered?: boolean;
   /** The idea has a direction record that is newer than the newest concept review (design pack §1.11 step 6). */
@@ -778,7 +786,7 @@ export function nextStepV3(
   if (review?.newIdeas && !picked.some((i) => i.rendered)) return "concept_review";
   if (picked.length < 3) return "concept_review";
   if (picked.some((i) => !i.copy.ownerApproved)) return "copy_review";
-  if (picked.some((i) => !i.directed)) return "direction";
+  if (picked.some((i) => !i.directed || i.redirect)) return "direction";
   if (picked.some((i) => !i.draftsDone)) return "drafts";
   if (picked.some((i) => !i.ranked)) return "draft_rank";
   if (!["board", "finals", "done"].includes(status)) return "board";

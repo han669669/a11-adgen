@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as batch from "../worker/batch";
 import { TOOLS } from "../worker/mcp";
 import { validate } from "../worker/schema";
-import { addRender, approved, boardReady, draftCheck, E3, renderId, run } from "./helpers/engine3";
+import { addRender, approved, boardReady, direction, draftCheck, E3, rankAll, renderId, run } from "./helpers/engine3";
 
 /** a11-engine v3 Phase 3: draft and final checks, eligible drafts, the rank and the board gate (design pack §3.6, tests 3.6 to 3.9). */
 
@@ -75,7 +75,7 @@ describe("checks_save", () => {
   });
 
   it("(3.8) the board gate: refused with 2 eligible drafts and no failed redo; passes after the failed redo, and with 3 eligible", async () => {
-    const { env, raw, picks } = await boardReady();
+    const { env, raw, picks } = await boardReady({ rank: false });
     const idea = picks[0]!.id;
     // The third draft of pick 1 is not eligible, first try.
     const fault = { eligible: false, items: [{ code: "D4", found: true, note: "The pouch floats." }], points: { ...draftCheck("x").points, physics: "fail" }, reason: "The pouch floats (D4)." };
@@ -86,6 +86,9 @@ describe("checks_save", () => {
     addRender(raw, renderId(1, 4), idea, "draft", "2026-11-17T07:10:00.000Z");
     await saveCheck(env, idea, draftCheck(renderId(1, 4), { ...fault, attempt: 2 }));
     expect((await run(env, "batch_get", { id: E3 })).nextStep).toBe("draft_rank");
+    // The critic ranks the eligible drafts before the board.
+    await expect(batch.batchUpdate(env, { id: E3, status: "board" })).rejects.toThrow("nextStep is 'draft_rank'");
+    expect(await rankAll(env)).toEqual({ ranked: 8 });
     await expect(batch.batchUpdate(env, { id: E3, status: "board" })).resolves.toMatchObject({ updated: ["status"] });
   });
 
@@ -95,18 +98,20 @@ describe("checks_save", () => {
     addRender(raw, renderId(3, 4), picks[2]!.id, "draft", "2026-11-17T07:10:00.000Z");
     await expect(batch.batchUpdate(env, { id: E3, status: "board" })).rejects.toThrow("nextStep is 'drafts'");
     await saveCheck(env, picks[2]!.id, draftCheck(renderId(3, 4)));
+    expect((await run(env, "batch_get", { id: E3 })).nextStep).toBe("draft_rank");
+    await rankAll(env);
     await expect(batch.batchUpdate(env, { id: E3, status: "board" })).resolves.toMatchObject({ updated: ["status"] });
   });
 
   it("(3.9) drafts_rank refuses a draft that is not eligible; the critic view shows the eligible current drafts only, without checks", async () => {
-    const { env, picks } = await boardReady();
+    const { env, picks } = await boardReady({ rank: false });
     const idea = picks[0]!.id;
     await saveCheck(env, idea, draftCheck(renderId(1, 2), { eligible: false, reason: "The light is flat: the judgement of the art director." }));
     const critic = await run(env, "batch_get", { id: E3, view: "critic" });
     const keys = critic.ideas.find((i: { id: string }) => i.id === idea).drafts.map((d: { key: string }) => d.key);
     expect(keys).toEqual([`renders/${renderId(1, 1)}/0.jpg`, `renders/${renderId(1, 3)}/0.jpg`]);
     expect(JSON.stringify(critic)).not.toMatch(/"check"|"eligible"|The light is flat/);
-    await expect(run(env, "drafts_rank", { batchId: E3, ranks: [{ key: `renders/${renderId(1, 2)}/0.jpg`, rank: 1, reason: "The pouch reads first." }] })).rejects.toThrow("is not an eligible draft");
+    await expect(run(env, "drafts_rank", { batchId: E3, ranks: [{ key: `renders/${renderId(1, 2)}/0.jpg`, rank: 1, reason: "The pouch reads first." }] })).rejects.toThrow("is not an eligible current draft");
     expect(await run(env, "drafts_rank", { batchId: E3, ranks: keys.map((key: string, n: number) => ({ key, rank: n + 1, reason: "The pouch reads first." })) })).toEqual({ ranked: 2 });
     // ranked counts the eligible drafts only.
     expect(ideaOf(await run(env, "batch_get", { id: E3 }), idea).ranked).toBe(true);
@@ -133,6 +138,51 @@ describe("checks_save", () => {
     expect(await saveCheck(env, picks[0]!.id, finalCheck(renderId(1, 9)), "final_check")).toMatchObject({ version: 3, ready: true });
     b = await run(env, "batch_get", { id: E3 });
     expect(b.nextStep).toBe("done");
+  });
+
+  it("the render-checklist rule: two F items make a draft not eligible and a final not ready; a final needs every point to pass (food may be na)", async () => {
+    const { env, raw, picks } = await boardReady();
+    const idea = picks[0]!.id;
+    const twoF = { items: [{ code: "F2", found: true, note: "Flat light." }, { code: "F8", found: true, note: "Same camera." }] };
+    await expect(saveCheck(env, idea, draftCheck(renderId(1, 1), twoF))).rejects.toThrow("F2, F8 is not eligible");
+    expect(await saveCheck(env, idea, draftCheck(renderId(1, 1), { items: [twoF.items[0]] }))).toMatchObject({ eligible: true });
+    addRender(raw, renderId(1, 9), idea, "final");
+    expect(await saveCheck(env, idea, finalCheck(renderId(1, 9), twoF), "final_check")).toMatchObject({ ready: false });
+    expect(await saveCheck(env, idea, finalCheck(renderId(1, 9), { items: [{ code: "D1", found: true, note: "A stray mark." }] }), "final_check")).toMatchObject({ ready: false });
+    expect(await saveCheck(env, idea, finalCheck(renderId(1, 9), { finalPoints: { ...finalCheck("x").finalPoints, visualCraft: "na" } }), "final_check")).toMatchObject({ ready: false });
+    expect(await saveCheck(env, idea, finalCheck(renderId(1, 9)), "final_check")).toMatchObject({ ready: true });
+  });
+
+  it("0 or 1 eligible drafts after the redos: nextStep direction; a new direction starts a new round, and the old drafts no longer count", async () => {
+    const { env, raw, picks } = await boardReady({ rank: false });
+    const idea = picks[0]!.id;
+    const bad = (rid: string, attempt: number) => draftCheck(rid, { eligible: false, attempt, reason: "The pouch is too small to read." });
+    await saveCheck(env, idea, bad(renderId(1, 2), 1));
+    await saveCheck(env, idea, bad(renderId(1, 3), 1));
+    for (const n of [5, 6]) {
+      addRender(raw, renderId(1, n), idea, "draft", "2026-11-17T07:10:00.000Z");
+      await saveCheck(env, idea, bad(renderId(1, n), 2));
+    }
+    expect((await run(env, "batch_get", { id: E3 })).nextStep).toBe("direction");
+    // The one lower-risk direction: a new round.
+    await run(env, "direction_save", { batchId: E3, ideaId: idea, direction: direction() });
+    let b = await run(env, "batch_get", { id: E3 });
+    expect(ideaOf(b, idea).drafts.map((d: { current: boolean }) => d.current)).toEqual([false, false, false, false, false]);
+    expect(b.nextStep).toBe("drafts");
+    await expect(run(env, "drafts_rank", { batchId: E3, ranks: [{ key: `renders/${renderId(1, 1)}/0.jpg`, rank: 1, reason: "The pouch reads first." }] })).rejects.toThrow("is not an eligible current draft");
+    // The new round: 0 eligible after the redos stays at drafts (the main session tells the owner) ...
+    for (const n of [7, 8, 9]) {
+      addRender(raw, renderId(1, n), idea, "draft", "2026-11-17T07:20:00.000Z");
+      await saveCheck(env, idea, bad(renderId(1, n), 2));
+    }
+    expect((await run(env, "batch_get", { id: E3 })).nextStep).toBe("drafts");
+    // ... and 1 eligible after the new round is done: the owner sees it with the reason.
+    await saveCheck(env, idea, draftCheck(renderId(1, 7)));
+    b = await run(env, "batch_get", { id: E3 });
+    expect(b.nextStep).toBe("draft_rank");
+    expect((await run(env, "batch_get", { id: E3, view: "critic" })).ideas.find((i: { id: string }) => i.id === idea).drafts).toHaveLength(1);
+    await rankAll(env);
+    expect((await run(env, "batch_get", { id: E3 })).nextStep).toBe("board");
   });
 
   it("an engine 2 batch shows no check fields and keeps its board gate and rank as today", async () => {
