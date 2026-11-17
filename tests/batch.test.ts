@@ -304,6 +304,38 @@ describe("batch flow", () => {
     });
   });
 
+  it("gives the critic a view with nothing that shows a favourite (v3 design pack §2.5)", async () => {
+    const { env, raw } = makeEnv();
+    const { b, ideas } = await seed(env);
+    await batch.ideasSave(env, b.id, Array.from({ length: 8 }, (_, n) => ({ format: "mof" as const, insight: `i${n}`, visual: `v${n}`, headline: `H${n}` })));
+    await batch.batchUpdate(env, { id: b.id, notes: "the writer likes idea 3 best" });
+    await batch.ideasUpdate(env, [{ id: ideas[0]!.id, subline: "Gone by noon.", copyApproved: "yes pls" }]);
+    const k = addDraft(raw, b.id, ideas[0]!.id, "e1111111-1111-1111-1111-111111111111");
+    await batch.draftsRank(env, b.id, k.map((key, i) => ({ key, rank: i + 1, reason: `secret reason ${i}` })));
+    await batch.picksSave(env, b.id, [{ key: k[0], note: "owner note here" }]);
+    await batch.ideasUpdate(env, [{ id: ideas[0]!.id, finalPrompt: "final prompt text" }]);
+    const run = (a: Record<string, unknown>) => TOOLS.find((t) => t.name === "batch_get")!.run(env, a);
+    const out = JSON.stringify(JSON.parse(((await run({ id: b.id, view: "critic" })) as { content: { text: string }[] }).content[0]!.text));
+    expect(out).toContain('"view":"critic"');
+    for (const hidden of ["the writer likes idea 3 best", "secret reason", "owner note here", "yes pls", "final prompt text", '"rank"', '"n"', '"picks"', '"finals"'])
+      expect(out).not.toContain(hidden);
+    const view = await batch.batchGetCritic(env, b.id);
+    expect(view.view).toBe("critic");
+    expect(view.ideas).toHaveLength(10);
+    // The drafts stay in submit order; the ideas get a stable order that is not the writer's.
+    expect(view.ideas.find((i) => i.id === ideas[0]!.id)!.drafts.map((d) => d.key)).toEqual(k);
+    expect(view.ideas.find((i) => i.id === ideas[0]!.id)!.copy).toEqual({ subline: "Gone by noon." });
+    const order = view.ideas.map((i) => i.id);
+    expect((await batch.batchGetCritic(env, b.id)).ideas.map((i) => i.id)).toEqual(order);
+    const full = await batch.batchGet(env, b.id);
+    expect(order).not.toEqual(full.ideas.map((i) => i.id));
+    expect([...order].sort()).toEqual(full.ideas.map((i) => i.id).sort());
+    // The normal view is unchanged: the owner's pick shows the rank.
+    expect(full.notes).toBe("the writer likes idea 3 best");
+    expect(full.ideas.find((i) => i.id === ideas[0]!.id)!.drafts[0]!.rank).toBe(1);
+    expect(() => validate(TOOLS.find((t) => t.name === "batch_get")!.inputSchema, { id: b.id, view: "owner" })).toThrow();
+  });
+
   it("compares the owner's pick with the blind rank and logs it for taste_log", async () => {
     const { env, raw } = makeEnv();
     const { b, ideas } = await seed(env);
@@ -654,6 +686,34 @@ describe("copy review", () => {
     await expect(submit(env, draft(b.id, id))).rejects.toThrow("changed after the owner approved");
     await batch.ideasUpdate(env, [{ id, copyApproved: "ok" }]);
     await expect(batch.copyApprovedCheck(env, b.id, id)).resolves.toBeUndefined();
+  });
+
+  it("refuses a draft for an idea that is not picked (v3 design pack §2.6)", async () => {
+    const { env } = makeEnv();
+    const { b, ideas } = await seed(env);
+    const bof = ideas[1]!.id; // seeded without a pick
+    await batch.ideasUpdate(env, [{ id: bof, subline: "One price.", copyApproved: "yes" }]);
+    await expect(submit(env, draft(b.id, bof))).rejects.toThrow("is not picked");
+  });
+
+  it("keeps the words as written before the owner's first change, once (v3 design pack §2.7)", async () => {
+    const { env, raw } = makeEnv();
+    const { b, ideas } = await seed(env);
+    const id = ideas[0]!.id;
+    raw.prepare("UPDATE ideas SET copy = json_set(copy, '$.subline', 'Gone by noon.') WHERE id = ?").run(id);
+    await batch.ideasUpdate(env, [{ id, headline: "Wait, there's ten?" }]);
+    await batch.ideasUpdate(env, [{ id, subline: "Ten flavours, one cake." }]);
+    // A change of the pick or the final prompt alone does not write it.
+    await batch.ideasUpdate(env, [{ id: ideas[1]!.id, finalPrompt: "P" }]);
+    const got = await batch.batchGet(env, b.id);
+    expect(got.ideas.find((i) => i.id === id)!.copy).toMatchObject({
+      subline: "Ten flavours, one cake.",
+      written: { headline: "Somehow the jar is empty again.", subline: "Gone by noon." },
+    });
+    expect(got.ideas.find((i) => i.id === id)!.headline).toBe("Wait, there's ten?");
+    expect(got.ideas.find((i) => i.id === ideas[1]!.id)!.copy.written).toBeUndefined();
+    // A missing idea is still reported.
+    await expect(batch.ideasUpdate(env, [{ id: "55555555-5555-5555-5555-555555555555", headline: "X" }])).rejects.toThrow("No idea");
   });
 
   it("reports an unknown idea on approval, and the schema takes only his words", async () => {

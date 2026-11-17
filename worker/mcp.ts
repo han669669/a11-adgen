@@ -252,14 +252,14 @@ export const TOOLS: Tool[] = [
   {
     name: "batch_get",
     description:
-      "Read everything about a batch: kit, subject, facts, insights, ideas with their drafts (in submit order, then image order: the order the owner sees; each draft's rank and reason are null until the owner picks a draft of that idea or passes on its drafts; a pass shows only the drafts made before it; the idea's ranked is true when the critic's rank of its newest 3 drafts is saved), picks and finals. Use it to resume a stopped batch.",
+      "Read everything about a batch: kit, subject, facts, insights, ideas with their drafts (in submit order, then image order: the order the owner sees; each draft's rank and reason are null until the owner picks a draft of that idea or passes on its drafts; a pass shows only the drafts made before it; the idea's ranked is true when the critic's rank of its newest 3 drafts is saved), picks and finals. Use it to resume a stopped batch. view 'critic' is for the critic subagent only: no batch notes, picks, finals, final prompts, owner words, ranks or reasons, and the ideas in a shuffled order without their numbers, so nothing shows a favourite.",
     inputSchema: {
       type: "object",
-      properties: { id: { type: "string", pattern: "^[0-9a-f-]{36}$" } },
+      properties: { id: { type: "string", pattern: "^[0-9a-f-]{36}$" }, view: { type: "string", enum: ["critic"] } },
       required: ["id"],
       additionalProperties: false,
     },
-    run: async (env, a) => text(await batch.batchGet(env, a.id)),
+    run: async (env, a) => text(a.view === "critic" ? await batch.batchGetCritic(env, a.id) : await batch.batchGet(env, a.id)),
   },
   {
     name: "batch_list",
