@@ -148,6 +148,11 @@ async function verdictInserts(env: Env, batchId: string, verdicts: OwnerVerdict[
   return out;
 }
 
+/** The engine 3 board checks again, in the status write: exactly 3 picks, and each picked idea with drafts has its final prompt. */
+const BOARD3_GUARD = ` AND (SELECT COUNT(*) FROM ideas WHERE batch_id = batches.id AND picked = 1) = 3
+  AND NOT EXISTS (SELECT 1 FROM ideas i WHERE i.batch_id = batches.id AND i.picked = 1 AND i.final_prompt IS NULL
+    AND EXISTS (SELECT 1 FROM renders r WHERE r.batch = i.batch_id AND r.idea = i.id AND r.kind = 'draft' AND r.image_keys IS NOT NULL))`;
+
 export async function batchUpdate(
   env: Env,
   input: { id: string; status?: string; insights?: unknown[]; notes?: string; ownerVerdicts?: OwnerVerdict[] },
@@ -159,7 +164,7 @@ export async function batchUpdate(
     board3 = b?.engine === 3;
     // Engine 3: exactly 3 picked ideas in any mix of roles (design pack §2.6). The direction and draft checks come with Phase 3.
     if (b?.engine === 3) {
-      // The status write below repeats this count, so a pick that changes in between cannot reach the board.
+      // The status write repeats these checks (BOARD3_GUARD), so a pick that changes in between cannot reach the board.
       const p = await env.DB.prepare("SELECT COUNT(*) AS n FROM ideas WHERE batch_id = ? AND picked = 1").bind(input.id).first<{ n: number }>();
       if (p?.n !== 3) throw new Error(`An engine 3 batch needs exactly 3 picked ideas before status 'board' (it has ${p?.n ?? 0}).`);
     }
@@ -192,10 +197,10 @@ export async function batchUpdate(
   const inserts = await verdictInserts(env, input.id, verdicts);
   // One D1 batch is one transaction: the batch row and its verdicts are saved together or not at all.
   const [res] = await env.DB.batch([
-    env.DB.prepare(`UPDATE batches SET ${[...sets, "updated_at = ?"].join(", ")} WHERE id = ?${board3 ? " AND (SELECT COUNT(*) FROM ideas WHERE batch_id = batches.id AND picked = 1) = 3" : ""}`).bind(...args, now(), input.id),
+    env.DB.prepare(`UPDATE batches SET ${[...sets, "updated_at = ?"].join(", ")} WHERE id = ?${board3 ? BOARD3_GUARD : ""}`).bind(...args, now(), input.id),
     ...inserts,
   ]);
-  if (res?.meta.changes !== 1) throw new Error(board3 ? "The picks changed while the status was set: the batch needs exactly 3 picked ideas. Read batch_get and try again." : `No batch with id ${input.id}.`);
+  if (res?.meta.changes !== 1) throw new Error(board3 ? "The picks changed while the status was set: the batch needs exactly 3 picked ideas, each with its final prompt after its drafts. Read batch_get and try again." : `No batch with id ${input.id}.`);
   return { id: input.id, updated: sets.map((s) => s.split(" ")[0]), verdictsSaved: verdicts.length };
 }
 
@@ -690,11 +695,20 @@ export async function batchGet(env: Env, id: string) {
     picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, byOwner: p.by_owner === 1, finalRenderId: p.final_render_id })),
     drafting: renders.results.filter((r) => r.status === "queued").map((r) => r.id),
     // Engine 3 only: the next step of the batch, from its rows (design pack §1.11). Engine 2 batches have none.
-    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, currentDrafts: currentDrafts.get(i.id) ?? 0 })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.n > conceptReview.lastN) }) } : {}),
+    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, currentDrafts: currentDrafts.get(i.id) ?? 0, rendered: renders.results.some((r) => r.idea === i.id) })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.n > conceptReview.lastN) }) } : {}),
   };
 }
 
-type IdeaState = { id: string; picked: boolean; copy: { ownerApproved?: unknown }; ranked: boolean; currentDrafts: number; finals: { status: unknown }[] };
+type IdeaState = {
+  id: string;
+  picked: boolean;
+  copy: { ownerApproved?: unknown };
+  ranked: boolean;
+  currentDrafts: number;
+  finals: { status: unknown }[];
+  /** Any render row of the idea, also a queued or failed one (ideas_pick freezes the picks then). */
+  rendered?: boolean;
+};
 
 /** The first step of an engine 3 batch that is not done yet. Pure: it reads only the rows that batchGet has read. */
 export function nextStepV3(
@@ -709,9 +723,9 @@ export function nextStepV3(
   if (ideas.length === 0) return "concepts";
   // The critic rejected the set: the writer adds concepts (concepts_rework). After 3 rework rounds the owner decides
   // (more research, another product angle, or stop). Concepts saved after the newest review go back to the critic, also
-  // after a select, until a picked idea has a draft or a final (then the picks are frozen).
+  // after a select, until a picked idea has a render of any status (then the picks are frozen).
   if (review?.outcome === "rework" && !review.newIdeas) return review.reworks >= 3 ? "owner_decision" : "concepts_rework";
-  if (review?.newIdeas && picked.every((i) => i.currentDrafts === 0 && i.finals.length === 0)) return "concept_review";
+  if (review?.newIdeas && !picked.some((i) => i.rendered)) return "concept_review";
   if (picked.length < 3) return "concept_review";
   if (picked.some((i) => !i.copy.ownerApproved)) return "copy_review";
   if (picked.some((i) => i.currentDrafts < 3)) return "drafts";

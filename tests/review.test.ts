@@ -172,10 +172,18 @@ describe("ideas_pick on an engine 3 batch", () => {
   });
 
   it("sends concepts saved after a select back to the critic, until a picked idea has a draft", async () => {
-    const { env, ideas } = await withConcepts();
+    const { env, raw, ideas } = await withConcepts();
     await run(env, "ideas_pick", select(ideas));
     await run(env, "ideas_save", { batchId: E3, ideas: [idea("t2")] });
     expect((await run(env, "batch_get", { id: E3 })).nextStep).toBe("concept_review");
+    // A queued render (no image yet) freezes the picks: the new concept no longer sends the batch back.
+    raw
+      .prepare(
+        `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, usd_est, created_at, updated_at)
+         VALUES ('q1', ?, ?, 'draft', 'queued', 'p', '[]', 1024, 1280, 'low', 1, 0.02, 'now', 'now')`,
+      )
+      .run(E3, ideas[0]!.id);
+    expect((await run(env, "batch_get", { id: E3 })).nextStep).toBe("copy_review");
   });
 
   it("refuses the board status when the picks change between the check and the write", async () => {
@@ -185,6 +193,21 @@ describe("ideas_pick on an engine 3 batch", () => {
     const batchFn = db.batch.bind(db);
     db.batch = async (stmts) => (raw.prepare("UPDATE ideas SET picked = 0 WHERE id = ?").run(ideas[0]!.id), batchFn(stmts));
     await expect(batch.batchUpdate(env, { id: E3, status: "board" })).rejects.toThrow("The picks changed while the status was set");
+    expect((raw.prepare("SELECT status FROM batches WHERE id = ?").get(E3) as { status: string }).status).not.toBe("board");
+    // A swap that keeps 3 picks but brings in an idea with drafts and no final prompt is refused too.
+    raw.prepare("UPDATE ideas SET picked = 1 WHERE id = ?").run(ideas[0]!.id);
+    raw
+      .prepare(
+        `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, image_keys, usd_est, created_at, updated_at)
+         VALUES ('d1', ?, ?, 'draft', 'done', 'p', '[]', 1024, 1280, 'low', 1, '["renders/x/0.jpg"]', 0.02, 'now', 'now')`,
+      )
+      .run(E3, ideas[9]!.id);
+    db.batch = async (stmts) => (
+      raw.prepare("UPDATE ideas SET picked = 0 WHERE id = ?").run(ideas[0]!.id),
+      raw.prepare("UPDATE ideas SET picked = 1 WHERE id = ?").run(ideas[9]!.id),
+      batchFn(stmts)
+    );
+    await expect(batch.batchUpdate(env, { id: E3, status: "board" })).rejects.toThrow("each with its final prompt after its drafts");
     expect((raw.prepare("SELECT status FROM batches WHERE id = ?").get(E3) as { status: string }).status).not.toBe("board");
   });
 
