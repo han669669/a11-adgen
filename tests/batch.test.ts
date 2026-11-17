@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as batch from "../worker/batch";
 import { brandGet, brandSave } from "../worker/brand";
 import type { Env } from "../worker/env";
+import worker from "../worker/index";
 import { TOOLS } from "../worker/mcp";
 import { picksGet } from "../worker/picks";
 import { validate } from "../worker/schema";
@@ -66,14 +68,14 @@ async function seed(env: Env) {
   return { subject, b, ideas };
 }
 
-function addDraft(raw: DatabaseSync, batchId: string, ideaId: string, renderId: string, n = 3) {
+function addDraft(raw: DatabaseSync, batchId: string, ideaId: string, renderId: string, n = 3, at = "now") {
   const keys = Array.from({ length: n }, (_, i) => `renders/${renderId}/${i + 1}.jpg`);
   raw
     .prepare(
       `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, image_keys, usd_est, created_at, updated_at)
-       VALUES (?, ?, ?, 'draft', 'done', 'p', '[]', 1024, 1280, 'low', ?, ?, 0.02, 'now', 'now')`,
+       VALUES (?, ?, ?, 'draft', 'done', 'p', '[]', 1024, 1280, 'low', ?, ?, 0.02, ?, ?)`,
     )
-    .run(renderId, batchId, ideaId, n, JSON.stringify(keys));
+    .run(renderId, batchId, ideaId, n, JSON.stringify(keys), at, at);
   return keys as [string, string, string];
 }
 
@@ -179,6 +181,127 @@ describe("batch flow", () => {
     expect(hook.drafts.find((d) => d.rank === 2)!).toMatchObject({ key: keys[1], picked: true, reason: "clean jar" });
     expect(got.picks).toEqual([{ key: keys[1], ideaId: ideas[0]!.id, note: "yes", byOwner: true, finalRenderId: null }]);
     expect(got.kit?.logo.key).toMatch(/\/logo\.png$/);
+  });
+
+  describe("holds the blind rank until the owner decides (v3 design pack §4.3)", () => {
+    const OLD = "2000-01-01T00:00:00.000Z";
+    const LATER = "2999-01-01T00:00:00.000Z";
+    const rank3 = (env: Env, id: string, k: string[]) =>
+      batch.draftsRank(env, id, k.map((key, i) => ({ key, rank: i + 1, reason: `reason ${i + 1}` })));
+    const ideaOf = async (env: Env, id: string, ideaId: string) => (await batch.batchGet(env, id)).ideas.find((i) => i.id === ideaId)!;
+
+    it("(a, b) hides rank and reason before a pick and says when the rank is saved", async () => {
+      const { env, raw } = makeEnv();
+      const { b, ideas } = await seed(env);
+      const k = addDraft(raw, b.id, ideas[0]!.id, "a1111111-1111-1111-1111-111111111111");
+      const before = await ideaOf(env, b.id, ideas[0]!.id);
+      expect(before.ranked).toBe(false);
+      expect(before.drafts.map((d) => [d.rank, d.reason])).toEqual([[null, null], [null, null], [null, null]]);
+      // A rank of only some of the drafts (an interrupted critic) is not done.
+      await rank3(env, b.id, k.slice(0, 2));
+      expect((await ideaOf(env, b.id, ideas[0]!.id)).ranked).toBe(false);
+      await rank3(env, b.id, k);
+      const after = await ideaOf(env, b.id, ideas[0]!.id);
+      expect(after.ranked).toBe(true);
+      expect(after.drafts.map((d) => [d.rank, d.reason])).toEqual([[null, null], [null, null], [null, null]]);
+      // The order is the submit order, not the rank.
+      expect(after.drafts.map((d) => d.key)).toEqual(k);
+    });
+
+    it("(c, e) shows the rank after the owner's pick, only for the idea he decided", async () => {
+      const { env, raw } = makeEnv();
+      const { b, ideas } = await seed(env);
+      const k1 = addDraft(raw, b.id, ideas[0]!.id, "c1111111-1111-1111-1111-111111111111");
+      const k2 = addDraft(raw, b.id, ideas[1]!.id, "c2222222-2222-2222-2222-222222222222");
+      await rank3(env, b.id, [...k1]);
+      await rank3(env, b.id, [...k2]);
+      await batch.picksSave(env, b.id, [{ key: k1[2], note: "this one" }]);
+      const got = await batch.batchGet(env, b.id);
+      const decided = got.ideas.find((i) => i.id === ideas[0]!.id)!;
+      const open = got.ideas.find((i) => i.id === ideas[1]!.id)!;
+      expect(decided.drafts.map((d) => [d.rank, d.reason])).toEqual([[1, "reason 1"], [2, "reason 2"], [3, "reason 3"]]);
+      expect(open.drafts.every((d) => d.rank === null && d.reason === null)).toBe(true);
+      expect([decided.ranked, open.ranked]).toEqual([true, true]);
+      // Clearing the pick (an empty list) holds the rank again.
+      await batch.picksSave(env, b.id, []);
+      expect((await ideaOf(env, b.id, ideas[0]!.id)).drafts.every((d) => d.rank === null && d.reason === null)).toBe(true);
+    });
+
+    it("(d, e2) shows the rank after a full pass, but holds the drafts made after it", async () => {
+      const { env, raw } = makeEnv();
+      const { b, ideas } = await seed(env);
+      const old = addDraft(raw, b.id, ideas[0]!.id, "d1111111-1111-1111-1111-111111111111", 3, OLD);
+      await rank3(env, b.id, [...old]);
+      await batch.batchUpdate(env, { id: b.id, ownerVerdicts: [{ stage: "draft", mark: "pass", ideaId: ideas[0]!.id, ownerSaid: "none of these" }] });
+      let idea = await ideaOf(env, b.id, ideas[0]!.id);
+      expect(idea.drafts.map((d) => [d.rank, d.reason])).toEqual([[1, "reason 1"], [2, "reason 2"], [3, "reason 3"]]);
+      const redraft = addDraft(raw, b.id, ideas[0]!.id, "d2222222-2222-2222-2222-222222222222", 3, LATER);
+      idea = await ideaOf(env, b.id, ideas[0]!.id);
+      // The new drafts are not ranked yet: the old ranks do not count for them.
+      expect(idea.ranked).toBe(false);
+      await rank3(env, b.id, [...redraft]);
+      idea = await ideaOf(env, b.id, ideas[0]!.id);
+      expect(idea.ranked).toBe(true);
+      expect(idea.drafts.map((d) => d.rank)).toEqual([1, 2, 3, null, null, null]);
+      expect(idea.drafts.slice(3).every((d) => d.reason === null)).toBe(true);
+      // A pick then decides the idea: every draft shows its rank.
+      await batch.picksSave(env, b.id, [{ key: redraft[0], note: "better" }]);
+      expect((await ideaOf(env, b.id, ideas[0]!.id)).drafts.map((d) => d.rank)).toEqual([1, 2, 3, 1, 2, 3]);
+    });
+
+    it("(d) a fix note is not a decision", async () => {
+      const { env, raw } = makeEnv();
+      const { b, ideas } = await seed(env);
+      const k = addDraft(raw, b.id, ideas[0]!.id, "d3333333-3333-3333-3333-333333333333", 3, OLD);
+      await rank3(env, b.id, [...k]);
+      await batch.batchUpdate(env, { id: b.id, ownerVerdicts: [{ stage: "draft", mark: "fix", ideaId: ideas[0]!.id, ownerSaid: "shadow is off" }] });
+      expect((await ideaOf(env, b.id, ideas[0]!.id)).drafts.every((d) => d.rank === null)).toBe(true);
+    });
+
+    it("(f) a pick that is not the owner's does not show the rank", async () => {
+      const { env, raw } = makeEnv();
+      const { b, ideas } = await seed(env);
+      const k = addDraft(raw, b.id, ideas[0]!.id, "f1111111-1111-1111-1111-111111111111");
+      await rank3(env, b.id, [...k]);
+      // An old pick from before by_owner existed (migration 0005): by_owner 0.
+      raw.prepare("INSERT INTO picks (render_key, batch_id, idea_id, by_owner, created_at) VALUES (?, ?, ?, 0, 'now')").run(k[0], b.id, ideas[0]!.id);
+      const idea = await ideaOf(env, b.id, ideas[0]!.id);
+      expect(idea.drafts[0]!.picked).toBe(true);
+      expect(idea.drafts.every((d) => d.rank === null && d.reason === null)).toBe(true);
+    });
+
+    it("(g) the board API gives the same held answer", async () => {
+      const { env, raw } = makeEnv();
+      const { b, ideas } = await seed(env);
+      const k = addDraft(raw, b.id, ideas[0]!.id, "a2222222-2222-2222-2222-222222222222");
+      await rank3(env, b.id, [...k]);
+      const CODE = "set-up-code-5678";
+      Object.assign(env, { ALLOWED_EMAILS: "owner@a11.example", SIGNUP_CODE_SHA256: createHash("sha256").update(CODE).digest("hex") });
+      const ORIGIN = "https://w";
+      const req = (path: string, body?: unknown, cookie?: string) =>
+        worker.fetch(
+          new Request(`${ORIGIN}${path}`, {
+            method: body === undefined ? "GET" : "POST",
+            headers: { origin: ORIGIN, ...(body === undefined ? {} : { "content-type": "application/json" }), ...(cookie ? { cookie } : {}) },
+            body: body === undefined ? undefined : JSON.stringify(body),
+          }),
+          env,
+        );
+      const signup = await req("/api/signup", { email: "owner@a11.example", password: "a long enough password", code: CODE });
+      expect(signup.status).toBe(200);
+      const cookie = (signup.headers.get("set-cookie") ?? "").split(";")[0]!;
+      const held = await req(`/api/batches/${b.id}`, undefined, cookie);
+      expect(held.status).toBe(200);
+      const body = await held.text();
+      expect(body).not.toContain("reason 1");
+      const json = JSON.parse(body) as { ideas: { id: string; ranked: boolean; drafts: { rank: number | null; reason: string | null }[] }[] };
+      const idea = json.ideas.find((i) => i.id === ideas[0]!.id)!;
+      expect(idea.ranked).toBe(true);
+      expect(idea.drafts.every((d) => d.rank === null && d.reason === null)).toBe(true);
+      expect((await req(`/api/batches/${b.id}/picks`, { picks: [{ key: k[1] }] }, cookie)).status).toBe(200);
+      const shown = (await (await req(`/api/batches/${b.id}`, undefined, cookie)).json()) as typeof json;
+      expect(shown.ideas.find((i) => i.id === ideas[0]!.id)!.drafts.map((d) => d.rank)).toEqual([1, 2, 3]);
+    });
   });
 
   it("compares the owner's pick with the blind rank and logs it for taste_log", async () => {

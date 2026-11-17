@@ -126,7 +126,8 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
               {idea.drafts.map((d) => {
                 const on = picks.has(d.key);
                 const locked = idea.drafts.some((x) => started.has(x.key));
-                const revealed = savedIdeas.has(idea.id);
+                // The server sends a rank only after the owner decided on the idea (a pick, or a full pass in chat).
+                const revealed = savedIdeas.has(idea.id) || idea.drafts.some((d) => d.rank !== null);
                 return (
                   <figure key={d.key} className="flex flex-col gap-2">
                     <button

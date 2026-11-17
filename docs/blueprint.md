@@ -64,7 +64,7 @@ Legend: CLAUDE = Claude Code, CODE = Worker code, HAN = the owner, PAID = paid A
 
 **Gold set.** v1 marks and notes on 264 ads (D5) become a frozen test set. Before a canon or prompt change ships, the critic re-ranks the gold set in a fresh context, never in the session that wants the change, without `docs/taste-seed.md` §1, `docs/marks.md` or `taste_log` (they quote marked ads and the owner's words). Balanced accuracy on the owner's marks must not fall by 0.04 or more; a smaller move is noise (`docs/decisions.md`, 2026-11-08). It runs in Claude Code, so it costs no API money.
 
-**Signal check.** With one human step, the owner's pick is the main taste signal. The critic's rank is blind (the owner sees it only after he picks), so it cannot become a rubber stamp. `picks_save` and `taste_log` log how often his pick is the critic's rank 1. A low change rate with good client results is the target. A low change rate with bad results means the board hides the bad drafts; then show more.
+**Signal check.** With one human step, the owner's pick is the main taste signal. The critic's rank is blind (the owner sees it only after he picks a draft of that idea or passes on its drafts), so it cannot become a rubber stamp. The server holds it: `batch_get` and the board API return each idea's rank and reason only after that decision, and `ranked` shows that the rank is saved (17-11-2026). A full pass shows only the drafts that existed when he passed; later redrafts stay held until a pick or a newer pass. `picks_save` and `taste_log` log how often his pick is the critic's rank 1. A low change rate with good client results is the target. A low change rate with bad results means the board hides the bad drafts; then show more.
 
 ## 5. Deliverable (weekly pack)
 
