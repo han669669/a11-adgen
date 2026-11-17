@@ -215,6 +215,7 @@ describe("calibration", () => {
       expect(JSON.parse((raw.prepare("SELECT result FROM calibration_runs").get() as { result: string }).result).splitDate).toBe("2026-11-10T06:00:00.000Z");
       // The report filters hold for the replays too.
       expect((await run(env, "calibration_report", { engine: 3 })).replays).toMatchObject({ runs: [], positionBias: { choices: 0 } });
+      expect((await run(env, "calibration_report", { engine: 2 })).replays.runs[0]).toMatchObject({ n: 5, agreement: { k: 2, n: 5 } });
       expect((await run(env, "calibration_report", { promptVersion: "0.2.17" })).replays.runs).toHaveLength(0);
       expect((await run(env, "calibration_report", { since: "2099-01-01" })).replays.runs).toHaveLength(0);
       // Refused: an item of another split, a partial run, a choice that is not a picture, an answer twice, no seed.
@@ -269,7 +270,7 @@ describe("calibration", () => {
     });
 
     it("(4.11) the critic subagent's tools do not hold the calibration tools", () => {
-      const tools = readFileSync("plugin/agents/critic.md", "utf8").match(/^tools: (.*)$/m)![1]!;
+      const tools = readFileSync(new URL("../plugin/agents/critic.md", import.meta.url), "utf8").match(/^tools: (.*)$/m)![1]!;
       expect(tools).not.toMatch(/calibration_/);
       expect(tools).toContain("mcp__a11__taste_log");
     });

@@ -537,7 +537,7 @@ export async function calibrationSave(
  */
 export async function replaySummary(env: Env, f: ReportFilter = {}) {
   type Row = { id: string; kind: string; as_of: string; split: string; canon_log_id: string | null; prompt_version: string; n: number; result: string; created_at: string };
-  type Res = { agreement?: unknown; common?: number; alarm?: boolean; items?: { engine: number; position: number | "pass" | null }[] };
+  type Res = { agreement?: unknown; common?: number; alarm?: boolean; items?: { engine: number; right?: boolean; position: number | "pass" | null }[] };
   const rows = (await env.DB.prepare(
     `SELECT id, kind, as_of, split, canon_log_id, prompt_version, n, result, created_at FROM calibration_runs
      WHERE created_at >= ?1 AND (?2 IS NULL OR prompt_version = ?2) ORDER BY created_at DESC`,
@@ -550,10 +550,16 @@ export async function replaySummary(env: Env, f: ReportFilter = {}) {
   const chose = ["1", "2", "3"].reduce((s, p) => s + (counts[p] ?? 0), 0);
   const share = Object.fromEntries(["1", "2", "3"].map((p) => [p, chose ? round((counts[p] ?? 0) / chose) : null]));
   return {
-    runs: rows.slice(0, 10).map(({ r, res }) => ({
-      id: r.id, kind: r.kind, asOf: r.as_of, split: r.split, canonLogId: r.canon_log_id, promptVersion: r.prompt_version, n: r.n,
-      agreement: res.agreement ?? null, common: res.common, alarm: res.alarm, at: r.created_at,
-    })),
+    runs: rows.slice(0, 10).map(({ r, res }) => {
+      // With engine, n and the agreement count the items of that engine only.
+      const mine = f.engine === undefined ? null : (res.items ?? []).filter((i) => i.engine === f.engine);
+      return {
+        id: r.id, kind: r.kind, asOf: r.as_of, split: r.split, canonLogId: r.canon_log_id, promptVersion: r.prompt_version,
+        n: mine ? mine.length : r.n,
+        agreement: mine ? prop(mine.filter((i) => i.right).length, mine.length) : (res.agreement ?? null),
+        common: res.common, alarm: res.alarm, at: r.created_at,
+      };
+    }),
     positionBias: { choices: chose, share, alarm: chose >= 20 && Object.values(share).some((s) => (s ?? 0) > 0.5) },
   };
 }

@@ -211,7 +211,7 @@ export const TOOLS: Tool[] = [
   {
     name: "subject_save",
     description:
-      "Save what a batch is about: kind 'product' (a product page URL), 'brand' (brand only, no product), or 'redesign' (a live ad to beat; put its image URLs in imageUrls). The server fetches each image (HTTPS, public hosts only, PNG, JPEG or WebP, 8 MB) and keeps it: the result lists imageKeys (look at each with image_get) and imageErrors. Returns the subject id.",
+      "Save what a batch is about: kind 'product' (a product page URL), 'brand' (brand only, no product), or 'redesign' (a live ad to beat; put its image URLs in imageUrls). The server fetches each image (HTTPS, public hosts only, PNG, JPEG or WebP, 8 MB) and keeps it: the result lists imageKeys (look at each with image_get) and imageErrors. Returns the subject id. A product page (kind 'product', a url, no imageUrls, no notes) that the brand already has a subject for returns that subject (reused true, since, facts: the number of its facts), so a product's facts carry over from batch to batch; check them on the page, add only new facts, and name a fact that changed to the owner (facts are only added, so a changed value would show twice).",
     inputSchema: {
       type: "object",
       properties: {
