@@ -2,6 +2,7 @@ import { brandBySlug, latestKit } from "./brand";
 import type { Env } from "./env";
 import { checkConcepts, type Concept, type Territory, territoriesGet } from "./concepts";
 import { briefGet, factMarks, sourcesList } from "./research";
+import { rankStamp } from "./calibration";
 import { checksGet, directionRounds, finalReady } from "./checks";
 import { directionsGet } from "./direction";
 import { conceptPick, conceptReviewGet, type PickInput } from "./review";
@@ -397,7 +398,7 @@ async function eligibleKeys(env: Env, batchId: string): Promise<Set<string>> {
   return new Set(g.ideas.flatMap((i) => i.drafts.filter((d) => d.eligible === true && d.current === true).map((d) => d.key)));
 }
 
-export async function draftsRank(env: Env, batchId: string, ranks: { key: string; rank: number; reason?: string }[]) {
+export async function draftsRank(env: Env, batchId: string, ranks: { key: string; rank: number; reason?: string }[], promptVersion = "") {
   const keys = await draftKeys(env, batchId);
   // Engine 3: the critic ranks the eligible drafts only (design pack §3.6, test 3.9).
   const b = await env.DB.prepare("SELECT engine FROM batches WHERE id = ?").bind(batchId).first<{ engine: number }>();
@@ -413,7 +414,26 @@ export async function draftsRank(env: Env, batchId: string, ranks: { key: string
        ON CONFLICT (render_key) DO UPDATE SET rank = excluded.rank, reason = excluded.reason, created_at = excluded.created_at`,
     ).bind(r.key, batchId, ideaId, r.rank, r.reason ?? null, at);
   });
-  await env.DB.batch(stmts);
+  // One rank_context record for each idea ranked, in the same write as the ranks (author server, a new version each time).
+  const stamp = await rankStamp(env);
+  const byIdea = new Map<string, string[]>();
+  for (const r of ranks) byIdea.set(keys.get(r.key)!, [...(byIdea.get(keys.get(r.key)!) ?? []), r.key]);
+  const stamps = [...byIdea].map(([ideaId, ranked]) =>
+    env.DB.prepare(
+      `INSERT INTO batch_records (id, batch_id, kind, idea_id, version, body, author, prompt_version, created_at)
+       SELECT ?, ?, 'rank_context', ?, COALESCE(MAX(version), 0) + 1, ?, 'server', ?, ?
+       FROM batch_records WHERE batch_id = ? AND kind = 'rank_context' AND idea_id = ?`,
+    ).bind(crypto.randomUUID(), batchId, ideaId, JSON.stringify({ ...stamp, promptVersion, keys: ranked }), promptVersion, at, batchId, ideaId),
+  );
+  for (let attempt = 1; ; attempt++) {
+    try {
+      // A rank saved at the same time takes the same version; the unique index refuses it, and the whole write is tried again.
+      await env.DB.batch([...stmts, ...stamps]);
+      break;
+    } catch (e) {
+      if (!/UNIQUE/i.test((e as Error).message) || attempt >= 5) throw e;
+    }
+  }
   return { ranked: ranks.length };
 }
 
@@ -460,11 +480,11 @@ export async function picksSave(env: Env, batchId: string, picks: { key: string;
 }
 
 /** How often the owner's pick was the critic's rank 1, over every owner pick that has a rank. */
-async function tasteTally(env: Env) {
+async function tasteTally(env: Env, before = "9999") {
   const r = await env.DB.prepare(
     `SELECT COUNT(*) AS reviewed, COALESCE(SUM(d.rank = 1), 0) AS agreed
-     FROM picks p JOIN draft_ranks d ON d.render_key = p.render_key WHERE p.by_owner = 1`,
-  ).first<{ reviewed: number; agreed: number }>();
+     FROM picks p JOIN draft_ranks d ON d.render_key = p.render_key AND d.created_at < ?1 WHERE p.by_owner = 1 AND p.created_at < ?1`,
+  ).bind(before).first<{ reviewed: number; agreed: number }>();
   return { reviewed: r?.reviewed ?? 0, agreed: r?.agreed ?? 0 };
 }
 
@@ -472,23 +492,31 @@ async function tasteTally(env: Env) {
  * What the owner chose and what he passed over, newest first, so the next ideas and ranks learn from it.
  * Each row has his words, the critic's rank and reason for the chosen draft, and the same for the drafts he passed.
  */
-export async function tasteLog(env: Env, limit = 30) {
+export async function tasteLog(env: Env, limit = 30, before?: string) {
+  // before (design pack §4.5 rule 5): only the decisions made before that time, so a replay cannot see its own answer.
+  // The stored times have milliseconds: a time cut is normalised to that form, so a cut at 10:00:00Z keeps out 10:00:00.200Z.
+  // A date cut stays as it is (it sorts before every time of that day).
+  const parsed = before ? new Date(before) : null;
+  // Date rolls an impossible day over (2026-02-30 becomes 03-02): the date part must come back unchanged.
+  if (parsed && (Number.isNaN(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== before!.slice(0, 10))) throw new InputError("before must be a real UTC date or time, such as 2026-11-12 or 2026-11-12T10:00:00.000Z.");
+  const cut = !before ? "9999" : before.length === 10 ? before : parsed!.toISOString();
   const picks = await env.DB.prepare(
     `SELECT p.render_key, p.idea_id, p.batch_id, p.note, p.created_at, i.format, i.headline, i.visual, b.label
      FROM picks p JOIN ideas i ON i.id = p.idea_id AND i.batch_id = p.batch_id JOIN batches b ON b.id = p.batch_id
-     WHERE p.by_owner = 1 ORDER BY p.created_at DESC LIMIT ?`,
-  ).bind(limit).all<Record<string, any>>();
+     WHERE p.by_owner = 1 AND p.created_at < ? ORDER BY p.created_at DESC LIMIT ?`,
+  ).bind(cut, limit).all<Record<string, any>>();
   const ideaIds = [...new Set(picks.results.map((p) => p.idea_id as string))];
   const ranks = await env.DB.prepare(
-    "SELECT render_key, idea_id, rank, reason FROM draft_ranks WHERE idea_id IN (SELECT value FROM json_each(?)) ORDER BY rank",
-  ).bind(JSON.stringify(ideaIds)).all<{ render_key: string; idea_id: string; rank: number; reason: string | null }>();
+    "SELECT render_key, idea_id, rank, reason FROM draft_ranks WHERE idea_id IN (SELECT value FROM json_each(?)) AND created_at < ? ORDER BY rank",
+  ).bind(JSON.stringify(ideaIds), cut).all<{ render_key: string; idea_id: string; rank: number; reason: string | null }>();
   const verdicts = await env.DB.prepare(
     `SELECT v.created_at, v.stage, v.mark, v.source_mark, v.owner_said, v.notes, v.render_key, b.label, i.format, i.headline, pk.version
      FROM verdicts v LEFT JOIN batches b ON b.id = v.batch_id LEFT JOIN ideas i ON i.id = v.idea_id LEFT JOIN packs pk ON pk.id = v.pack_id
-     ORDER BY v.created_at DESC, v.rowid DESC LIMIT ?`,
-  ).bind(limit).all<Record<string, any>>();
+     WHERE v.created_at < ? ORDER BY v.created_at DESC, v.rowid DESC LIMIT ?`,
+  ).bind(cut, limit).all<Record<string, any>>();
   return {
-    tally: await tasteTally(env),
+    ...(before ? { before } : {}),
+    tally: await tasteTally(env, cut),
     verdicts: verdicts.results.map((v) => ({
       at: v.created_at,
       batch: v.label ?? null,

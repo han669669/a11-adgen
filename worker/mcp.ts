@@ -17,6 +17,7 @@ import { brandExtract } from "./brandextract";
 import * as exa from "./exa";
 import * as research from "./research";
 import { CONCEPT_SCHEMA, TERRITORY_SCHEMA } from "./concepts";
+import { calibrationReport } from "./calibration";
 import { CHECK_SCHEMA, type Check, checksSave } from "./checks";
 import { DIRECTION_SCHEMA, type Direction, directionSave, dropDirectionServerFields } from "./direction";
 import { REVIEW_SCHEMA } from "./review";
@@ -523,7 +524,7 @@ export const TOOLS: Tool[] = [
   {
     name: "drafts_rank",
     description:
-      "Save the critic's rank for draft images (1 = best per idea). It is blind: batch_get and the board show it only after the owner picks a draft of that idea or passes on its drafts (a pass shows only the drafts made before it), then the server compares his pick with it (picks_save, taste_log). Keys must be finished drafts of this batch; for an engine 3 batch, the eligible current drafts only (the drafts that the critic view shows). Give a one-line reason per draft that names what you see (look, light, product shape, food), so taste_log can teach the next batch.",
+      "Save the critic's rank for draft images (1 = best per idea). It is blind: batch_get and the board show it only after the owner picks a draft of that idea or passes on its drafts (a pass shows only the drafts made before it), then the server compares his pick with it (picks_save, taste_log). Keys must be finished drafts of this batch; for an engine 3 batch, the eligible current drafts only (the drafts that the critic view shows). Give a one-line reason per draft that names what you see (look, light, product shape, food), so taste_log can teach the next batch. Give promptVersion (the plugin version): the server stamps each rank with it, the canon and the taste log (calibration_report).",
     inputSchema: {
       type: "object",
       properties: {
@@ -543,11 +544,12 @@ export const TOOLS: Tool[] = [
             additionalProperties: false,
           },
         },
+        promptVersion: { type: "string", maxLength: 40, description: "the plugin version, for the rank context stamp" },
       },
       required: ["batchId", "ranks"],
       additionalProperties: false,
     },
-    run: async (env, a) => text(await batch.draftsRank(env, a.batchId, a.ranks)),
+    run: async (env, a) => text(await batch.draftsRank(env, a.batchId, a.ranks, a.promptVersion)),
   },
   {
     name: "picks_save",
@@ -582,10 +584,17 @@ export const TOOLS: Tool[] = [
       "What the owner chose and what he passed over, newest first: his words, your blind rank and reason for the chosen draft, and the same for the drafts he passed, plus how often his pick was your rank 1, and his verdicts (full passes on drafts, notes on finals, approvals and rejections of finals and pack copy, each with his exact words, newest first; when two are about the same picture, the newest is his current view). Read it before you write ideas, prompts or ranks for a new batch, and when you write the rank reasons. Where he chose a draft you ranked lower, find what he saw that you did not (look, light, shape, mood) and let it steer the next batch. This is evidence, not a rule: do not add code rules from one pick.",
     inputSchema: {
       type: "object",
-      properties: { limit: { type: "integer", minimum: 1, maximum: 100, default: 30 } },
+      properties: {
+        limit: { type: "integer", minimum: 1, maximum: 100, default: 30 },
+        before: {
+          type: "string",
+          pattern: "^\\d{4}-\\d{2}-\\d{2}(T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{3})?)?Z)?$",
+          description: "Only the picks and verdicts made before this date or UTC time (a calibration replay cuts the log at the item's decision).",
+        },
+      },
       additionalProperties: false,
     },
-    run: async (env, a) => text(await batch.tasteLog(env, a.limit)),
+    run: async (env, a) => text(await batch.tasteLog(env, a.limit, a.before)),
   },
   {
     name: "canon_get",
@@ -828,6 +837,21 @@ export const TOOLS: Tool[] = [
       additionalProperties: false,
     },
     run: async (env, a) => text(await canon.goldScore(env, a as { note: string; answers: { id: string; mark: "use" | "pass" }[] })),
+  },
+  {
+    name: "calibration_report",
+    description:
+      "Read only: the critic's calibration against the owner's choices (design pack §4), computed from the saved rows each time. The draft-pick rank-1 agreement and MRR (the primary measure) by engine and stamp (the plugin version and canon that the critic had; older ranks are unstamped), the owner pass rate, concept acceptance and selection agreement, the draft rework rate, final approval, the final check against the owner (agreement, false acceptance), false rejection, the product defect rate, the copy correction rate and the paid render waste (a US$ share of the fal spend ledger, with its job counts). The critic and art-director metrics are by engine and by the prompt version of the record that made the judgement; the owner's own decisions are by engine only. Every proportion has n and its Wilson 95% interval; under n = 30 it says small sample: direction only, no conclusion. Report it so: never as one number across versions, and never as a visual result from the text gold set. Not for the critic subagent.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        engine: { type: "integer", minimum: 2, maximum: 3 },
+        since: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "Only decisions and records from this date (UTC)." },
+        promptVersion: { type: "string", maxLength: 40, description: "Only the groups with this plugin version stamp (every stamped metric)." },
+      },
+      additionalProperties: false,
+    },
+    run: async (env, a) => text(await calibrationReport(env, a)),
   },
   {
     name: "gold_runs",

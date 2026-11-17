@@ -1,5 +1,6 @@
 import type { Env } from "./env";
 import { InputError, type ObjectSchema, type StringProp } from "./schema";
+import { rankStamp } from "./calibration";
 
 /**
  * a11-engine v3 Phase 2: the critic's concept review and the 3 picks (design pack §2.5, §2.6). The server checks the
@@ -91,7 +92,7 @@ export async function conceptReviewGet(env: Env, batchId: string) {
      FROM batch_records WHERE batch_id = ?1 AND kind = 'concept_review' AND idea_id IS NULL ORDER BY version DESC LIMIT 1`,
   ).bind(batchId).first<{ version: number; author: string; created_at: string; body: string; reworks: number }>();
   if (!r) return null;
-  const body = JSON.parse(r.body) as { outcome: string; ids: string[]; reserves: string[]; review: Review; lastN: number; [k: string]: unknown };
+  const body = JSON.parse(r.body) as { outcome: string; ids: string[]; reserves: string[]; review: Review; lastN: number; canonLogId?: number | null; tasteRows?: number; [k: string]: unknown };
   return { version: r.version, author: r.author, savedAt: r.created_at, reworks: r.reworks, ...body };
 }
 
@@ -115,7 +116,7 @@ export async function conceptPick(env: Env, batchId: string, ids: string[], inpu
     env.DB.prepare(
       "SELECT 1 FROM renders r JOIN ideas i ON i.id = r.idea AND i.batch_id = r.batch WHERE r.batch = ? AND i.picked = 1 LIMIT 1",
     ).bind(batchId).first(),
-    env.DB.prepare("SELECT MAX(id) AS id FROM canon_log").first<{ id: number | null }>(),
+    rankStamp(env),
     conceptReviewGet(env, batchId),
   ]);
   if (frozen)
@@ -181,7 +182,10 @@ export async function conceptPick(env: Env, batchId: string, ids: string[], inpu
     roles,
     reserves,
     review,
-    canonLogId: canon?.id ?? null,
+    // The rank context stamp (design pack §4.4): the concept review record is the stamp of the critic's selection. The
+    // owner's change keeps the critic's review, so it keeps the stamp of that review too.
+    canonLogId: ownerWords ? (last!.canonLogId ?? null) : canon.canonLogId,
+    tasteRows: ownerWords ? (last!.tasteRows ?? null) : canon.tasteRows,
     // The newest idea number the review covered: an idea with a higher number is a concept the critic has not seen.
     lastN: ideas.results.at(-1)?.n ?? 0,
     ...(ownerSwap ? { ownerSwap } : {}),
