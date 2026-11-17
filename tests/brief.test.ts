@@ -26,10 +26,16 @@ const run = async (env: Env, name: string, args: unknown) => {
 };
 
 /** A batch with the example's sources stored and two facts, one of them checked against a stored page. */
-async function seeded() {
+async function seeded(engine: 2 | 3 = 2) {
   const { env, raw } = makeEnv();
   const subject = await run(env, "subject_save", { brandSlug: "pasar", kind: "product", title: "Gula Melaka Granola", url: "https://example.com/p" });
-  const b = await run(env, "batch_create", { brandSlug: "pasar", subjectId: subject.id, label: "W48" });
+  let b = await run(env, "batch_create", { brandSlug: "pasar", subjectId: subject.id, label: "W48" });
+  if (engine === 3) {
+    // batch_create makes engine 2 batches only, and the engine of a batch is fixed: copy the row as an engine 3 batch.
+    const cols = (raw.prepare("PRAGMA table_info(batches)").all() as { name: string }[]).map((c) => c.name).filter((c) => c !== "id" && c !== "engine");
+    raw.prepare(`INSERT INTO batches (id, engine, ${cols.join(", ")}) SELECT ?, 3, ${cols.join(", ")} FROM batches WHERE id = ?`).run("e3000000-0000-4000-8000-000000000003", b.id);
+    b = { id: "e3000000-0000-4000-8000-000000000003" };
+  }
   const add = raw.prepare(
     "INSERT INTO research_sources (id, batch_id, url, title, retrieved_at, via, text) VALUES (?, ?, ?, '', '2026-11-17T00:00:00.000Z', 'contents', ?)",
   );
@@ -237,8 +243,7 @@ describe("brief_save", () => {
   });
 
   it("(1.11) an engine 3 batch gives nextStep brief, then concepts after the brief", async () => {
-    const { env, raw, subjectId, batchId, factIds } = await seeded();
-    raw.prepare("UPDATE batches SET engine = 3 WHERE id = ?").run(batchId);
+    const { env, subjectId, batchId, factIds } = await seeded(3);
     expect((await batch.batchGet(env, batchId)).nextStep).toBe("brief");
     await save(env, batchId, exampleBrief(subjectId, factIds));
     expect(await batch.batchGet(env, batchId)).toMatchObject({ engine: 3, nextStep: "concepts" });
