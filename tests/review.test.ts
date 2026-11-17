@@ -79,6 +79,7 @@ describe("ideas_pick on an engine 3 batch", () => {
     const sel = select(ideas);
     const bad: [Record<string, unknown>, string][] = [
       [{ ids: sel.ids.slice(0, 2), roles: sel.roles.slice(0, 2) }, "exactly 3 different idea ids; this call has 2."],
+      [{ ids: [sel.ids[0], sel.ids[0], sel.ids[1]] }, "exactly 3 different idea ids; this call has 3."],
       [{ review: undefined }, "needs the review"],
       [{ outcome: undefined }, "needs outcome"],
       [{ review: { ...sel.review, concepts: sel.review.concepts.slice(1) } }, "1 have no review"],
@@ -87,7 +88,8 @@ describe("ideas_pick on an engine 3 batch", () => {
       [{ roles: [sel.roles[0], sel.roles[1], { ideaId: ideas[9]!.id, role: "mof" }] }, "one role (tof, mof or bof), and no other id"],
       [{ reserves: [sel.ids[0]] }, "not one of the 3 selected"],
       [{ review: { concepts: sel.review.concepts } }, "needs review.setVariety"],
-      [{ ownerSwap: "use the hidden pouch one" }, "this batch has none"],
+      [{ ownerSwap: "use the hidden pouch one", review: undefined }, "this batch has none"],
+      [{ ownerSwap: "use the hidden pouch one" }, "send no review with ownerSwap"],
     ];
     for (const [over, msg] of bad) await expect(run(env, "ideas_pick", { ...sel, ...over })).rejects.toThrow(msg);
     await expect(run(env, "ideas_pick", { ...rework(ideas), ids: [ideas[0]!.id] })).rejects.toThrow("A rework picks nothing");
@@ -97,6 +99,7 @@ describe("ideas_pick on an engine 3 batch", () => {
     const one = (over: Record<string, unknown>) => ({ ...sel, review: { ...sel.review, concepts: [entry(ideas[0]!.id, "select", over)] } });
     expect(() => validate(schema, one({ scores: { ...scores, originality: 6 } }))).toThrow("must be at most 5");
     expect(() => validate(schema, one({ works: "" }))).toThrow("too short");
+    expect(() => validate(schema, { ...sel, ownerSwap: "   " })).toThrow("ownerSwap has the wrong format");
     expect(records(raw)).toHaveLength(0);
     expect(pickedRows(raw)).toHaveLength(0);
   });
@@ -112,7 +115,7 @@ describe("ideas_pick on an engine 3 batch", () => {
     expect(got.nextStep).toBe("concepts_rework");
     // The board needs 3 picks: a rejected set cannot reach it.
     await expect(batch.batchUpdate(env, { id: E3, status: "board" })).rejects.toThrow("exactly 3 picked ideas before status 'board' (it has 0)");
-    await new Promise((r) => setTimeout(r, 2));
+    // No wait: the idea number, not the time, says that a concept is newer than the review.
     await run(env, "ideas_save", { batchId: E3, ideas: [idea("t2"), idea("t3")] });
     got = await run(env, "batch_get", { id: E3 });
     expect(got.nextStep).toBe("concept_review");
@@ -154,12 +157,35 @@ describe("ideas_pick on an engine 3 batch", () => {
     await run(env, "ideas_pick", first);
     const ids = [ideas[0]!.id, ideas[4]!.id, ideas[6]!.id];
     const words = "use the hidden pouch one instead of the gift";
-    await run(env, "ideas_pick", { ...first, ids, roles: ids.map((ideaId) => ({ ideaId, role: "bof" })), reserves: [ideas[1]!.id], ownerSwap: words });
+    const swap = { batchId: E3, outcome: "select", ids, roles: ids.map((ideaId) => ({ ideaId, role: "bof" })), reserves: [ideas[1]!.id], ownerSwap: words };
+    // Only the saved picks and reserves: idea 9 was neither.
+    await expect(run(env, "ideas_pick", { ...swap, ids: [ideas[0]!.id, ideas[4]!.id, ideas[9]!.id], roles: [] })).rejects.toThrow(
+      `uses only the saved picks and reserves; these are neither: ${ideas[9]!.id}.`,
+    );
+    await expect(run(env, "ideas_pick", swap)).resolves.toMatchObject({ version: 2, picked: ids });
     expect(pickedRows(raw).map((p) => p.id)).toEqual([ideas[0]!.id, ideas[4]!.id, ideas[6]!.id]);
     const recs = records(raw);
     expect(recs.map((r) => r.author)).toEqual(["critic", "owner"]);
-    expect(JSON.parse(recs[1]!.body).ownerSwap).toBe(words);
+    // The server keeps the critic's saved review: the owner's record does not carry a new one.
+    expect(JSON.parse(recs[1]!.body)).toMatchObject({ ownerSwap: words, review: JSON.parse(recs[0]!.body).review });
     await expect(run(env, "ideas_pick", { ...rework(ideas), ownerSwap: words })).rejects.toThrow("ownerSwap is for a select only");
+  });
+
+  it("sends concepts saved after a select back to the critic, until a picked idea has a draft", async () => {
+    const { env, ideas } = await withConcepts();
+    await run(env, "ideas_pick", select(ideas));
+    await run(env, "ideas_save", { batchId: E3, ideas: [idea("t2")] });
+    expect((await run(env, "batch_get", { id: E3 })).nextStep).toBe("concept_review");
+  });
+
+  it("refuses the board status when the picks change between the check and the write", async () => {
+    const { env, raw, ideas } = await withConcepts();
+    await run(env, "ideas_pick", select(ideas));
+    const db = env.DB as unknown as { batch: (s: unknown[]) => Promise<unknown> };
+    const batchFn = db.batch.bind(db);
+    db.batch = async (stmts) => (raw.prepare("UPDATE ideas SET picked = 0 WHERE id = ?").run(ideas[0]!.id), batchFn(stmts));
+    await expect(batch.batchUpdate(env, { id: E3, status: "board" })).rejects.toThrow("The picks changed while the status was set");
+    expect((raw.prepare("SELECT status FROM batches WHERE id = ?").get(E3) as { status: string }).status).not.toBe("board");
   });
 
   it("(2.16) refuses any call after a picked idea has a render, also when the render comes during the call", async () => {

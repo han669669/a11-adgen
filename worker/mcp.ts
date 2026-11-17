@@ -407,7 +407,7 @@ export const TOOLS: Tool[] = [
   {
     name: "ideas_pick",
     description:
-      "The critic's pick. Engine 2: mark 1 to 3 ideas of this batch as picked (at most 1 tof, 1 mof, 1 bof per batch), with ids only. It cannot unpick an idea, change a prompt or touch another batch. Use ideas_update for the final prompt. Engine 3 (batch_get engine 3): the concept review. Send review (every concept of the batch: scores, gates, option B, owner gate, the five reasons, verdict) and outcome: select (exactly 3 ids, roles with one role for each, any mix, and up to 3 reserves that also pass; the other picks are cleared) or rework (no ids; review.setReject says what the writer must do; the picks are cleared). One record keeps the review. It returns warnings, never a refusal for taste. Refused after a picked idea has a render: then only the owner changes the picks. ownerSwap: only when the owner, in his own words, named a reserve in place of a pick (his exact words); send the new 3 ids and the same review.",
+      "The critic's pick. Engine 2: mark 1 to 3 ideas of this batch as picked (at most 1 tof, 1 mof, 1 bof per batch), with ids only. It cannot unpick an idea, change a prompt or touch another batch. Use ideas_update for the final prompt. Engine 3 (batch_get engine 3): the concept review. Send review (every concept of the batch: scores, gates, option B, owner gate, the five reasons, verdict) and outcome: select (exactly 3 ids, roles with one role for each, any mix, and up to 3 reserves that also pass; the other picks are cleared) or rework (no ids; review.setReject says what the writer must do; the picks are cleared). One record keeps the review. It returns warnings, never a refusal for taste. Refused after a picked idea has a render: then only the owner changes the picks. ownerSwap: only when the owner, in his own words, named a reserve in place of a pick (his exact words); send the new 3 ids, their roles and the reserves, and no review (the server keeps the saved one); each id must be a saved pick or reserve.",
     inputSchema: {
       type: "object",
       properties: {
@@ -428,7 +428,7 @@ export const TOOLS: Tool[] = [
         reserves: { type: "array", maxItems: 3, items: { type: "string", pattern: "^[0-9a-f-]{36}$" }, description: "Engine 3 only: up to 3 concepts that also pass, the spares for the copy review." },
         review: REVIEW_SCHEMA,
         promptVersion: { type: "string", maxLength: 40, description: "Engine 3 only: the plugin version, kept with the review." },
-        ownerSwap: { type: "string", minLength: 1, maxLength: 600, description: "Engine 3 only: the owner's exact words when he named a reserve in place of a pick." },
+        ownerSwap: { type: "string", minLength: 1, maxLength: 600, pattern: "\\S", description: "Engine 3 only: the owner's exact words when he named a reserve in place of a pick." },
       },
       required: ["batchId"],
       additionalProperties: false,

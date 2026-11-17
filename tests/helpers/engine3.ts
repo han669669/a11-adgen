@@ -15,7 +15,7 @@ export const run = async (env: Env, name: string, args: unknown) => {
   return JSON.parse(c.type === "text" ? c.text : "{}");
 };
 
-/** An engine 2 batch and an engine 3 copy of it, with stored sources, two facts and (unless brief is false) a brief with 3 insights. */
+/** An engine 2 batch and an engine 3 copy of it, with stored sources, one fact and (unless brief is false) a brief with 3 insights. */
 export async function seeded({ brief = true } = {}) {
   const env = { DB: fakeD1(), SPEND_CAP_USD: "5.00", PUBLIC_BASE_URL: "https://w" } as unknown as Env;
   const raw = (env.DB as unknown as { raw: DatabaseSync }).raw;

@@ -71,7 +71,10 @@ export type PickInput = {
   reserves?: string[];
   review?: Review;
   promptVersion?: string;
-  /** The owner's exact words when he named a reserve in place of a pick (design pack §2.7). The record author is then owner. */
+  /**
+   * The owner's exact words when he named a reserve in place of a pick (design pack §2.7). The record author is then owner,
+   * the server keeps the saved review, and each new pick must be a pick or a reserve of the saved selection.
+   */
   ownerSwap?: string;
 };
 
@@ -83,7 +86,7 @@ export async function conceptReviewGet(env: Env, batchId: string) {
      FROM batch_records WHERE batch_id = ?1 AND kind = 'concept_review' AND idea_id IS NULL ORDER BY version DESC LIMIT 1`,
   ).bind(batchId).first<{ version: number; author: string; created_at: string; body: string; reworks: number }>();
   if (!r) return null;
-  const body = JSON.parse(r.body) as { outcome: string; [k: string]: unknown };
+  const body = JSON.parse(r.body) as { outcome: string; ids: string[]; reserves: string[]; review: Review; lastN: number; [k: string]: unknown };
   return { version: r.version, author: r.author, savedAt: r.created_at, reworks: r.reworks, ...body };
 }
 
@@ -94,12 +97,14 @@ const dupes = (xs: string[]) => [...new Set(xs.filter((x, i) => xs.indexOf(x) !=
  * one D1 batch. A rework picks nothing and clears the picks, so no draft can be paid for from a rejected set.
  */
 export async function conceptPick(env: Env, batchId: string, ids: string[], input: PickInput) {
-  const { outcome, roles = [], reserves = [], review, promptVersion = "", ownerSwap } = input;
+  const { outcome, roles = [], reserves = [], promptVersion = "", ownerSwap } = input;
   if (!outcome) throw new InputError("An engine 3 batch needs outcome: select (3 ids with roles) or rework (no ids).");
-  if (!review) throw new InputError("An engine 3 batch needs the review: every concept of the batch, with its scores, gates and reasons.");
+  if (ownerSwap && outcome !== "select") throw new InputError("ownerSwap is for a select only: the owner names a reserve in place of a pick.");
+  if (ownerSwap && input.review) throw new InputError("An owner swap keeps the critic's saved review: send no review with ownerSwap.");
+  if (!ownerSwap && !input.review) throw new InputError("An engine 3 batch needs the review: every concept of the batch, with its scores, gates and reasons.");
 
   const [ideas, frozen, canon, last] = await Promise.all([
-    env.DB.prepare("SELECT id, concept FROM ideas WHERE batch_id = ? ORDER BY n").bind(batchId).all<{ id: string; concept: string }>(),
+    env.DB.prepare("SELECT id, n, concept FROM ideas WHERE batch_id = ? ORDER BY n").bind(batchId).all<{ id: string; n: number; concept: string }>(),
     env.DB.prepare(
       "SELECT 1 FROM renders r JOIN ideas i ON i.id = r.idea AND i.batch_id = r.batch WHERE r.batch = ? AND i.picked = 1 LIMIT 1",
     ).bind(batchId).first(),
@@ -109,6 +114,13 @@ export async function conceptPick(env: Env, batchId: string, ids: string[], inpu
   if (frozen)
     throw new InputError("A picked idea of this batch has a render, so the picks and roles are frozen. Only the owner can change them, with ideas_update.");
   const all = new Set(ideas.results.map((i) => i.id));
+  if (ownerSwap) {
+    if (last?.outcome !== "select") throw new InputError("ownerSwap changes a saved selection, and this batch has none.");
+    const saved = new Set([...last.ids, ...last.reserves]);
+    const strangers = [...ids, ...reserves].filter((id) => !saved.has(id));
+    if (strangers.length) throw new InputError(`An owner swap uses only the saved picks and reserves; these are neither: ${strangers.join(", ")}.`);
+  }
+  const review = input.review ?? last!.review;
 
   const reviewed = review.concepts.map((c) => c.ideaId);
   if (dupes(reviewed).length) throw new InputError(`Review each concept once: ${dupes(reviewed).join(", ")} appear more than once.`);
@@ -116,9 +128,6 @@ export async function conceptPick(env: Env, batchId: string, ids: string[], inpu
   if (strange.length) throw new InputError(`The review names ideas that are not in batch ${batchId}: ${strange.join(", ")}.`);
   const unread = [...all].filter((id) => !reviewed.includes(id));
   if (unread.length) throw new InputError(`Review every concept of the batch before you judge: ${unread.length} have no review (${unread.join(", ")}).`);
-
-  if (ownerSwap && outcome !== "select") throw new InputError("ownerSwap is for a select only: the owner names a reserve in place of a pick.");
-  if (ownerSwap && last?.outcome !== "select") throw new InputError("ownerSwap changes a saved selection, and this batch has none.");
 
   const warnings: string[] = [];
   if (outcome === "rework") {
@@ -165,6 +174,8 @@ export async function conceptPick(env: Env, batchId: string, ids: string[], inpu
     reserves,
     review,
     canonLogId: canon?.id ?? null,
+    // The newest idea number the review covered: an idea with a higher number is a concept the critic has not seen.
+    lastN: ideas.results.at(-1)?.n ?? 0,
     ...(ownerSwap ? { ownerSwap } : {}),
   };
   // The record is the gate of the whole D1 batch: it is added only when no picked idea has a render and the batch still
@@ -190,5 +201,6 @@ export async function conceptPick(env: Env, batchId: string, ids: string[], inpu
   const [saved] = await env.DB.batch(stmts);
   if (saved?.meta.changes !== 1)
     throw new InputError("The batch changed while you reviewed it (a new concept or a render), and nothing was saved. Read batch_get and review again.");
-  return { batchId, outcome, picked: ids, roles, reserves, warnings, version: (last?.version ?? 0) + 1 };
+  const v = await env.DB.prepare("SELECT version FROM batch_records WHERE id = ?").bind(recordId).first<{ version: number }>();
+  return { batchId, outcome, picked: ids, roles, reserves, warnings, version: v?.version };
 }

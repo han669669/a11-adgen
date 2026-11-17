@@ -153,10 +153,13 @@ export async function batchUpdate(
   input: { id: string; status?: string; insights?: unknown[]; notes?: string; ownerVerdicts?: OwnerVerdict[] },
 ) {
   // Every picked idea with drafts must have its final prompt before the picks are made (D2: Claude picks the drafts).
+  let board3 = false;
   if (input.status === "board") {
     const b = await env.DB.prepare("SELECT engine FROM batches WHERE id = ?").bind(input.id).first<{ engine: number }>();
+    board3 = b?.engine === 3;
     // Engine 3: exactly 3 picked ideas in any mix of roles (design pack §2.6). The direction and draft checks come with Phase 3.
     if (b?.engine === 3) {
+      // The status write below repeats this count, so a pick that changes in between cannot reach the board.
       const p = await env.DB.prepare("SELECT COUNT(*) AS n FROM ideas WHERE batch_id = ? AND picked = 1").bind(input.id).first<{ n: number }>();
       if (p?.n !== 3) throw new Error(`An engine 3 batch needs exactly 3 picked ideas before status 'board' (it has ${p?.n ?? 0}).`);
     }
@@ -189,10 +192,10 @@ export async function batchUpdate(
   const inserts = await verdictInserts(env, input.id, verdicts);
   // One D1 batch is one transaction: the batch row and its verdicts are saved together or not at all.
   const [res] = await env.DB.batch([
-    env.DB.prepare(`UPDATE batches SET ${[...sets, "updated_at = ?"].join(", ")} WHERE id = ?`).bind(...args, now(), input.id),
+    env.DB.prepare(`UPDATE batches SET ${[...sets, "updated_at = ?"].join(", ")} WHERE id = ?${board3 ? " AND (SELECT COUNT(*) FROM ideas WHERE batch_id = batches.id AND picked = 1) = 3" : ""}`).bind(...args, now(), input.id),
     ...inserts,
   ]);
-  if (res?.meta.changes !== 1) throw new Error(`No batch with id ${input.id}.`);
+  if (res?.meta.changes !== 1) throw new Error(board3 ? "The picks changed while the status was set: the batch needs exactly 3 picked ideas. Read batch_get and try again." : `No batch with id ${input.id}.`);
   return { id: input.id, updated: sets.map((s) => s.split(" ")[0]), verdictsSaved: verdicts.length };
 }
 
@@ -687,7 +690,7 @@ export async function batchGet(env: Env, id: string) {
     picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, byOwner: p.by_owner === 1, finalRenderId: p.final_render_id })),
     drafting: renders.results.filter((r) => r.status === "queued").map((r) => r.id),
     // Engine 3 only: the next step of the batch, from its rows (design pack §1.11). Engine 2 batches have none.
-    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, currentDrafts: currentDrafts.get(i.id) ?? 0 })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.created_at > conceptReview.savedAt) }) } : {}),
+    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, currentDrafts: currentDrafts.get(i.id) ?? 0 })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.n > conceptReview.lastN) }) } : {}),
   };
 }
 
@@ -705,8 +708,10 @@ export function nextStepV3(
   if (!hasBrief) return "brief";
   if (ideas.length === 0) return "concepts";
   // The critic rejected the set: the writer adds concepts (concepts_rework). After 3 rework rounds the owner decides
-  // (more research, another product angle, or stop). Concepts saved after the review go back to the critic.
+  // (more research, another product angle, or stop). Concepts saved after the newest review go back to the critic, also
+  // after a select, until a picked idea has a draft or a final (then the picks are frozen).
   if (review?.outcome === "rework" && !review.newIdeas) return review.reworks >= 3 ? "owner_decision" : "concepts_rework";
+  if (review?.newIdeas && picked.every((i) => i.currentDrafts === 0 && i.finals.length === 0)) return "concept_review";
   if (picked.length < 3) return "concept_review";
   if (picked.some((i) => !i.copy.ownerApproved)) return "copy_review";
   if (picked.some((i) => i.currentDrafts < 3)) return "drafts";
