@@ -31,7 +31,7 @@ Then apply the owner gate in `taste-seed.md` §2 (Singapore truth, no ethnicity,
 
 ## 3. Funnel stages
 
-Three ads per batch: 1 tof, 1 mof, 1 bof (owner, 07-11-2026). The database allows at most one pick per stage, and `batch_update` requires exactly one per stage before status `board`. The owner runs batches until one ad is top tier, so judge each final as if it is the only ad the client sees.
+Three ads per batch: 1 tof, 1 mof, 1 bof (owner, 07-11-2026). The database allows at most one pick per stage, and `batch_update` requires exactly one per stage before status `board`. An engine 3 batch (a11-engine v3, owner 16-11-2026) differs: the critic selects the best 3 concepts from any stage and gives each a role, so two picks can have one role; the database allows 3 picks per batch, and `batch_update` requires exactly 3 before status `board`. The owner runs batches until one ad is top tier, so judge each final as if it is the only ad the client sees.
 
 | Stage | Job | What to lead with | Never |
 |---|---|---|---|

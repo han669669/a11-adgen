@@ -2,11 +2,12 @@ import { brandBySlug, latestKit } from "./brand";
 import type { Env } from "./env";
 import { checkConcepts, type Concept, type Territory, territoriesGet } from "./concepts";
 import { briefGet, factMarks, sourcesList } from "./research";
+import { conceptPick, conceptReviewGet, type PickInput } from "./review";
 import { InputError } from "./schema";
 import * as fal from "./fal";
 import { storeSubjectImages } from "./subjectimages";
 
-/** Funnel stages (owner, 2026-11-06). Picks per batch: 1 per stage (a database trigger enforces it). */
+/** Funnel stages (owner, 2026-11-06). Picks per batch (a database trigger enforces it): 1 per stage for engine 2; 3 in any mix for engine 3, where the stage is the critic's role. */
 export const FORMATS = ["tof", "mof", "bof"] as const;
 export const STATUSES = ["research", "ideas", "drafts", "board", "finals", "done"] as const;
 const MAX_BATCH_RENDERS = fal.MAX_BATCH_RENDERS;
@@ -153,8 +154,14 @@ export async function batchUpdate(
 ) {
   // Every picked idea with drafts must have its final prompt before the picks are made (D2: Claude picks the drafts).
   if (input.status === "board") {
-    // A funnel batch needs exactly one picked idea per stage. Batches made before the stages are exempt.
-    const counts = await env.DB.prepare(
+    const b = await env.DB.prepare("SELECT engine FROM batches WHERE id = ?").bind(input.id).first<{ engine: number }>();
+    // Engine 3: exactly 3 picked ideas in any mix of roles (design pack §2.6). The direction and draft checks come with Phase 3.
+    if (b?.engine === 3) {
+      const p = await env.DB.prepare("SELECT COUNT(*) AS n FROM ideas WHERE batch_id = ? AND picked = 1").bind(input.id).first<{ n: number }>();
+      if (p?.n !== 3) throw new Error(`An engine 3 batch needs exactly 3 picked ideas before status 'board' (it has ${p?.n ?? 0}).`);
+    }
+    // An engine 2 funnel batch needs exactly one picked idea per stage. Batches made before the stages are exempt.
+    const counts = b?.engine === 3 ? { results: [] } : await env.DB.prepare(
       "SELECT format, SUM(picked) AS n FROM ideas WHERE batch_id = ? AND format IN ('tof', 'mof', 'bof') GROUP BY format",
     ).bind(input.id).all<{ format: string; n: number }>();
     if (counts.results.length) {
@@ -328,8 +335,17 @@ export async function copyApprovedCheck(env: Env, batchId: string, ideaId: strin
     throw new Error(`The words of idea ${ideaId} changed after the owner approved them. Show him the new words and save his approval again.`);
 }
 
-/** The critic's pick: set picked on ideas of one batch. It cannot unpick, write a prompt or touch another batch (the pick limit, 1 per stage, still holds). */
-export async function ideasPick(env: Env, batchId: string, ids: string[]) {
+/**
+ * The critic's pick. Engine 2: set picked on ideas of one batch; it cannot unpick, write a prompt or touch another batch
+ * (the pick limit, 1 per stage, still holds). Engine 3: the concept review and the 3 picks with their roles (worker/review.ts).
+ */
+export async function ideasPick(env: Env, batchId: string, ids: string[] = [], v3: PickInput = {}) {
+  const batch = await env.DB.prepare("SELECT engine FROM batches WHERE id = ?").bind(batchId).first<{ engine: number }>();
+  if (!batch) throw new Error(`No batch with id ${batchId}.`);
+  if (batch.engine === 3) return conceptPick(env, batchId, ids, v3);
+  if (Object.values(v3).some((v) => v !== undefined))
+    throw new InputError("outcome, roles, reserves, review, promptVersion and ownerSwap are for an engine 3 batch only. This batch is engine 2: send the ids only.");
+  if (!ids.length) throw new InputError("Name 1 to 3 ideas to pick.");
   if (new Set(ids).size !== ids.length) throw new Error("Each idea id may appear only once.");
   // Check every id first, so a wrong id never leaves the others picked.
   const rows = await env.DB.prepare("SELECT id FROM ideas WHERE batch_id = ? AND id IN (SELECT value FROM json_each(?))").bind(batchId, JSON.stringify(ids)).all<{ id: string }>();
@@ -558,7 +574,8 @@ function shuffleKey(s: string) {
  * no final prompt, and the ideas in a stable shuffled order without their numbers.
  */
 export async function batchGetCritic(env: Env, id: string) {
-  const { notes: _notes, picks: _picks, ideas, ...rest } = await batchGet(env, id);
+  // conceptReview is left out too: the critic judges every concept again from the concepts alone.
+  const { notes: _notes, picks: _picks, conceptReview: _cr, ideas, ...rest } = await batchGet(env, id);
   return {
     ...rest,
     view: "critic" as const,
@@ -598,7 +615,7 @@ export async function batchGet(env: Env, id: string) {
   const ownerPicked = new Set(picks.results.filter((p) => p.by_owner === 1).map((p) => p.idea_id as string));
   const passedAt = new Map(passes.results.map((p) => [p.idea_id, p.at]));
   const img = (key: string) => ({ key, url: fal.mediaUrl(env, key) });
-  const brief = await briefGet(env, id);
+  const [brief, conceptReview] = await Promise.all([briefGet(env, id), conceptReviewGet(env, id)]);
   const currentDrafts = new Map<string, number>();
   const ideasOut = ideas.results.map((i) => {
     const drafts = renders.results
@@ -662,23 +679,34 @@ export async function batchGet(env: Env, id: string) {
     sources: await sourcesList(env, id),
     // Engine 3: the newest territories list with its version, or null.
     territories: await territoriesGet(env, id),
+    // Engine 3: the critic's newest concept review (with reworks, the number of rework rounds), or null.
+    conceptReview,
     insights: JSON.parse(b.insights),
     notes: b.notes,
     ideas: ideasOut,
     picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, byOwner: p.by_owner === 1, finalRenderId: p.final_render_id })),
     drafting: renders.results.filter((r) => r.status === "queued").map((r) => r.id),
     // Engine 3 only: the next step of the batch, from its rows (design pack §1.11). Engine 2 batches have none.
-    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, currentDrafts: currentDrafts.get(i.id) ?? 0 })), ownerPicked) } : {}),
+    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, currentDrafts: currentDrafts.get(i.id) ?? 0 })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.created_at > conceptReview.savedAt) }) } : {}),
   };
 }
 
 type IdeaState = { id: string; picked: boolean; copy: { ownerApproved?: unknown }; ranked: boolean; currentDrafts: number; finals: { status: unknown }[] };
 
 /** The first step of an engine 3 batch that is not done yet. Pure: it reads only the rows that batchGet has read. */
-export function nextStepV3(status: string, hasBrief: boolean, ideas: IdeaState[], ownerPicked: Set<string>): string {
+export function nextStepV3(
+  status: string,
+  hasBrief: boolean,
+  ideas: IdeaState[],
+  ownerPicked: Set<string>,
+  review: { outcome: string; reworks: number; newIdeas: boolean } | null = null,
+): string {
   const picked = ideas.filter((i) => i.picked);
   if (!hasBrief) return "brief";
   if (ideas.length === 0) return "concepts";
+  // The critic rejected the set: the writer adds concepts (concepts_rework). After 3 rework rounds the owner decides
+  // (more research, another product angle, or stop). Concepts saved after the review go back to the critic.
+  if (review?.outcome === "rework" && !review.newIdeas) return review.reworks >= 3 ? "owner_decision" : "concepts_rework";
   if (picked.length < 3) return "concept_review";
   if (picked.some((i) => !i.copy.ownerApproved)) return "copy_review";
   if (picked.some((i) => i.currentDrafts < 3)) return "drafts";
