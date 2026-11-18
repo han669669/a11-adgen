@@ -525,10 +525,25 @@ def photo_piece(q):
     return product_piece(photo, box, q.get("alpha")), box
 
 
+def soften(img, r):
+    """An RGBA piece blurred by r px, on a clear margin so the soft edge is not cut at the piece's border, and that margin."""
+    from PIL import ImageFilter
+    pad = int(np.ceil(3 * r))
+    big = Image.new("RGBA", (img.width + 2 * pad, img.height + 2 * pad), (0, 0, 0, 0))
+    big.paste(img, (pad, pad))
+    v = np.asarray(big).astype(np.float32)
+    al = v[..., 3:] / 255
+    pre = Image.fromarray(np.clip(v[..., :3] * al, 0, 255).astype("uint8")).filter(ImageFilter.GaussianBlur(r))
+    wa = Image.fromarray((al[..., 0] * 255).astype("uint8"), "L").filter(ImageFilter.GaussianBlur(r))
+    wsum = np.asarray(wa).astype(np.float32)[..., None] / 255
+    out = Image.fromarray(np.clip(np.asarray(pre).astype(np.float32) / np.maximum(wsum, 1e-3), 0, 255).astype("uint8")).convert("RGBA")
+    out.putalpha(Image.fromarray((al[..., 0] * 255).astype("uint8"), "L").filter(ImageFilter.GaussianBlur(r * 0.6)))
+    return out, pad
+
+
 def layout(a):
     """A skeleton from a plan: products at their own places, sizes, sides and small turns (a messy stack, a loose group, one upright),
     over flat shapes that draw the room's real-scale cues (tile rows, a worktop edge). The model then builds the scene around them."""
-    from PIL import ImageFilter
     plan = load_plan(a.plan)
     if a.packshot:
         pack = Image.open(a.packshot, formats=FORMATS).convert("RGB")
@@ -554,16 +569,10 @@ def layout(a):
             pieces[key] = photo_piece(q)
         piece, pbox = pieces[key]
         img = turn(piece, q["height"] * H * piece.height / (pbox[3] - pbox[1]), q["side"], q["rot"])
+        x, y = corner(q, img, W, H)   # from the sharp piece: a blur does not move the item
         if q.get("blur"):  # an item further back: soft, blurred with its own alpha so no backdrop colour bleeds in
-            v = np.asarray(img).astype(np.float32)
-            al = v[..., 3:] / 255
-            pre = Image.fromarray(np.clip(v[..., :3] * al, 0, 255).astype("uint8")).filter(ImageFilter.GaussianBlur(q["blur"]))
-            wa = Image.fromarray((al[..., 0] * 255).astype("uint8"), "L").filter(ImageFilter.GaussianBlur(q["blur"]))
-            wsum = np.asarray(wa).astype(np.float32)[..., None] / 255
-            rgb_ = np.asarray(pre).astype(np.float32) / np.maximum(wsum, 1e-3)
-            img = Image.fromarray(np.clip(rgb_, 0, 255).astype("uint8")).convert("RGBA")
-            img.putalpha(Image.fromarray((al[..., 0] * 255).astype("uint8"), "L").filter(ImageFilter.GaussianBlur(q["blur"] * 0.6)))
-        x, y = corner(q, img, W, H)
+            img, pad = soften(img, q["blur"])
+            x, y = x - pad, y - pad
         layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))   # paste clips a piece that bleeds off an edge; alpha_composite refuses it
         layer.paste(img, (x, y), img)
         canvas.alpha_composite(layer)

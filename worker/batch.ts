@@ -172,6 +172,7 @@ async function verdictInserts(env: Env, batchId: string, verdicts: OwnerVerdict[
       const saved = !!render && ((JSON.parse(render.image_keys ?? "[]") as string[]).includes(v.key) || render.composed_key === v.key);
       if (!render || !saved) throw new Error(`${where}: ${v.key} is not a picture of this batch.`);
       if (v.stage === "final" && render.kind !== "final") throw new Error(`${where}: ${v.key} is a ${render.kind}, not a final picture.`);
+      if (v.stage === "draft" && render.kind === "rough") throw new Error(`${where}: ${v.key} is a rough, not a draft picture.`);
       if (ideaId && render.idea && render.idea !== ideaId) throw new Error(`${where}: ${v.key} is a picture of another idea.`);
       ideaId ??= render.idea;
     }

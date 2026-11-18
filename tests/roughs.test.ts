@@ -62,12 +62,16 @@ describe("roughs", () => {
     await expect(run(env, "ideas_pick", { ...select(ideas), review: undefined, ownerSwap: "back to the first 3" })).rejects.toThrow("picks and roles are frozen");
   });
 
-  it("are not a final picture for a verdict", async () => {
+  it("are not a final or a draft picture for a verdict", async () => {
     const { env, raw, ideas } = await withConcepts();
     addRender(raw, "rr", ideas[0]!.id, "rough");
     await expect(
       batch.batchUpdate(env, { id: E3, ownerVerdicts: [{ stage: "final", mark: "approve", key: "renders/rr/0.jpg", ownerSaid: "yes" }] }),
     ).rejects.toThrow("is a rough, not a final picture");
+    // Nor a draft: a draft verdict on a rough would withdraw a pass (or count as a draft) for the wrong picture.
+    await expect(
+      batch.batchUpdate(env, { id: E3, ownerVerdicts: [{ stage: "draft", mark: "fix", ideaId: ideas[0]!.id, key: "renders/rr/0.jpg", ownerSaid: "too dark" }] }),
+    ).rejects.toThrow("is a rough, not a draft picture");
   });
 });
 
