@@ -202,3 +202,57 @@ Cost: about US$0.50 (5 roughs, 9 low drafts, no finals). Inside the live spend c
 - Craft sources [5] and [8] are summaries, not the books. [8] measured TV ads, not static ads.
 - The reach and award figures for "Pass the Heinz" in the owner's note are not verified. Only the campaign facts in [3] are.
 - The rough cost uses the blueprint estimate (about US$0.028 for each low draft), not a new measurement.
+
+---
+
+## 10. Proof run result and build plan (18-11-2026)
+
+### 10.1 Result
+
+Batch `1ff404f8` (Fickle Feline 2.0), run by hand in three rounds. Spend about US$1.05.
+
+| Pass test (§8) | Result |
+|---|---|
+| At least 2 of 3 ideas usable | Met in round 2 (Plucked daisy, Too slow, Price per flavour) |
+| At least 1 ad the owner would pay for | **Not met.** Owner, 09:03 UTC: "no i would not pay and be proud at all, its simply usable enough but not the best" |
+| Not every ad weaker than the bar | Met: "all of them holds up i suppose" |
+| No draft shown with a D item | Met |
+
+**The owner's decision (09:03 UTC):** build the code now, although the pay test failed. His micro decisions are enough to improve engine 3. Refinement of engine 3 continues after the build. The bar stays the 5 reference ads.
+
+Usable or approved ads: Plucked daisy 1 and 2, Too slow 2 (`212d8e56`), Price 2 (`ce3473ee`), Pie chart A (final `5f3c9a45`, approved). Rejected: Podium (all), Too slow 3, whole-cake Price, Eeny meeny, Swatches, and the round 1 ideas.
+
+### 10.2 What held, what did not
+
+| Change | Held? | Evidence |
+|---|---|---|
+| C1 to C2 picture device | Partly | The owner liked the copy. The concepts that worked use an object or the food itself; a coin flip "doesn't register in local Singaporean context" |
+| C3 brand-colour stage | Yes | Flat brand yellow on every usable ad |
+| C5 critic | Partly | The owner picked 3 concepts the critic rejected, and rejected the critic's top pick (coin). He wants all concepts with the critic's notes |
+| C6 type | Yes, with changes | Subline about 0.5 of the headline (not 0.30 to 0.36). Big stacked headlines ("This one. That one. This one.", "Too slow.") feel right. Clear space above the food |
+| C8 reference render | **No, for food** | Model-drawn slices were "ai food slop" (round 1). The brand's real slice photos, composed into the reference and kept with "keep every slice exactly", worked |
+
+New lessons:
+
+1. **Food is the device.** Props next to food (a hand, paint swatches, a cake server, crumbs, a flag) made the food unappetising. The approved ad makes the food itself the outside object (the cake as a pie chart).
+2. **Real photos are the truth.** Compose cut-outs of the brand's real product photos into the reference. When no real photo has the angle, the model may re-shoot the brand's real photo, and then a high-quality pass (kind `final`) with the real photo as the texture reference removes the "AI food" look of a low draft.
+3. **Staging rules:** no white shelf, one camera and eye line, no leftovers, edge-cut items still readable, true slice widths, the count matches the copy, bottom of funnel shows what the buyer takes home.
+4. **Local truth:** the critic tests each concept against real Singapore buyer behaviour.
+5. **Verdict mark `pass` means "reject all drafts".** Saving a usable draft as `pass` hid it from picks for good.
+
+### 10.3 Build plan
+
+One small PR at a time. Engine 2 and the daily practice do not change.
+
+| PR | Change | Kind |
+|---|---|---|
+| B1 | This section and the decision row | docs |
+| B2 | Agent prompts and playbook: device first with "food is the device", point test, local-truth test, the staging rules, real-photo truth reference, one alternative line per pick, all concepts with the critic's notes to the owner (the owner picks). Plugin version bump | prompts, docs |
+| B3 | Verdicts: a newer owner verdict corrects an older `pass` on the same idea, so a usable draft can be picked again | code and tests |
+| B4 | Owner concept pick: `ideas_pick` takes the owner's own choice of any 3 concepts, with his words | code and tests |
+| B5 | Food realism: `photo_finish.py` keeps brand yellow (no olive tone shift); a higher-quality draft option for food | code and tests |
+| B6 | Type: the big stacked lockup with subline about 0.5 of the headline and a checked gap above the product | code and tests |
+| B7 | Real-photo cut-outs: a script that cuts out brand product photos and composes them into a reference plan | code and tests |
+| B8 | C7 roughs before the copy review | code and tests |
+
+Then a second product in another category (a drink or a wellness product).
