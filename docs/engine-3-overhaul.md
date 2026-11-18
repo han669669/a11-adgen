@@ -1,6 +1,6 @@
 # Engine 3 creative overhaul: assessment and plan
 
-Date: 18-11-2026. Status: **plan only. No runtime code, no paid render and no model setting changes until the owner says yes.**
+Date: 18-11-2026. Status: **the owner chose all four recommended options (D1 to D4 = A) on 18-11-2026 03:34 UTC.** Next: the proof run (section 8). No runtime code until the proof run passes. No model setting changes.
 This document uses ASD-STE100 Simplified Technical English with British spelling.
 
 Goals moved: Goal 1 (high-taste, self-improving ads) and Goal 2 (an ad a Singapore brand pays for). Each change in section 6 names its goal.
@@ -166,6 +166,8 @@ What this plan does not do: no new hard check in code (the 15-check budget holds
 ---
 
 ## 7. Decisions for the owner
+
+Decided 18-11-2026 03:34 UTC: the owner chose A on all four (`docs/decisions.md`).
 
 | # | Question | Options | Recommended |
 |---|---|---|---|
