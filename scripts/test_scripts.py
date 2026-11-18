@@ -546,6 +546,24 @@ class PhotoFinish(Tmp):
         self.assertGreater(float(np.abs(c - m).max()), 5 / 255)  # the colour grain is there
         self.assertLess(float(np.abs(photo_finish.luma(c) - photo_finish.luma(m)).max()), 1.5 / 255)  # and it keeps luma
 
+    def test_keep_holds_the_brand_colour(self):
+        # Owner, 18-11-2026: the tone step turned the brand yellow olive. --keep holds it exact in tone and halation.
+        yellow = Image.fromarray(np.full((64, 64, 3), (255, 210, 0), np.uint8))
+        skip = ("soften", "lens", "grain")
+        plain = np.asarray(photo_finish.finish(yellow, skip=skip)).astype(int)
+        kept = np.asarray(photo_finish.finish(yellow, skip=skip, keep=[photo_finish.hex_rgb("#FFD200")])).astype(int)
+        self.assertGreater(int(np.abs(plain - (255, 210, 0)).max()), 15)  # the shift the owner saw
+        self.assertLessEqual(int(np.abs(kept - (255, 210, 0)).max()), 1)
+        grey = Image.fromarray(np.full((64, 64, 3), 250, np.uint8))  # far from the colour: the normal finish
+        self.assertTrue(np.array_equal(np.asarray(photo_finish.finish(grey, skip=skip)),
+                                       np.asarray(photo_finish.finish(grey, skip=skip, keep=[(1.0, 0.82, 0.0)]))))
+        src = self.save("y.png", np.full((64, 64, 3), (255, 210, 0)))
+        out = os.path.join(self.dir.name, "o.png")
+        self.assertIn("--keep needs", exit_message(photo_finish.main, ["--in", src, "--out", out, "--keep", "yellow"]))
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            photo_finish.main(["--in", src, "--out", out, "--keep", "FFD200", "--no-grain"])
+        self.assertIn("keep FFD200", log.getvalue())
+
 
 if __name__ == "__main__":
     sys.exit(unittest.main())
