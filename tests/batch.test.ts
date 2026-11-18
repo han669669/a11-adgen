@@ -267,6 +267,8 @@ describe("batch flow", () => {
       expect(batch.activePasses([v("pass", "2"), v("fix", "3")], [r("1")]).has("i1")).toBe(false);
       expect(batch.activePasses([v("pass", "2"), v("fix", "4")], [r("1"), r("3")]).get("i1")).toBe("2");
       expect(batch.activePasses([v("pass", "2"), v("fix", "3"), v("pass", "5")], [r("1")]).get("i1")).toBe("5");
+      // A fix withdraws only the newest pass: an earlier pass, made before a redraft, counts again.
+      expect(batch.activePasses([v("pass", "2"), v("pass", "5"), v("fix", "6")], [r("1"), r("3")]).get("i1")).toBe("2");
       // A final render after the pass is not a redraft.
       expect(batch.activePasses([v("pass", "2"), v("fix", "4")], [{ idea: "i1", kind: "final", created_at: "3" }]).has("i1")).toBe(false);
     });
