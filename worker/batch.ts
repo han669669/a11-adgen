@@ -171,7 +171,7 @@ async function verdictInserts(env: Env, batchId: string, verdicts: OwnerVerdict[
       // The key must be a saved picture of the render: one of its images, or its composed final.
       const saved = !!render && ((JSON.parse(render.image_keys ?? "[]") as string[]).includes(v.key) || render.composed_key === v.key);
       if (!render || !saved) throw new Error(`${where}: ${v.key} is not a picture of this batch.`);
-      if (v.stage === "final" && render.kind === "draft") throw new Error(`${where}: ${v.key} is a draft, not a final picture.`);
+      if (v.stage === "final" && render.kind !== "final") throw new Error(`${where}: ${v.key} is a ${render.kind}, not a final picture.`);
       if (ideaId && render.idea && render.idea !== ideaId) throw new Error(`${where}: ${v.key} is a picture of another idea.`);
       ideaId ??= render.idea;
     }
@@ -397,6 +397,31 @@ export async function copyApprovedCheck(env: Env, batchId: string, ideaId: strin
     );
   if (ok.headline !== row.headline || ok.subline !== copy.subline)
     throw new Error(`The words of idea ${ideaId} changed after the owner approved them. Show him the new words and save his approval again.`);
+}
+
+/** Engine 3 roughs (owner, 18-11-2026, decision D3 = A): at most this many for each concept, and for each batch. */
+export const MAX_ROUGHS_IDEA = 2;
+export const MAX_ROUGHS_BATCH = 8;
+
+/**
+ * A rough: one cheap low render of a concept before the copy review (docs/engine-3-overhaul.md C7), so the owner and the
+ * critic judge the picture, not only the words. Engine 3 only; any concept of the batch (it need not be picked, and its
+ * words need no approval yet); at most 2 for each concept (one redo) and 8 for each batch. A failed render does not count.
+ */
+export async function roughCheck(env: Env, batchId: string, ideaId: string) {
+  // The renders table takes 'rough' only after migration 0017: refuse before fal is paid, not after.
+  const table = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'renders'").first<{ sql: string }>();
+  if (!table?.sql.includes("'rough'")) throw new Error("Roughs need migration 0017_roughs, which is not live yet. Ask the owner to run it (docs/deploy.md step 3).");
+  const row = await env.DB.prepare("SELECT b.engine FROM ideas i JOIN batches b ON b.id = i.batch_id WHERE i.id = ? AND i.batch_id = ?")
+    .bind(ideaId, batchId)
+    .first<{ engine: number }>();
+  if (!row) throw new Error(`No idea ${ideaId} in batch ${batchId}. A rough belongs to a concept of its batch.`);
+  if (row.engine !== 3) throw new Error("Roughs are for engine 3 batches only.");
+  const n = await env.DB.prepare(
+    "SELECT COUNT(*) AS batch, COALESCE(SUM(idea = ?), 0) AS idea FROM renders WHERE batch = ? AND kind = 'rough' AND status != 'failed'",
+  ).bind(ideaId, batchId).first<{ batch: number; idea: number }>();
+  if ((n?.idea ?? 0) >= MAX_ROUGHS_IDEA) throw new Error(`This concept has ${MAX_ROUGHS_IDEA} roughs, the limit.`);
+  if ((n?.batch ?? 0) >= MAX_ROUGHS_BATCH) throw new Error(`This batch has ${MAX_ROUGHS_BATCH} roughs, the limit (one for each of the critic's top 5 concepts, with a few redos).`);
 }
 
 /**
@@ -837,6 +862,9 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
       // Engine 3: the art director's newest direction (design pack §3.3), or null. Engine 2 ideas have no such field.
       // Only a picked idea shows it: the direction of a concept that a swap or a rework unpicked is not for use.
       ...(b.engine === 3 ? { direction: i.picked === 1 ? (directions.get(i.id) ?? null) : null } : {}),
+      // Engine 3: the concept's roughs, oldest first (docs/engine-3-overhaul.md C7): a cheap picture of the idea before the
+      // copy review. Never a draft: no rank, no check, no pick.
+      ...(e3 ? { roughs: renders.results.filter((r) => r.idea === i.id && r.kind === "rough" && r.image_keys).flatMap((r) => (JSON.parse(r.image_keys) as string[]).map(img)) } : {}),
       ranked,
       // Submit order, then image order. Never rank order: the order must not show the critic's rank.
       // rank and reason are null until the owner decides on the idea (see shown above).
@@ -887,7 +915,7 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
     picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, byOwner: p.by_owner === 1, finalRenderId: p.final_render_id })),
     drafting: renders.results.filter((r) => r.status === "queued").map((r) => r.id),
     // Engine 3 only: the next step of the batch, from its rows (design pack §1.11). Engine 2 batches have none.
-    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, draftsDone: draftsDone.get(i.id) === true, redirect: redirect.get(i.id) === true, rendered: renders.results.some((r) => r.idea === i.id), directed: directions.get(i.id)?.current === true })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.n > conceptReview.lastN) }) } : {}),
+    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, draftsDone: draftsDone.get(i.id) === true, redirect: redirect.get(i.id) === true, rendered: renders.results.some((r) => r.idea === i.id && r.kind !== "rough"), directed: directions.get(i.id)?.current === true })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.n > conceptReview.lastN) }) } : {}),
   };
 }
 

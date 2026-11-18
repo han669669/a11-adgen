@@ -12,6 +12,8 @@ const QUEUE = "https://queue.fal.run";
 export const SIZES = {
   draft: { width: 1024, height: 1280, quality: "low" },
   final: { width: 1536, height: 1920, quality: "high" },
+  // Engine 3 (owner, 18-11-2026, decision D3): a cheap rough of a concept before the copy review, at the draft price.
+  rough: { width: 1024, height: 1280, quality: "low" },
 } as const;
 
 /** Code adds this once to every render prompt (hard check 4: no painted CTA). */
@@ -25,7 +27,7 @@ export const RENDER_SUFFIX =
 export type Kind = keyof typeof SIZES;
 
 export function estimate(kind: Kind, numImages: number, numRefs: number): number {
-  const perImage = kind === "draft" ? PRICE.falDraftImage : PRICE.falFinalImage;
+  const perImage = kind === "final" ? PRICE.falFinalImage : PRICE.falDraftImage;
   return Number((perImage * numImages + PRICE.falReference * numRefs + PRICE.falPrompt).toFixed(4));
 }
 
