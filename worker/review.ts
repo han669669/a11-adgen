@@ -105,7 +105,7 @@ const dupes = (xs: string[]) => [...new Set(xs.filter((x, i) => xs.indexOf(x) !=
 export async function conceptPick(env: Env, batchId: string, ids: string[], input: PickInput) {
   const { outcome, roles = [], reserves = [], promptVersion = "", ownerSwap, ownerReject } = input;
   if (!outcome) throw new InputError("An engine 3 batch needs outcome: select (3 ids with roles) or rework (no ids).");
-  if (ownerSwap && outcome !== "select") throw new InputError("ownerSwap is for a select only: the owner names a reserve in place of a pick.");
+  if (ownerSwap && outcome !== "select") throw new InputError("ownerSwap is for a select only: the owner names the concepts he chose.");
   if (ownerReject && outcome !== "rework") throw new InputError("ownerReject is for a rework only: the owner rejected the selected concepts.");
   const ownerWords = ownerSwap ?? ownerReject;
   if (ownerWords && input.review) throw new InputError("The owner's change keeps the critic's saved review: send no review with ownerSwap or ownerReject.");
@@ -124,11 +124,8 @@ export async function conceptPick(env: Env, batchId: string, ids: string[], inpu
   const all = new Set(ideas.results.map((i) => i.id));
   if (ownerWords && last?.outcome !== "select")
     throw new InputError(`${ownerSwap ? "ownerSwap" : "ownerReject"} changes a saved selection, and this batch has none.`);
-  if (ownerSwap) {
-    const saved = new Set([...last!.ids, ...last!.reserves]);
-    const strangers = [...ids, ...reserves].filter((id) => !saved.has(id));
-    if (strangers.length) throw new InputError(`An owner swap uses only the saved picks and reserves; these are neither: ${strangers.join(", ")}.`);
-  }
+  // The owner chooses the 3 concepts himself from every concept of the batch (owner, 18-11-2026): an owner swap may name
+  // any concept of this batch, not only the critic's picks and reserves. The checks below keep it inside the batch.
   const review = input.review ?? last!.review;
 
   const reviewed = review.concepts.map((c) => c.ideaId);
