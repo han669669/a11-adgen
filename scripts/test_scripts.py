@@ -233,6 +233,22 @@ class LayoutReprint(Tmp):
         self.assertIn("a photo for every product", exit_message(product_lock.layout, self.ns(packshot=None, box=None, plan=mixed)))
         self.assertIn("their own photos", exit_message(product_lock.reprint, self.rp(self.pack, plan=plan)))
 
+    def test_layout_blurs_an_item_with_a_soft_edge_at_its_place(self):
+        # Review of #113: the blur ran inside the piece's own border, so the soft edge stopped in a hard straight line.
+        red = np.full((120, 100, 3), 255, np.uint8); red[10:110, 10:90] = (200, 30, 40)
+        self.save("red.png", red); self.save("m_red.png", np.where(red.min(axis=2) < 250, 255, 0))
+        rows = {}
+        for blur in (0, 20):
+            item = {"cx": 0.5, "base": 0.8, "height": 0.4, "photo": "red.png", "alpha": "m_red.png", "blur": blur}
+            with contextlib.redirect_stdout(io.StringIO()):
+                product_lock.layout(self.ns(packshot=None, box=None, plan=self.plan(bg="#2040C0", shapes=[], products=[item])))
+            sk = np.asarray(Image.open(os.path.join(self.dir.name, "out.png")).convert("RGB")).astype(int)
+            rows[blur] = sk[300, :, 0] - sk[300, :, 2]   # red over the backdrop's own red-blue
+        bg = rows[20][5]
+        self.assertLess(np.abs(np.diff(rows[20])).max(), 25, "the blurred edge has no hard step")
+        sharp, soft = np.nonzero(rows[0] - bg > 60)[0], np.nonzero(rows[20] - bg > 60)[0]
+        self.assertAlmostEqual((sharp.min() + sharp.max()) / 2, (soft.min() + soft.max()) / 2, delta=1.5)  # the blur does not move it
+
     def test_reprint_restores_smeared_print_under_the_render_light(self):
         import cv2
         with contextlib.redirect_stdout(io.StringIO()):
