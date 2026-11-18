@@ -284,6 +284,9 @@ describe("the words of the pick rule (design pack §2.11, risk R5)", () => {
     expect(e3).toContain("the critic's reserves (batch_get conceptReview.reserves, up to 3) as the spares");
     expect(e3).toContain("ownerReject (his exact words)");
     expect(e3).toContain("Never suggest a swap.");
+    // Owner, 18-11-2026: he sees every concept with the critic's notes and chooses the 3.
+    expect(e3).toContain("Show the owner ALL the concepts of the batch, not only the picks");
+    expect(e3).toContain("neither a pick nor a reserve: ideas_update picked false");
     expect(INSTRUCTIONS).toContain("spares (engine 2: 2 per stage; engine 3: the critic's reserves)");
     expect(INSTRUCTIONS).not.toContain("copy review is not built yet");
     expect(e3).toContain("owner_decision");
@@ -291,6 +294,9 @@ describe("the words of the pick rule (design pack §2.11, risk R5)", () => {
     const critic = readFileSync("plugin/agents/critic.md", "utf8");
     const review = critic.slice(critic.indexOf("**Review the concepts (engine 3).**"), critic.indexOf("**Rank drafts blind.**"));
     expect(review).toContain("Two concepts can have one role.");
+    expect(review).toContain("the point, local-truth and appetite tests pass");
+    expect(readFileSync("plugin/agents/writer.md", "utf8")).toContain("Picture device first (owner, 18-11-2026");
+    expect(readFileSync("plugin/agents/art-director.md", "utf8")).toContain("Product truth from real photos (owner, 18-11-2026)");
     expect(review).not.toMatch(stageRule);
   });
 });
