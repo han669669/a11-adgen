@@ -6,6 +6,7 @@ import contextlib
 import importlib.util
 import io
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -348,6 +349,11 @@ class Headline(Tmp):
         self.assertIn("under --min-head", exit_message(self.run_, *words, "--min-head", "0.3"))
         self.assertIn("above the product top", exit_message(self.run_, *words, "--product-top", "0.44"))  # text ends at 41.8%
         self.assertIn("--product-top more than 0", exit_message(self.run_, *words, "--product-top", "0"))
+        # The check measures the drawn ink: a descender under the last baseline counts (review on #112).
+        low = ["--font", self.FONT, "--case", "upper", "--headline", "Ça | quip", "--area", "0.07,0.05,0.93,0.45"]
+        _, msg = self.run_(*low)
+        bottom = float(re.search(r"bottom ([0-9.]+)%", msg).group(1)) / 100  # the last baseline
+        self.assertIn("above the product top", exit_message(self.run_, *low, "--product-top", f"{bottom + 0.045:.3f}"))
 
     def test_a_missing_font_stops_with_a_clear_message(self):
         self.assertIn("font file not found", exit_message(self.run_, "--font", "/no/such.ttf", "--headline", "Hi", "--area", "0,0,1,1"))

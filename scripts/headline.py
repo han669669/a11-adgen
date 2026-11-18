@@ -319,9 +319,12 @@ def main(argv=None):
     if hf.size < a.min_head * H:
         sys.exit(f"the headline is {hf.size}px, {100 * hf.size / H:.1f}% of the height, under --min-head {100 * a.min_head:.1f}%: make the area larger or break the lines with ' | '")
 
+    ink = [0]  # the lowest drawn pixel row: descenders and marks such as a cedilla count (the --product-top check)
+
     def put(lines, font, step, y, anchor="la", marked=frozenset()):
         for line in lines:
             w = draw.textlength(line, font=font)
+            ink[0] = max(ink[0], draw.textbbox((0, y), line, font=font, anchor=anchor)[3])
             x = bx0 if a.align == "left" else bx0 + bw - w if a.align == "right" else bx0 + (bw - w) / 2
             if marked:  # word by word, so the accent words take their own colour; the spaces keep the line's own width
                 words = line.split(" ")
@@ -357,8 +360,8 @@ def main(argv=None):
         y = put(hl, hf, lh, top, "la", accent)
     if sl:
         y = put(sl, sf, sh, y + int(hf.size * a.gap))
-    if a.product_top is not None and y + a.min_clear * H > a.product_top * H:
-        sys.exit(f"the text ends at {100 * y / H:.1f}% of the height, less than {100 * a.min_clear:.1f}% above the product top ({100 * a.product_top:.1f}%): move the area up or make it shorter")
+    if a.product_top is not None and ink[0] + a.min_clear * H > a.product_top * H:
+        sys.exit(f"the text ends at {100 * ink[0] / H:.1f}% of the height, less than {100 * a.min_clear:.1f}% above the product top ({100 * a.product_top:.1f}%): move the area up or make it shorter")
     if logo:
         im.paste(logo, (round(W / 2 - body_centre(logo)) if a.logo_x is None else round(W * a.logo_x), ly), logo)
     im.save(a.out, quality=95)
