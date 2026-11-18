@@ -340,6 +340,15 @@ class Headline(Tmp):
         self.assertLessEqual(ys.max(), 0.5 * 500 + 2)
         self.assertIn("text top 20.0%", msg)
 
+    def test_the_engine_3_lockup_checks_size_and_clear_space(self):
+        # Owner, 18-11-2026: big stacked type, and clear air between the words and the food.
+        words = ["--font", self.FONT, "--case", "upper", "--headline", "The only | pie chart | I like.", "--area", "0.07,0.05,0.93,0.45"]
+        out, msg = self.run_(*words, "--min-head", "0.07", "--product-top", "0.6")
+        self.assertIn("headline", msg)
+        self.assertIn("under --min-head", exit_message(self.run_, *words, "--min-head", "0.3"))
+        self.assertIn("above the product top", exit_message(self.run_, *words, "--product-top", "0.44"))  # text ends at 41.8%
+        self.assertIn("--product-top more than 0", exit_message(self.run_, *words, "--product-top", "0"))
+
     def test_a_missing_font_stops_with_a_clear_message(self):
         self.assertIn("font file not found", exit_message(self.run_, "--font", "/no/such.ttf", "--headline", "Hi", "--area", "0,0,1,1"))
 

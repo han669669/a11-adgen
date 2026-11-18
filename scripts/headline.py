@@ -36,6 +36,16 @@ sets the subline at --sub-ratio of that size under it, and prints the text's top
 bottom as a percentage of the height, so the logo gap can be checked. A variable font
 takes --wght and --sub-wght on its weight axis. It stops with a clear message, and
 writes nothing, when the font or the picture is missing or the words cannot fit.
+
+The engine 3 lockup (owner, 18-11-2026: the pie chart type "isn't big enough", unlike "This one." and
+"Too slow."): big stacked capitals with a subline about half the headline size and clear air above the
+food. --min-head stops the script when the headline comes out smaller than that share of the picture
+height (make the area larger or break the lines with " | "); --product-top gives the top of the product
+(fraction of the height) and the script stops when the text ends less than --min-clear (default 0.04)
+above it:
+
+python3 scripts/headline.py ... --case upper --leading 0.95 --sub-ratio 0.5 --gap 0.35 \
+    --min-head 0.07 --product-top 0.52 --headline "THE ONLY | PIE CHART | I LIKE."
 """
 import argparse
 import math
@@ -241,6 +251,9 @@ def main(argv=None):
     p.add_argument("--leading", type=float, default=1.05, help="step between headline lines, x the font size")
     p.add_argument("--accent", default="", help="headline words set in --accent-color (matched without case)")
     p.add_argument("--accent-color", default="", help="the kit's accent colour, hex")
+    p.add_argument("--min-head", type=float, default=0, help="stop when the headline size is under this share of the picture height (engine 3: 0.07)")
+    p.add_argument("--product-top", type=float, default=None, help="the product's top edge, x the picture height: the text must end --min-clear above it")
+    p.add_argument("--min-clear", type=float, default=0.04, help="clear space between the text and --product-top, x the picture height")
     p.add_argument("--logo", help="the kit logo (PNG), drawn above the words: a preview on drafts, the real logo on a final built in code (creative-playbook 7.7)")
     p.add_argument("--logo-width", type=float, default=0.25, help="logo width, x the picture width")
     p.add_argument("--logo-top", type=float, default=0.045, help="logo top, x the picture height")
@@ -301,6 +314,10 @@ def main(argv=None):
     if fit is None:
         sys.exit(f"the words do not fit the area {a.area} in at most {MAX_LINES} headline lines and 2 subline lines; make the area larger or the copy shorter")
     hf, hl, sf, sl, lh, sh = fit
+    if not (0 <= a.min_head < 1 and 0 <= a.min_clear < 1) or (a.product_top is not None and not 0 < a.product_top <= 1):
+        sys.exit("--min-head and --min-clear must be from 0 to less than 1, --product-top more than 0 and at most 1")
+    if hf.size < a.min_head * H:
+        sys.exit(f"the headline is {hf.size}px, {100 * hf.size / H:.1f}% of the height, under --min-head {100 * a.min_head:.1f}%: make the area larger or break the lines with ' | '")
 
     def put(lines, font, step, y, anchor="la", marked=frozenset()):
         for line in lines:
@@ -340,6 +357,8 @@ def main(argv=None):
         y = put(hl, hf, lh, top, "la", accent)
     if sl:
         y = put(sl, sf, sh, y + int(hf.size * a.gap))
+    if a.product_top is not None and y + a.min_clear * H > a.product_top * H:
+        sys.exit(f"the text ends at {100 * y / H:.1f}% of the height, less than {100 * a.min_clear:.1f}% above the product top ({100 * a.product_top:.1f}%): move the area up or make it shorter")
     if logo:
         im.paste(logo, (round(W / 2 - body_centre(logo)) if a.logo_x is None else round(W * a.logo_x), ly), logo)
     im.save(a.out, quality=95)
