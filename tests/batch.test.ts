@@ -249,6 +249,28 @@ describe("batch flow", () => {
       expect((await ideaOf(env, b.id, ideas[0]!.id)).drafts.map((d) => d.rank)).toEqual([1, 2, 3, 1, 2, 3]);
     });
 
+    it("(d) a later fix on the same drafts withdraws a mistaken full pass", async () => {
+      const { env, raw } = makeEnv();
+      const { b, ideas } = await seed(env);
+      const k = addDraft(raw, b.id, ideas[0]!.id, "d4444444-4444-4444-4444-444444444444", 3, OLD);
+      await rank3(env, b.id, [...k]);
+      await batch.batchUpdate(env, { id: b.id, ownerVerdicts: [{ stage: "draft", mark: "pass", ideaId: ideas[0]!.id, ownerSaid: "usable" }] });
+      expect((await ideaOf(env, b.id, ideas[0]!.id)).drafts.every((d) => d.rank !== null)).toBe(true);
+      // Owner, 18-11-2026: the pass was a mistake; his newest verdict on the same drafts is a fix, so no pass is active.
+      await batch.batchUpdate(env, { id: b.id, ownerVerdicts: [{ stage: "draft", mark: "fix", ideaId: ideas[0]!.id, ownerSaid: "usable, a bit bigger" }] });
+      expect((await ideaOf(env, b.id, ideas[0]!.id)).drafts.every((d) => d.rank === null)).toBe(true);
+    });
+
+    it("(d) activePasses keeps a pass when a redraft came before the fix", () => {
+      const r = (at: string) => ({ idea: "i1", kind: "draft", created_at: at });
+      const v = (mark: string, at: string) => ({ idea_id: "i1", mark, at });
+      expect(batch.activePasses([v("pass", "2"), v("fix", "3")], [r("1")]).has("i1")).toBe(false);
+      expect(batch.activePasses([v("pass", "2"), v("fix", "4")], [r("1"), r("3")]).get("i1")).toBe("2");
+      expect(batch.activePasses([v("pass", "2"), v("fix", "3"), v("pass", "5")], [r("1")]).get("i1")).toBe("5");
+      // A final render after the pass is not a redraft.
+      expect(batch.activePasses([v("pass", "2"), v("fix", "4")], [{ idea: "i1", kind: "final", created_at: "3" }]).has("i1")).toBe(false);
+    });
+
     it("(d) a fix note is not a decision", async () => {
       const { env, raw } = makeEnv();
       const { b, ideas } = await seed(env);

@@ -73,6 +73,8 @@ The four marks:
 | `approve` | He approves it as it is. Stages `final` and `pack`. |
 | `reject` | He refuses it. Stages `final` and `pack`. |
 
+Correction of a mistaken pass (owner, 18-11-2026): rows are only added. A later `fix` on the same idea withdraws the `pass` when no new draft of that idea was made between the two rows (`activePasses` in `worker/batch.ts`). After a redraft, a `fix` is about the new drafts, so the pass stays.
+
 Why `picks` is not extended: a `picks` row is one chosen draft. Its key is the draft's picture, and each row starts one paid final (`final_render_id`). A full pass has no chosen draft. A verdict on pack copy has no picture. A final can get many notes. A second kind of row in `picks` would put the paid-final guard at risk.
 
 Bounded read path: `taste_log` reads `ORDER BY created_at DESC LIMIT ?` on the `verdicts_recent` index. The limit is the tool's `limit` (1 to 100, default 30).
