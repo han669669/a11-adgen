@@ -21,7 +21,12 @@ Run it on the picture before the words go on: the ad's type is set in post on a 
 soften and lens steps leave it crisp (tone and grain still run there, so no edge shows on the backdrop). Then give
 compose_final grain "off" on that final: this script makes the grain.
 
-  python3 scripts/photo_finish.py --in <picture> --out <picture> [--strength 1] [--sharp x0,y0,x1,y1] [--no-STEP]
+--keep HEX keeps a brand colour exact (owner, 18-11-2026: the tone step turned the Fickle Feline brand yellow olive,
+because the highlight shoulder pulls the red channel down more than the green). Pixels near that colour skip the
+tone and halation steps; the soften, lens and grain steps still run there, so the backdrop reads as the same photo.
+Use it on an engine 3 brand-colour stage with the kit's brand colour.
+
+  python3 scripts/photo_finish.py --in <picture> --out <picture> [--strength 1] [--sharp x0,y0,x1,y1] [--keep HEX] [--no-STEP]
 
 Sizes scale with the picture width (the numbers are tuned at 1536 px, the final width), so a 1024 px draft gets
 the same look at its size. --seed makes the grain the same on each run. Needs Python 3 with Pillow, numpy and
@@ -35,6 +40,7 @@ import numpy as np
 from PIL import Image
 
 FORMATS = ["JPEG", "PNG", "WEBP"]
+KEEP_NEAR, KEEP_FAR = 0.06, 0.14  # --keep: RGB distance (0..1) fully kept, and where the normal finish is back
 REF_WIDTH = 1536  # the final's width; sizes below are in pixels at this width
 
 STEPS = ("tone", "soften", "halation", "lens", "grain")
@@ -188,8 +194,25 @@ def sharp_mask(h, w, boxes, cv2):
     return m
 
 
-def finish(img, strength=1.0, skip=(), sharp_boxes=(), seed=None, params=None):
-    """The finished picture (PIL RGB) from a PIL picture. Pure function of its inputs and the seed."""
+def hex_rgb(s):
+    h = s.strip().lstrip("#")
+    if len(h) != 6 or any(c not in "0123456789abcdefABCDEF" for c in h):
+        sys.exit(f"--keep needs a colour as RRGGBB, not {s!r}")
+    return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+
+def keep_mask(a, colours):
+    """1 where a pixel is near one of the colours (kept exact by tone and halation), 0 far from all of them."""
+    m = np.zeros(a.shape[:2], np.float32)
+    for c in colours:
+        d = np.sqrt(((a - np.asarray(c, np.float32)) ** 2).sum(-1))
+        m = np.maximum(m, np.clip((KEEP_FAR - d) / (KEEP_FAR - KEEP_NEAR), 0, 1))
+    return m[..., None]
+
+
+def finish(img, strength=1.0, skip=(), sharp_boxes=(), seed=None, params=None, keep=()):
+    """The finished picture (PIL RGB) from a PIL picture. Pure function of its inputs and the seed.
+    keep: RGB colours (0..1) that the tone and halation steps leave exact (a brand colour)."""
     cv2 = need_cv2()
     p = dict(DEFAULTS)
     p.update(params or {})
@@ -200,12 +223,13 @@ def finish(img, strength=1.0, skip=(), sharp_boxes=(), seed=None, params=None):
     k = float(strength)
     sharp = sharp_mask(h, w, list(sharp_boxes), cv2)
     rng = np.random.default_rng(seed)
+    kept = keep_mask(a, keep) if keep else None
     if "tone" not in skip:
-        a = tone(a, p, k)
+        a = tone(a, p, k) if kept is None else a * kept + tone(a, p, k) * (1 - kept)
     if "soften" not in skip:
         a = soften(a, p, k, scale, sharp, cv2)
     if "halation" not in skip:
-        a = halation(a, p, k, scale, cv2)
+        a = halation(a, p, k, scale, cv2) if kept is None else a * kept + halation(a, p, k, scale, cv2) * (1 - kept)
     if "lens" not in skip:
         a = lens(a, p, k, scale, sharp, cv2)
     if "grain" not in skip:
@@ -220,6 +244,7 @@ def main(argv=None):
     ap.add_argument("--strength", type=float, default=1.0, help="0 = no change, 1 = the tuned look (at most 2)")
     ap.add_argument("--sharp", action="append", default=[], help="x0,y0,x1,y1 (fractions): keep crisp, e.g. the logo; repeat")
     ap.add_argument("--seed", type=int, default=None, help="the same grain on each run")
+    ap.add_argument("--keep", action="append", default=[], help="RRGGBB: keep this brand colour exact in tone and halation; repeat")
     ap.add_argument("--quality", type=int, default=95, help="JPEG quality of the output")
     for s in STEPS:
         ap.add_argument(f"--no-{s}", action="store_true", help=f"skip the {s} step")
@@ -236,9 +261,10 @@ def main(argv=None):
     except Exception as e:  # noqa: BLE001  (any decoder error is a bad input)
         sys.exit(f"cannot read {a.src} as JPEG, PNG or WebP: {e}")
     boxes = [box_fracs(b) for b in a.sharp]
+    keep = [hex_rgb(c) for c in a.keep]
     skip = {s for s in STEPS if getattr(a, f"no_{s}")}
     params = {n: getattr(a, n) for n in DEFAULTS if getattr(a, n) is not None}
-    out = finish(img, a.strength, skip, boxes, a.seed, params)
+    out = finish(img, a.strength, skip, boxes, a.seed, params, keep)
     try:
         if a.out.lower().endswith((".jpg", ".jpeg")):
             out.save(a.out, quality=a.quality, subsampling=0)
@@ -247,7 +273,7 @@ def main(argv=None):
     except Exception as e:  # noqa: BLE001
         sys.exit(f"cannot write {a.out}: {e}")
     print(f"photo_finish: {img.size[0]}x{img.size[1]} strength {a.strength} steps {','.join(s for s in STEPS if s not in skip)}"
-          f"{' sharp ' + str(len(boxes)) if boxes else ''} -> {a.out}")
+          f"{' sharp ' + str(len(boxes)) if boxes else ''}{' keep ' + ','.join(a.keep) if keep else ''} -> {a.out}")
 
 
 if __name__ == "__main__":
