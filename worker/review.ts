@@ -114,13 +114,13 @@ export async function conceptPick(env: Env, batchId: string, ids: string[], inpu
   const [ideas, frozen, canon, last] = await Promise.all([
     env.DB.prepare("SELECT id, n, concept FROM ideas WHERE batch_id = ? ORDER BY n").bind(batchId).all<{ id: string; n: number; concept: string }>(),
     env.DB.prepare(
-      "SELECT 1 FROM renders r JOIN ideas i ON i.id = r.idea AND i.batch_id = r.batch WHERE r.batch = ? AND i.picked = 1 LIMIT 1",
+      "SELECT 1 FROM renders r JOIN ideas i ON i.id = r.idea AND i.batch_id = r.batch WHERE r.batch = ? AND i.picked = 1 AND r.kind != 'rough' LIMIT 1",
     ).bind(batchId).first(),
     rankStamp(env),
     conceptReviewGet(env, batchId),
   ]);
   if (frozen)
-    throw new InputError("A picked idea of this batch has a render, so the picks and roles are frozen. Only the owner can change them, with ideas_update.");
+    throw new InputError("A picked idea of this batch has a draft or final render, so the picks and roles are frozen. Only the owner can change them, with ideas_update.");
   const all = new Set(ideas.results.map((i) => i.id));
   if (ownerWords && last?.outcome !== "select")
     throw new InputError(`${ownerSwap ? "ownerSwap" : "ownerReject"} changes a saved selection, and this batch has none.`);
@@ -197,7 +197,7 @@ export async function conceptPick(env: Env, batchId: string, ids: string[], inpu
       `INSERT INTO batch_records (id, batch_id, kind, idea_id, version, body, author, prompt_version, created_at)
        SELECT ?, ?, 'concept_review', NULL, v, ?, ?, ?, ? FROM
          (SELECT COALESCE(MAX(version), 0) + 1 AS v FROM batch_records WHERE batch_id = ? AND kind = 'concept_review' AND idea_id IS NULL)
-       WHERE NOT EXISTS (SELECT 1 FROM renders r JOIN ideas i ON i.id = r.idea AND i.batch_id = r.batch WHERE r.batch = ? AND i.picked = 1)
+       WHERE NOT EXISTS (SELECT 1 FROM renders r JOIN ideas i ON i.id = r.idea AND i.batch_id = r.batch WHERE r.batch = ? AND i.picked = 1 AND r.kind != 'rough')
          AND (SELECT COUNT(*) FROM ideas WHERE batch_id = ?) = ?`,
     ).bind(recordId, batchId, JSON.stringify(body), ownerWords ? "owner" : "critic", promptVersion, new Date().toISOString(), batchId, batchId, batchId, all.size),
     // A rework takes back the owner's approval of the words of the old picks: if the critic selects one again, the owner

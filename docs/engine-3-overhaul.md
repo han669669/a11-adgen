@@ -253,6 +253,6 @@ One small PR at a time. Engine 2 and the daily practice do not change.
 | B5 | Food realism: `photo_finish.py` keeps brand yellow (no olive tone shift); a higher-quality draft option for food | code and tests |
 | B6 | Type: the big stacked lockup with subline about 0.5 of the headline and a checked gap above the product | code and tests |
 | B7 | Real-photo cut-outs: a script that cuts out brand product photos and composes them into a reference plan | code and tests |
-| B8 | C7 roughs before the copy review | code and tests |
+| B8 | C7 roughs before the copy review: `render_submit` kind `rough` (any concept of an engine 3 batch, no copy approval, draft price, at most 2 for each concept and 8 for each batch), `batch_get` ideas[].roughs, migration `0017_roughs` (renders.kind takes 'rough'; live only with the owner's yes, and roughs are refused until it is live) | code and tests |
 
 Then a second product in another category (a drink or a wellness product).
