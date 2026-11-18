@@ -207,6 +207,32 @@ class LayoutReprint(Tmp):
         self.assertGreater(sk[440:460, 10:20].mean(), 80)
         self.assertLess(abs(int(sk[480, 5]) - 0x6a), 25, "the floor shape under the products")
 
+    def test_layout_composes_each_product_from_its_own_photo(self):
+        # Owner, 18-11-2026: real slice photos of each flavour, cut out and composed, not model-drawn food.
+        red = np.full((120, 100, 3), 255, np.uint8); red[20:100, 20:80] = (200, 30, 40)
+        blue = np.full((120, 100, 3), 255, np.uint8); blue[30:90, 10:90] = (40, 50, 190)
+        self.save("red.png", red); self.save("blue.png", blue)
+        for name, arr in (("red", red), ("blue", blue)):
+            m = np.where(arr.min(axis=2) < 250, 255, 0)
+            self.save(f"m_{name}.png", m)
+        plan = self.plan(products=[
+            {"cx": 0.3, "base": 0.8, "height": 0.4, "photo": "red.png", "alpha": "m_red.png"},
+            {"cx": 0.75, "base": 0.8, "height": 0.3, "photo": "blue.png", "alpha": "m_blue.png", "blur": 2}])
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            product_lock.layout(self.ns(packshot=None, box=None, plan=plan))
+        self.assertIn("2 products on 400x500", log.getvalue())
+        sk = np.asarray(Image.open(os.path.join(self.dir.name, "out.png")).convert("RGB")).astype(int)
+        self.assertGreater(sk[300, 120, 0] - sk[300, 120, 2], 100, "the red item at its place")
+        self.assertGreater(sk[340, 300, 2] - sk[340, 300, 0], 100, "the blue item at its place")
+        self.assertLess(abs(sk[40, 200] - (0xB4, 0xA0, 0x8C)).max(), 3, "the backdrop shows no white photo backdrop")
+        self.assertAlmostEqual(int((sk[:, 120, 0] - sk[:, 120, 2] > 100).sum()), 200, delta=4)  # height 0.4 of 500 px, true shape
+        # bad plans stop with clear messages
+        bad = self.plan(products=[{"cx": 0.3, "base": 0.8, "height": 0.4, "alpha": "m_red.png"}])
+        self.assertIn("go with its own photo", exit_message(product_lock.layout, self.ns(packshot=None, box=None, plan=bad)))
+        mixed = self.plan(products=[{"cx": 0.3, "base": 0.8, "height": 0.4}])
+        self.assertIn("a photo for every product", exit_message(product_lock.layout, self.ns(packshot=None, box=None, plan=mixed)))
+        self.assertIn("their own photos", exit_message(product_lock.reprint, self.rp(self.pack, plan=plan)))
+
     def test_reprint_restores_smeared_print_under_the_render_light(self):
         import cv2
         with contextlib.redirect_stdout(io.StringIO()):

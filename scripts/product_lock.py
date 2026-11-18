@@ -13,6 +13,9 @@ Needs Python 3 with Pillow and numpy (reprint also needs OpenCV: opencv-python-h
             Pass it as --alpha to skeleton and swap.
   layout    A skeleton from a plan file: each product at its own place, size, side (standing or lying) and small turn,
             over flat shapes that draw real-scale cues (tile rows, a worktop edge). Use it for groups and true scale.
+            A plan product may name its own real photo ("photo", with an "alpha" from `cutout`): for a range of
+            different items (engine 3, owner 18-11-2026: model-drawn cake slices were "ai food slop"; the brand's
+            real slice photos, cut out and composed, were kept by the model).
   reprint   Put the real packshot print back on each product of a render made from a layout skeleton (the model smears small print).
   swap      Replace the product in an existing draft or final with the real one (repair of a picked draft).
             --lower-only keeps the scene above the label: for an open, almost empty jar (the packshot cannot show that
@@ -21,6 +24,7 @@ Needs Python 3 with Pillow and numpy (reprint also needs OpenCV: opencv-python-h
 --box is the product's silhouette in the packshot: x0,y0,x1,y1 in pixels (read it from a grid overlay of the packshot).
 """
 import argparse
+import os
 import sys
 
 import numpy as np
@@ -423,7 +427,11 @@ def load_plan(path):
      "products": [{"cx": 0.24, "base": 0.77, "height": 0.21, "side": "R", "rot": -0.6}, ...]}
     cx: centre x; base: y of the lowest point; height: the product's own length (cap to base); all fractions of the canvas.
     side: "up" (standing), "L" (lying, top to the left) or "R" (lying, top to the right; its print reads left to right).
-    rot: a small turn in degrees (counter-clockwise), so a group looks put down by a person (creative-playbook 7.4 A)."""
+    rot: a small turn in degrees (counter-clockwise), so a group looks put down by a person (creative-playbook 7.4 A).
+    A product may also give its own real photo (a range of different items, such as cake slices of each flavour):
+    "photo": the file, "alpha": its mask from `cutout` (same size), "box": [x0, y0, x1, y1] px in that photo (default: the
+    mask's box), "blur": px of softness for an item further back. Paths are relative to the plan file. Without "photo"
+    the product is the --packshot."""
     import json
     try:
         with open(path) as f:
@@ -449,6 +457,19 @@ def load_plan(path):
                 sys.exit(f"product {i + 1}: {k} must be a number")
         if not (0 < q["height"] <= 1.5 and -0.5 <= q["cx"] <= 1.5 and 0 < q["base"] <= 1.5 and abs(q["rot"]) <= 45):
             sys.exit(f"product {i + 1}: height must be above 0, cx and base near the canvas, rot within 45 degrees")
+        for k in ("photo", "alpha"):
+            if k in q:
+                if not (isinstance(q[k], str) and q[k]):
+                    sys.exit(f"product {i + 1}: {k} must be a file name")
+                q[k] = os.path.join(os.path.dirname(os.path.abspath(path)), q[k])
+        if ("alpha" in q or "box" in q) and "photo" not in q:
+            sys.exit(f"product {i + 1}: alpha and box go with its own photo")
+        if "photo" in q and "alpha" not in q and "box" not in q:
+            sys.exit(f"product {i + 1}: a photo needs its alpha (from cutout) or its box")
+        if "box" in q and not (isinstance(q["box"], list) and len(q["box"]) == 4 and all(isinstance(v, int) and not isinstance(v, bool) for v in q["box"])):
+            sys.exit(f"product {i + 1}: box must be [x0, y0, x1, y1] in whole pixels")
+        if not (num(q.get("blur", 0)) and 0 <= q.get("blur", 0) <= 20):
+            sys.exit(f"product {i + 1}: blur must be from 0 to 20 px")
     for i, sh in enumerate(plan.get("shapes", [])):
         r = sh.get("rect") if isinstance(sh, dict) else None
         if not (isinstance(r, list) and len(r) == 4 and all(num(v) for v in r) and r[0] < r[2] and r[1] < r[3]):
@@ -487,23 +508,61 @@ def corner(q, img, W, H):
     return round(q["cx"] * W - (b[0] + b[2]) / 2), round(q["base"] * H - b[3])
 
 
+def photo_piece(q):
+    """A plan product's own real photo, cut out with its mask, and its box (default: the mask's box)."""
+    try:
+        photo = Image.open(q["photo"], formats=FORMATS).convert("RGB")
+    except OSError as e:
+        sys.exit(f"cannot read the photo {q['photo']}: {e}")
+    box = q.get("box")
+    if box is None:
+        m = Image.open(q["alpha"], formats=FORMATS).convert("L")
+        box = list(m.point(lambda v: 255 if v > 127 else 0).getbbox() or ())
+        if not box:
+            sys.exit(f"{q['alpha']} is empty: no product in the mask")
+        box = [max(PAD, box[0]), max(PAD, box[1]), min(photo.width - PAD, box[2]), min(photo.height - PAD, box[3])]
+    check_box(box, photo.size, f"the box of {os.path.basename(q['photo'])}")
+    return product_piece(photo, box, q.get("alpha")), box
+
+
 def layout(a):
     """A skeleton from a plan: products at their own places, sizes, sides and small turns (a messy stack, a loose group, one upright),
     over flat shapes that draw the room's real-scale cues (tile rows, a worktop edge). The model then builds the scene around them."""
-    pack = Image.open(a.packshot, formats=FORMATS).convert("RGB")
-    box = ints(a.box, 4)
-    check_box(box, pack.size)
+    from PIL import ImageFilter
     plan = load_plan(a.plan)
+    if a.packshot:
+        pack = Image.open(a.packshot, formats=FORMATS).convert("RGB")
+        if not a.box:
+            sys.exit("--packshot needs --box")
+        box = ints(a.box, 4)
+        check_box(box, pack.size)
+    elif any("photo" not in q for q in plan["products"]):
+        sys.exit("give --packshot and --box, or a photo for every product of the plan")
     W, H = plan["size"]
     canvas = Image.new("RGBA", (W, H), rgb(str(plan.get("bg", "#E9E4DC"))) + (255,))
     d = ImageDraw.Draw(canvas)
     for sh in plan.get("shapes", []):
         x0, y0, x1, y1 = sh["rect"]
         d.rectangle((round(x0 * W), round(y0 * H), round(x1 * W) - 1, round(y1 * H) - 1), fill=rgb(str(sh.get("fill", "#808080"))))
-    piece = product_piece(pack, box, a.alpha)
+    pieces = {}
+    if a.packshot:
+        pieces[None] = (product_piece(pack, box, a.alpha), box)
     boxes = []
     for q in plan["products"]:
-        img = turn(piece, q["height"] * H * piece.height / (box[3] - box[1]), q["side"], q["rot"])
+        key = (q["photo"], q.get("alpha"), tuple(q.get("box") or ())) if "photo" in q else None
+        if key not in pieces:
+            pieces[key] = photo_piece(q)
+        piece, pbox = pieces[key]
+        img = turn(piece, q["height"] * H * piece.height / (pbox[3] - pbox[1]), q["side"], q["rot"])
+        if q.get("blur"):  # an item further back: soft, blurred with its own alpha so no backdrop colour bleeds in
+            v = np.asarray(img).astype(np.float32)
+            al = v[..., 3:] / 255
+            pre = Image.fromarray(np.clip(v[..., :3] * al, 0, 255).astype("uint8")).filter(ImageFilter.GaussianBlur(q["blur"]))
+            wa = Image.fromarray((al[..., 0] * 255).astype("uint8"), "L").filter(ImageFilter.GaussianBlur(q["blur"]))
+            wsum = np.asarray(wa).astype(np.float32)[..., None] / 255
+            rgb_ = np.asarray(pre).astype(np.float32) / np.maximum(wsum, 1e-3)
+            img = Image.fromarray(np.clip(rgb_, 0, 255).astype("uint8")).convert("RGBA")
+            img.putalpha(Image.fromarray((al[..., 0] * 255).astype("uint8"), "L").filter(ImageFilter.GaussianBlur(q["blur"] * 0.6)))
         x, y = corner(q, img, W, H)
         layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))   # paste clips a piece that bleeds off an edge; alpha_composite refuses it
         layer.paste(img, (x, y), img)
@@ -511,7 +570,8 @@ def layout(a):
         print(f"product {len(boxes) + 1}: x {x},{x + img.width} y {y},{y + img.height}")
         boxes.append((x, y))
     canvas.convert("RGB").save(a.out, quality=95)
-    print(f"{a.out}: {len(plan['products'])} products on {W}x{H}, H/W {(box[3] - box[1]) / (box[2] - box[0]):.3f}")
+    shape = f", H/W {(box[3] - box[1]) / (box[2] - box[0]):.3f}" if a.packshot else ""
+    print(f"{a.out}: {len(plan['products'])} products on {W}x{H}{shape}")
 
 
 def reprint(a):
@@ -538,6 +598,8 @@ def reprint(a):
     if not (np.isfinite(a.light_px) and a.light_px > 0):
         sys.exit("--light-px must be above 0")
     plan = load_plan(a.plan)
+    if any("photo" in q for q in plan["products"]):
+        sys.exit("reprint puts one packshot's print back: this plan has products with their own photos")
     render = Image.open(a.render, formats=FORMATS).convert("RGB")
     W, H = render.size
     pw, ph = plan["size"]
@@ -692,8 +754,8 @@ def main():
     o.add_argument("--out", required=True)
     o.set_defaults(fn=open_source)
     y = sub.add_parser("layout", help="a skeleton from a plan file: products at their own places, sides and small turns, over flat real-scale cues")
-    y.add_argument("--packshot", required=True)
-    y.add_argument("--box", required=True, help="x0,y0,x1,y1 of the product in the packshot")
+    y.add_argument("--packshot", help="the product for every plan product without its own photo")
+    y.add_argument("--box", help="x0,y0,x1,y1 of the product in the packshot")
     y.add_argument("--alpha", help="a silhouette mask the size of the packshot (from `cutout`) instead of a rounded box")
     y.add_argument("--plan", required=True, help="the plan JSON (see load_plan); keep it: reprint needs the same plan")
     y.add_argument("--out", required=True)
