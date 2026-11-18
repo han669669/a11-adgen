@@ -731,6 +731,31 @@ export async function batchGetOwner(env: Env, id: string) {
   };
 }
 
+/**
+ * Each idea's active full pass: the newest 'pass' verdict that the owner did not correct. Verdict rows are only added, and
+ * the newest is his current view: a 'fix' on the same idea that comes after a pass, with no new draft of that idea made
+ * between the two, withdraws that pass (owner, 18-11-2026: a usable draft saved as 'pass' by mistake hid it from picks).
+ * An earlier pass then counts again. After a redraft, a 'fix' is about the new drafts, so the pass stays.
+ * verdicts: oldest first.
+ */
+export function activePasses(
+  verdicts: { idea_id: string; mark: string; at: string }[],
+  renders: { idea: string; kind: string; created_at: string }[],
+): Map<string, string> {
+  const passes = new Map<string, string[]>(); // each idea's passes that stand, oldest first
+  for (const v of verdicts) {
+    const list = passes.get(v.idea_id) ?? [];
+    if (v.mark === "pass") passes.set(v.idea_id, [...list, v.at]);
+    else if (v.mark === "fix") {
+      const at = list[list.length - 1];
+      if (at !== undefined && !renders.some((r) => r.idea === v.idea_id && r.kind === "draft" && r.created_at > at && r.created_at <= v.at)) {
+        list.pop();
+      }
+    }
+  }
+  return new Map([...passes].filter(([, list]) => list.length > 0).map(([idea, list]) => [idea, list[list.length - 1] as string]));
+}
+
 /** Everything about one batch, for Claude and for the board. */
 export async function batchGet(env: Env, id: string, { withPlans = false } = {}) {
   const b = await env.DB.prepare(
@@ -745,10 +770,11 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
     ).bind(id).all<Record<string, any>>(),
     env.DB.prepare("SELECT render_key, idea_id, rank, reason FROM draft_ranks WHERE batch_id = ? LIMIT 200").bind(id).all<Record<string, any>>(),
     env.DB.prepare("SELECT render_key, idea_id, note, by_owner, final_render_id, created_at FROM picks WHERE batch_id = ? LIMIT 100").bind(id).all<Record<string, any>>(),
-    // The owner's newest full pass on each idea's drafts (docs/design/owner-verdicts.md).
+    // The owner's newest draft verdicts (bounded; reversed to oldest first below): they give each idea's active full pass
+    // (docs/design/owner-verdicts.md).
     env.DB.prepare(
-      "SELECT idea_id, MAX(created_at) AS at FROM verdicts WHERE batch_id = ? AND stage = 'draft' AND mark = 'pass' GROUP BY idea_id LIMIT 60",
-    ).bind(id).all<{ idea_id: string; at: string }>(),
+      "SELECT idea_id, mark, created_at AS at FROM verdicts WHERE batch_id = ? AND stage = 'draft' AND idea_id IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 400",
+    ).bind(id).all<{ idea_id: string; mark: string; at: string }>(),
     latestKit(env, b.brand_id, b.kit_version),
   ]);
   const rankBy = new Map(ranks.results.map((r) => [r.render_key, r]));
@@ -756,7 +782,7 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
   // The blind rank is held on the server until the owner decides (a11-engine v3 design pack §4.3): an owner pick on the idea
   // shows the rank of all its drafts; a full pass shows it only for the drafts that existed when he passed. No flag turns this off.
   const ownerPicked = new Set(picks.results.filter((p) => p.by_owner === 1).map((p) => p.idea_id as string));
-  const passedAt = new Map(passes.results.map((p) => [p.idea_id, p.at]));
+  const passedAt = activePasses([...passes.results].reverse(), renders.results as { idea: string; kind: string; created_at: string }[]);
   const img = (key: string) => ({ key, url: fal.mediaUrl(env, key) });
   const [brief, conceptReview, directions, checks, rounds] = await Promise.all([
     briefGet(env, id),
