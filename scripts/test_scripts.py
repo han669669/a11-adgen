@@ -31,6 +31,7 @@ product_lock = load("product_lock")
 food_grade = load("food_grade")
 headline = load("headline")
 photo_finish = load("photo_finish")
+pack_check = load("pack_check")
 
 
 def exit_message(fn, *args):
@@ -620,6 +621,95 @@ class PhotoFinish(Tmp):
         with contextlib.redirect_stdout(io.StringIO()) as log:
             photo_finish.main(["--in", src, "--out", out, "--keep", "FFD200", "--no-grain"])
         self.assertIn("keep FFD200", log.getvalue())
+
+
+class PackCheck(Tmp):
+    """Owner, 19-11-2026: the pack must match the real pack in every dimension; the brand's packshot is the guide."""
+
+    def stage(self, h, w, clip=True):
+        img = np.zeros((400, 300, 3))
+        img[:] = (255, 212, 25)  # the stage colour
+        img[300:320, 40:280] = (200, 160, 18)  # its shadow: the same hue, darker
+        y0 = 300 - h
+        img[y0:300, 150 - w // 2:150 + w // 2] = (120, 80, 50)  # the pack
+        img[y0 + 20:y0 + 30, 140:160] = (255, 212, 25)  # yellow print on the pack: a hole in the mask
+        if clip:
+            img[y0 - 25:y0, 145:155] = (20, 20, 20)  # a clip on the top
+        return self.save("r.png", img)
+
+    def packshot(self, h, w):
+        a = np.zeros((300, 300))
+        a[150 - h // 2:150 + h // 2, 150 - w // 2:150 + w // 2] = 255
+        return self.save("p.png", a)
+
+    def check(self, *args):
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            code = pack_check.main(list(args))
+        return code, log.getvalue()
+
+    def test_a_pack_of_the_true_shape_passes_with_a_clip_and_a_shadow(self):
+        code, log = self.check("--render", self.stage(214, 200), "--at", "150,200", "--bg", "FFD419", "--packshot", self.packshot(214, 200))
+        self.assertEqual(code, 0, log)
+        self.assertIn("PASS", log)
+
+    def test_a_short_wide_pack_fails(self):
+        code, log = self.check("--render", self.stage(180, 210), "--at", "150,250", "--bg", "FFD419", "--packshot", self.packshot(214, 200))
+        self.assertEqual(code, 1, log)
+        self.assertIn("FAIL", log)
+
+    def test_a_stage_coloured_band_across_the_pack_does_not_split_it(self):
+        img = np.zeros((400, 300, 3))
+        img[:] = (255, 212, 25)
+        img[86:300, 50:250] = (120, 80, 50)  # the pack, 214 x 200
+        img[180:186, 50:250] = (255, 212, 25)  # a yellow print band from edge to edge
+        code, log = self.check("--render", self.save("band.png", img), "--at", "150,250", "--bg", "FFD419", "--packshot", self.packshot(214, 200))
+        self.assertEqual(code, 0, log)
+
+    def test_a_grey_stage_is_not_measured_as_the_pack(self):
+        img = np.full((400, 300, 3), 200.0)
+        img[300:320, 40:280] = 150  # its shadow
+        img[86:300, 50:250] = (120, 80, 50)
+        code, log = self.check("--render", self.save("grey.png", img), "--at", "150,250", "--bg", "C8C8C8", "--packshot", self.packshot(214, 200))
+        self.assertEqual(code, 0, log)
+
+    def test_a_near_neutral_stage_is_not_measured_as_the_pack(self):
+        img = np.zeros((400, 300, 3))
+        img[:] = (200, 175, 165)  # C8AFA5: saturation 0.175, under 0.2 but over 0.15
+        img[86:300, 50:250] = (165, 200, 175)  # a muted green pack: the same saturation and brightness, another hue
+        code, log = self.check("--render", self.save("warm.png", img), "--at", "150,250", "--bg", "C8AFA5", "--packshot", self.packshot(214, 200))
+        self.assertEqual(code, 0, log)
+
+    def test_a_dark_coloured_stage_is_not_measured_as_the_pack(self):
+        img = np.zeros((400, 300, 3))
+        img[:] = (64, 0, 0)  # a deep red stage, 400000
+        img[300:320, 40:280] = (36, 0, 0)  # its shadow: the same hue, darker
+        img[86:300, 50:250] = (230, 225, 210)  # a pale pack
+        code, log = self.check("--render", self.save("dark.png", img), "--at", "150,250", "--bg", "400000", "--packshot", self.packshot(214, 200))
+        self.assertEqual(code, 0, log)
+
+    def test_a_deep_shadow_of_a_bright_stage_is_not_measured_as_the_pack(self):
+        img = np.zeros((400, 300, 3))
+        img[:] = (255, 212, 25)
+        img[86:300, 50:250] = (120, 80, 50)
+        img[300:320, 40:260] = (60, 49, 5)  # a deep shadow that touches the pack
+        code, log = self.check("--render", self.save("deep.png", img), "--at", "150,250", "--bg", "FFD419", "--packshot", self.packshot(214, 200))
+        self.assertEqual(code, 0, log)
+
+    def test_a_pack_on_its_side_passes_with_sideways(self):
+        img = np.zeros((400, 400, 3))
+        img[:] = (255, 212, 25)
+        img[150:250, 50:350] = (120, 80, 50)  # the pack on its side: 100 high, 300 wide
+        args = ["--render", self.save("side.png", img), "--at", "200,200", "--bg", "FFD419", "--packshot", self.packshot(300, 100)]
+        self.assertEqual(self.check(*args)[0], 1)
+        code, log = self.check(*args, "--sideways")
+        self.assertEqual(code, 0, log)
+
+    def test_a_point_on_the_stage_and_a_packshot_without_a_cut_out_stop_with_a_clear_message(self):
+        r = self.stage(214, 200)
+        self.assertIn("not inside the pack", exit_message(pack_check.main, ["--render", r, "--at", "5,5", "--bg", "FFD419", "--packshot", self.packshot(214, 200)]))
+        flat = self.save("flat.png", np.full((50, 50, 3), 200))
+        self.assertIn("cut-out packshot", exit_message(pack_check.main, ["--render", r, "--at", "150,200", "--bg", "FFD419", "--packshot", flat]))
+        self.assertIn("RRGGBB", exit_message(pack_check.main, ["--render", r, "--at", "150,200", "--bg", "yellow", "--packshot", flat]))
 
 
 if __name__ == "__main__":
