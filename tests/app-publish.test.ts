@@ -11,38 +11,57 @@ import { run } from "./helpers/engine3";
 const PAGE = '<script src="/assets/index-TEST.js"></script><link href="/assets/index-TEST.css">';
 const BUILD: Record<string, string> = { "assets/index-TEST.css": "test css", "assets/index-TEST.js": "test js", "index.html": PAGE };
 const OLD_PAGE = '<script src="/assets/index-OLD.js"></script>';
-/** Where the page that a publish replaced is kept: the key holds the SHA-256 of the page that the publish made live. */
-const kept = (page: string) => `app-publish/previous/${createHash("sha256").update(page).digest("hex")}.html`;
-const KEPT = kept(PAGE);
+/** Ids of kept pages, as a publish makes them (random). */
+const ID_A = "11111111-1111-4111-8111-111111111111";
+const ID_B = "22222222-2222-4222-8222-222222222222";
+const kept = (id: string) => `app-publish/previous/${id}.html`;
 
 interface Saved {
   bytes: Uint8Array;
   sha256?: ArrayBuffer;
   type?: string;
+  meta?: Record<string, string>;
 }
 
-/** R2 with the parts the publish path uses. Like R2, put refuses a body that does not have the given SHA-256. */
-function setup(live: Record<string, string> = { "app/index.html": OLD_PAGE, "app/assets/index-OLD.js": "old js" }) {
+const etag = (bytes: Uint8Array) => createHash("md5").update(bytes).digest("hex");
+/** The kept pages in R2. */
+const keptPages = (files: Map<string, Saved>) => [...files.keys()].filter((key) => key.startsWith("app-publish/previous"));
+/** Where the way back of the live page is: the live page names its own kept page. */
+const keptOf = (files: Map<string, Saved>) => kept(files.get("app/index.html")!.meta?.previous ?? "none");
+
+/**
+ * R2 with the parts the publish path uses. Like R2, put refuses a body that does not have the given SHA-256, and with
+ * onlyIf it writes only when the object still has the given etag (null if not). `meta` is the customMetadata of a key.
+ */
+function setup(live: Record<string, string> = { "app/index.html": OLD_PAGE, "app/assets/index-OLD.js": "old js" }, meta: Record<string, Record<string, string>> = {}) {
   const files = new Map<string, Saved>();
   const enc = (s: string) => new TextEncoder().encode(s);
-  for (const [key, body] of Object.entries(live)) files.set(key, { bytes: enc(body) });
+  for (const [key, body] of Object.entries(live)) files.set(key, { bytes: enc(body), meta: meta[key] });
   const view = (f: Saved) => ({
     checksums: { sha256: f.sha256 },
     arrayBuffer: async () => f.bytes.buffer.slice(f.bytes.byteOffset, f.bytes.byteOffset + f.bytes.byteLength),
     json: async () => JSON.parse(new TextDecoder().decode(f.bytes)),
     body: f.bytes,
     httpMetadata: { contentType: f.type },
+    customMetadata: f.meta,
+    etag: etag(f.bytes),
   });
-  const state = { reads: 0, failPut: "", limited: false, limitKeys: [] as string[] };
+  type Hook = ((key: string) => void | Promise<void>) | undefined;
+  /** beforePut and afterPut run around each write: a test uses them for a request that overlaps another. */
+  const state = { reads: 0, failPut: "", limited: false, limitKeys: [] as string[], beforePut: undefined as Hook, afterPut: undefined as Hook };
   const MEDIA = {
     head: async (k: string) => (state.reads++, files.has(k) ? view(files.get(k)!) : null),
     get: async (k: string) => (state.reads++, files.has(k) ? view(files.get(k)!) : null),
     delete: async (k: string | string[]) => void [k].flat().forEach((key) => files.delete(key)),
-    put: async (k: string, v: ArrayBuffer | string, o?: { sha256?: ArrayBuffer; httpMetadata?: { contentType?: string } }) => {
+    put: async (k: string, v: ArrayBuffer | string, o?: { sha256?: ArrayBuffer; httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string>; onlyIf?: { etagMatches?: string } }) => {
+      await state.beforePut?.(k);
       if (k === state.failPut) throw new Error("R2: the write failed");
       const bytes = typeof v === "string" ? enc(v) : new Uint8Array(v);
       if (o?.sha256 && !createHash("sha256").update(bytes).digest().equals(Buffer.from(o.sha256))) throw new Error("R2: the body does not have the given SHA-256");
-      files.set(k, { bytes, sha256: o?.sha256, type: o?.httpMetadata?.contentType });
+      if (o?.onlyIf?.etagMatches !== undefined && (!files.has(k) || etag(files.get(k)!.bytes) !== o.onlyIf.etagMatches)) return null;
+      files.set(k, { bytes, sha256: o?.sha256, type: o?.httpMetadata?.contentType, meta: o?.customMetadata });
+      await state.afterPut?.(k);
+      return view(files.get(k)!);
     },
   };
   const PUBLISH_LIMIT = { limit: async ({ key }: { key: string }) => (state.limitKeys.push(key), { success: !state.limited }) };
@@ -94,7 +113,8 @@ describe("app_publish", () => {
     expect(text("app/index.html")).toBe(PAGE);
     expect(files.get("app/assets/index-TEST.js")!.type).toBe("text/javascript; charset=utf-8");
     expect(files.get("app/index.html")!.type).toBe("text/html; charset=utf-8");
-    expect(text(KEPT)).toBe(OLD_PAGE);
+    const way = keptOf(files);
+    expect(text(way)).toBe(OLD_PAGE);
     // The site serves the new page; the private prefix is not served.
     expect(await (await worker.fetch(new Request("https://w.example/"), env)).text()).toBe(PAGE);
     expect((await worker.fetch(new Request("https://w.example/app-publish/link.json"), env)).status).toBe(404);
@@ -108,7 +128,8 @@ describe("app_publish", () => {
     const second = linkOf(await publish(env));
     await put(env, `${second}/assets/index-TEST.css`, BUILD["assets/index-TEST.css"]!);
     expect((await put(env, `${second}/index.html`, PAGE)).status).toBe(200);
-    expect(text(KEPT)).toBe(OLD_PAGE);
+    expect(keptOf(files)).toBe(way);
+    expect(text(way)).toBe(OLD_PAGE);
     // Each step is logged, and no log line has the link.
     const lines = logs.mock.calls.map((c) => JSON.parse(String(c[0])) as { event: string; action: string; path?: string });
     expect(lines.filter((l) => l.event === "app_publish").map((l) => l.action)).toEqual(["link", "file", "file", "file", "link", "file", "file"]);
@@ -245,35 +266,91 @@ describe("app_publish", () => {
   it("rollback goes one step back from the live page, whatever build the Worker runs", async () => {
     // The live page is not the build of this Worker (a deploy without a publish, or a revert on main).
     const NEWER = '<script src="/assets/index-NEWER.js"></script>';
-    const { env, files, text } = setup({
-      "app/index.html": NEWER,
-      "app/assets/index-TEST.css": "test css",
-      "app/assets/index-TEST.js": "test js",
-      "app/assets/index-OLD.js": "old js",
-      // The publish of NEWER replaced PAGE, and an earlier publish of PAGE replaced OLD_PAGE.
-      [kept(NEWER)]: PAGE,
-      [kept(PAGE)]: OLD_PAGE,
-    });
+    const { env, files, text } = setup(
+      {
+        "app/index.html": NEWER,
+        "app/assets/index-TEST.css": "test css",
+        "app/assets/index-TEST.js": "test js",
+        "app/assets/index-OLD.js": "old js",
+        // The publish of NEWER replaced PAGE. A page kept at an earlier publish of PAGE is still in R2 (its delete did not run).
+        [kept(ID_A)]: PAGE,
+        [kept(ID_B)]: OLD_PAGE,
+      },
+      { "app/index.html": { previous: ID_A } },
+    );
     expect(await run(env, "app_publish", { rollback: true })).toMatchObject({ rolledBack: true, assets: ["assets/index-TEST.js", "assets/index-TEST.css"] });
     expect(text("app/index.html")).toBe(PAGE);
     // PAGE is live by a rollback, not by a publish: the page kept at its earlier publish is not its way back.
     await expect(publish(env, { rollback: true })).rejects.toThrow("No earlier page is kept");
     expect(text("app/index.html")).toBe(PAGE);
-    expect([...files.keys()].filter((key) => key.startsWith("app-publish/previous"))).toEqual([]);
+    expect(keptPages(files)).toEqual([kept(ID_B)]);
   });
 
   it("a publish keeps only the page that it replaced", async () => {
-    const { env, files, text } = setup({
-      "app/index.html": OLD_PAGE,
-      "app/assets/index-OLD.js": "old js",
-      // Kept pages from before: the way back of the old page, and the one key of the first version of the tool.
-      [kept(OLD_PAGE)]: "the page before the old page",
-      "app-publish/previous-index.html": "the page before the old page",
-    });
+    const { env, files, text } = setup(
+      {
+        "app/index.html": OLD_PAGE,
+        "app/assets/index-OLD.js": "old js",
+        // Kept pages from before: the way back of the old page, and the one key of the first version of the tool.
+        [kept(ID_A)]: "the page before the old page",
+        "app-publish/previous-index.html": "the page before the old page",
+      },
+      { "app/index.html": { previous: ID_A } },
+    );
     const link = linkOf(await publish(env));
     for (const path of Object.keys(BUILD)) expect((await put(env, `${link}/${path}`, BUILD[path]!)).status, path).toBe(200);
-    expect([...files.keys()].filter((key) => key.startsWith("app-publish/previous"))).toEqual([KEPT]);
-    expect(text(KEPT)).toBe(OLD_PAGE);
+    expect(keptPages(files)).toEqual([keptOf(files)]);
+    expect(keptOf(files)).not.toBe(kept(ID_A));
+    expect(text(keptOf(files))).toBe(OLD_PAGE);
+  });
+
+  it("a publish that overlaps a rollback keeps its way back", async () => {
+    const { env, files, text, state } = setup();
+    const link = linkOf(await publish(env));
+    for (const path of Object.keys(BUILD)) expect((await put(env, `${link}/${path}`, BUILD[path]!)).status, path).toBe(200);
+    // The rollback has put the old page back and has not yet removed the kept page that it used. Another agent publishes the build again.
+    state.afterPut = async (key) => {
+      if (key !== "app/index.html") return;
+      state.afterPut = undefined;
+      expect((await put(env, `${linkOf(await publish(env))}/index.html`, PAGE)).status).toBe(200);
+    };
+    expect(await run(env, "app_publish", { rollback: true })).toMatchObject({ rolledBack: true });
+    // The publish was the last write: its page is live, and it has its way back.
+    expect(text("app/index.html")).toBe(PAGE);
+    expect(await run(env, "app_publish", { rollback: true })).toMatchObject({ rolledBack: true });
+    expect(text("app/index.html")).toBe(OLD_PAGE);
+    expect(keptPages(files)).toEqual([]);
+  });
+
+  it("a rollback or an upload does not write over a page that went live in between", async () => {
+    const { env, files, text, state } = setup();
+    const first = linkOf(await publish(env));
+    for (const path of Object.keys(BUILD)) expect((await put(env, `${first}/${path}`, BUILD[path]!)).status, path).toBe(200);
+    const way = keptOf(files);
+    const OTHER = '<script src="/assets/index-OLD.js"></script><!-- another page -->';
+    /** Another page goes live after the request read the live page and before it writes. */
+    const overlap = (page: string) => {
+      state.beforePut = (key) => {
+        if (key !== "app/index.html") return;
+        state.beforePut = undefined;
+        files.set(key, { bytes: new TextEncoder().encode(page) });
+      };
+    };
+    overlap(OTHER);
+    await expect(publish(env, { rollback: true })).rejects.toThrow("The live page changed");
+    expect(text("app/index.html")).toBe(OTHER);
+    const link = linkOf(await publish(env));
+    overlap(OLD_PAGE);
+    const refused = await put(env, `${link}/index.html`, PAGE);
+    expect(refused.status).toBe(409);
+    expect(await error(refused)).toContain("The live page changed");
+    expect(text("app/index.html")).toBe(OLD_PAGE);
+    // The upload removed the page that it kept for itself. The page kept for the publish that was written over stays, and nothing uses it.
+    expect(keptPages(files)).toEqual([way]);
+    // The same upload again works, and its way back is the page that it replaced.
+    expect((await put(env, `${link}/index.html`, PAGE)).status).toBe(200);
+    expect(text(keptOf(files))).toBe(OLD_PAGE);
+    expect(keptOf(files)).not.toBe(way);
   });
 
   it("rollback uses the page that the first version of the tool kept only for the publish of that version", async () => {
