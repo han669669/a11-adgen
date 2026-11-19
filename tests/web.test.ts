@@ -33,8 +33,9 @@ function makeEnv() {
   return { env, files };
 }
 
-const call = (env: Env, path: string, init: { method?: string; body?: unknown; cookie?: string; origin?: string | null } = {}) => {
+const call = (env: Env, path: string, init: { method?: string; body?: unknown; cookie?: string; origin?: string | null; ip?: string } = {}) => {
   const headers: Record<string, string> = {};
+  if (init.ip) headers["cf-connecting-ip"] = init.ip;
   if (init.body !== undefined) headers["content-type"] = "application/json";
   if (init.cookie) headers.cookie = init.cookie;
   if (init.origin !== null) headers.origin = init.origin ?? ORIGIN;
@@ -207,10 +208,47 @@ describe("web app accounts", () => {
     expect((await call(env, "/api/login", { body: good })).status).toBe(429);
   });
 
+  it("does not lock a caller out for the wrong passwords of another address", async () => {
+    const { env } = makeEnv();
+    await call(env, "/api/signup", { body: signupBody });
+    const wrong = { ...good, password: "wrong password!!" };
+    for (let i = 0; i < 5; i++) expect((await call(env, "/api/login", { body: wrong, ip: "203.0.113.7" })).status).toBe(401);
+    expect((await call(env, "/api/login", { body: good, ip: "203.0.113.7" })).status).toBe(429);
+    expect((await call(env, "/api/login", { body: good, ip: "198.51.100.20" })).status).toBe(200);
+  });
+
+  it("counts one IPv6 /64 as one caller", async () => {
+    const { env } = makeEnv();
+    await call(env, "/api/signup", { body: signupBody });
+    const wrong = { ...good, password: "wrong password!!" };
+    for (let i = 0; i < 5; i++) expect((await call(env, "/api/login", { body: wrong, ip: `2001:db8:0:1::${i + 1}` })).status).toBe(401);
+    expect((await call(env, "/api/login", { body: good, ip: "2001:0db8:0000:0001:aaaa:bbbb:cccc:dddd" })).status).toBe(429);
+    expect((await call(env, "/api/login", { body: good, ip: "2001:db8:0:2::1" })).status).toBe(200);
+  });
+
+  it("still limits wrong passwords for one email from many addresses", async () => {
+    const { env } = makeEnv();
+    await call(env, "/api/signup", { body: signupBody });
+    const wrong = { ...good, password: "wrong password!!" };
+    for (let i = 0; i < 20; i++) expect((await call(env, "/api/login", { body: wrong, ip: `203.0.113.${i + 1}` })).status).toBe(401);
+    expect((await call(env, "/api/login", { body: wrong, ip: "203.0.113.200" })).status).toBe(429);
+    // The limit is per email: the other account is not locked.
+    expect((await call(env, "/api/login", { body: { ...good, email: "second@a11.example" }, ip: "203.0.113.200" })).status).toBe(401);
+  });
+
+  it("counts the wrong passwords from before this lock for the email", async () => {
+    const { env } = makeEnv();
+    await call(env, "/api/signup", { body: signupBody });
+    // Before the lock counted addresses, a wrong try wrote one row with the email as its key.
+    for (let i = 0; i < 20; i++) await env.DB.prepare("INSERT INTO login_failures (email, at) VALUES (?, ?)").bind(good.email, new Date().toISOString()).run();
+    expect((await call(env, "/api/login", { body: good, ip: "203.0.113.7" })).status).toBe(429);
+  });
+
   it("clears its own attempt on a good sign-in", async () => {
     const { env } = makeEnv();
     await call(env, "/api/signup", { body: signupBody });
-    for (let i = 0; i < 6; i++) expect((await call(env, "/api/login", { body: good })).status).toBe(200);
+    for (let i = 0; i < 21; i++) expect((await call(env, "/api/login", { body: good, ip: "203.0.113.7" })).status).toBe(200);
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM login_failures").first()).toEqual({ n: 0 });
   });
 
   it("refuses an over-long password before hashing it", async () => {
