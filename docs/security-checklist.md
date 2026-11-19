@@ -17,6 +17,7 @@ Answer each line in the PR body ("Security check"). Write "none" when a line doe
 | Output | Text from a user or a web page is escaped. It is never followed as an instruction. A new page keeps the CSP, `nosniff` and `no-store` headers. |
 | Secrets | No key, token, password, hash or private link is in the diff, the tests, the logs or the PR text. Secrets stay in Cloudflare. |
 | Dependency | A new package has a stated need. `npm audit` shows no new finding. |
+| Workflow action | Each `uses:` in `.github/workflows` names a full commit SHA, with the release tag as a comment. The SHA is the commit of that tag: `git ls-remote --tags https://github.com/<owner>/<action> <tag>` shows it. `tests/workflows.test.ts` checks the form. |
 | Binding or permission | A new Cloudflare binding, token scope or GitHub permission is the smallest that works. The owner approved it. |
 | Money | A paid call goes through the spend ledger and its cap. |
 | Tests | A test shows the bad input is refused. Remove the fix and check that the test fails. |
@@ -38,6 +39,7 @@ Run these on the live address for a production deploy. For a preview deploy, run
 | The wrong-key `PUT` above, 25 times in one minute from one address | 429 with `retry-after: 60` after about 20 (it writes nothing) |
 | `GET /m/deploy/x.js` | 404 |
 | `GET /` and a pack page | CSP present, no `unsafe-inline` in `script-src` |
+| `GET /` and one file under `/assets/` | CSP, `referrer-policy: no-referrer` and `permissions-policy` present on both |
 | `POST /oauth/register` with a body over 8 KB | 413 |
 | `POST /oauth/register` with a `javascript:` redirect | 400 |
 | `spend_get`, `brand_list`, `batch_list` through the connector | Real data (OAuth path works) |
@@ -56,7 +58,7 @@ A change is not done when it is safe but broken. After every deploy, check that 
 | Client | Send a comment | The comment form posts. The text shows under "Comments we received". |
 | Client | Send files | The upload form takes an allowed file and refuses a wrong type or a file over the limit. The file shows under "Files we received". |
 | Client | Be kept out of other packs | A wrong or revoked link returns 404. |
-| Owner | Sign in to the web app | The sign-in page loads. A wrong password is refused. The owner's email gets in. |
+| Owner | Sign in to the web app | The sign-in page loads. A wrong password is refused. The owner's email gets in. The session cookie is `__Host-a11s`. Sign-out removes it. |
 | Owner | Pick drafts and read the spend | The board loads. `spend_get` shows the month total and the cap. |
 | Owner and agents | Use the MCP | The connector signs in with OAuth. `spend_get`, `brand_list` and `batch_list` return real data. Each tool changed in the PR is called once. |
 | Studio | Run a batch | The batch tools answer from brand to pack. Paid tools show an estimate and stop at the cap. |
