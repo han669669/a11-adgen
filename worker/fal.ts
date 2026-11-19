@@ -1,5 +1,5 @@
 import type { Env } from "./env";
-import { readCapped, TooLargeError } from "./images";
+import { MAX_IMAGE_BYTES, readCapped, TooLargeError } from "./images";
 import { pasteBack } from "./paste";
 import { NotBilledError, PRICE, reserve, settle } from "./spend";
 
@@ -213,6 +213,11 @@ async function poll(env: Env, row: RenderRow) {
         // A temporary error from the image host: stay queued, the next poll downloads again (R2 puts repeat safely).
         if (transient(file.status)) return { id, status: "queued", note: `image download HTTP ${file.status}; poll again.` };
         continue;
+      }
+      // A declared size past the limit is refused before the body is read; readCapped holds the limit when no size is declared.
+      if (Number(file.headers.get("content-length") ?? 0) > MAX_IMAGE_BYTES) {
+        await file.body?.cancel();
+        throw new TooLargeError(`fal image ${i + 1} is larger than ${MAX_IMAGE_BYTES} bytes.`);
       }
       raw = await readCapped(file, `fal image ${i + 1}`);
     } catch (e) {

@@ -191,6 +191,21 @@ describe("fal answer URLs", () => {
     expect(saved.size).toBe(1);
   });
 
+  it("does not read an image whose Content-Length is larger than the limit", async () => {
+    const { env, saved } = setup();
+    let pulls = 0;
+    const body = new ReadableStream<Uint8Array>({ pull: (c) => (pulls++, c.enqueue(new Uint8Array(1))) }, { highWaterMark: 0 });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(Response.json({ status: "COMPLETED" }))
+      .mockResolvedValueOnce(Response.json({ images: [{ url: IMG(1) }] }))
+      .mockResolvedValueOnce(new Response(body, { headers: { "content-length": String(MAX_IMAGE_BYTES + 1) } })));
+    const r = await done(check(env, ID));
+    expect(r.status).toBe("failed");
+    expect(r.error).toBe(`saved 0 of 1 images: fal image 1 is larger than ${MAX_IMAGE_BYTES} bytes.`);
+    expect(saved.size).toBe(0);
+    expect(pulls).toBe(0);
+  });
+
   it("stops reading an image that is larger than the limit, with no Content-Length, and does not save it", async () => {
     const { env, saved } = setup();
     const chunk = new Uint8Array(1_000_000);
