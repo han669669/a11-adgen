@@ -174,7 +174,7 @@ describe("fal answer URLs", () => {
     vi.stubGlobal("fetch", fetchMock);
     const r = await done(check(env, ID));
     expect(sent(fetchMock)).toEqual([[STATUS, "Key k"]]);
-    expect(fetchMock.mock.calls[0][1]?.redirect).toBe("manual");
+    expect(fetchMock.mock.calls[0]?.[1]?.redirect).toBe("manual");
     expect(r.status).toBe("failed");
     expect(r.error).toContain("fal status URL is not an https fal address (evil.example)");
   });
