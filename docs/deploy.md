@@ -55,7 +55,7 @@ What the tool can do, and no more:
 | Who can call it | A caller of `/mcp`: an OAuth client that the owner signed in and approved, or the admin token. |
 | What can go live | Only the web app build of the commit that the Worker runs. Each deploy builds the web app and puts the SHA-256 of each built file into the Worker bundle. The Worker saves a file to R2 `app/` only when its name and its SHA-256 are in that list. Other JavaScript is refused (HTTP 422), also with a valid link. |
 | How code gets into the list | Only by a merge to `main` (the owner's merge, or the merge rule in `AGENTS.md` section 9) and its deploy. |
-| The upload link | 24 random bytes, for the files of one publish. Only its SHA-256 is kept (R2 `app-publish/`, which no route serves). It works for 15 minutes, and a new `app_publish` call replaces it. Never write it in a PR, a log or a chat. |
+| The upload link | 24 random bytes, for the files of one publish. Only its SHA-256 is kept (R2 `app-publish/`, which no route serves). It works for 15 minutes. A new `app_publish` call, a rollback or a deploy with another build ends it. Never write it in a PR, a log or a chat. |
 | Order | The Worker refuses `index.html` until each file it needs is in R2 with the right SHA-256. A publish that stops early changes nothing for a user. |
 | Rollback | `rollback: true` puts back the page that the last publish replaced. It cannot put any other page live. |
 | Record | Workers Logs keep one line for each step (`"event":"app_publish"`: `link`, `file`, `refused`, `rollback`), never the link. They do not name the caller. |

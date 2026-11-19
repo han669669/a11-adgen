@@ -32,6 +32,7 @@ function setup(live: Record<string, string> = { "app/index.html": OLD_PAGE, "app
   const MEDIA = {
     head: async (k: string) => (files.has(k) ? view(files.get(k)!) : null),
     get: async (k: string) => (files.has(k) ? view(files.get(k)!) : null),
+    delete: async (k: string) => void files.delete(k),
     put: async (k: string, v: ArrayBuffer | string, o?: { sha256?: ArrayBuffer; httpMetadata?: { contentType?: string } }) => {
       const bytes = typeof v === "string" ? enc(v) : new Uint8Array(v);
       if (o?.sha256 && !createHash("sha256").update(bytes).digest().equals(Buffer.from(o.sha256))) throw new Error("R2: the body does not have the given SHA-256");
@@ -50,12 +51,6 @@ const linkOf = (a: Answer) => /'(https:\/\/w\.example\/up\/app\/[0-9a-f]{48})\//
 const put = (env: Env, url: string, body: string, headers: Record<string, string> = {}) =>
   worker.fetch(new Request(url, { method: "PUT", body, headers: { "content-length": String(new TextEncoder().encode(body).byteLength), ...headers } }), env);
 const error = async (r: Response) => ((await r.json()) as { error: string }).error;
-
-/** Uploads the whole build in the order of the answer. */
-async function publishAll(env: Env) {
-  const link = linkOf(await publish(env));
-  for (const path of Object.keys(BUILD)) expect((await put(env, `${link}/${path}`, BUILD[path]!)).status, path).toBe(200);
-}
 
 afterEach(() => void vi.restoreAllMocks());
 
@@ -160,19 +155,29 @@ describe("app_publish", () => {
     const second = linkOf(await publish(env));
     expect(second).not.toBe(first);
     expect((await put(env, `${first}/${js}`, BUILD[js]!)).status).toBe(404);
-    // An expired link.
-    const saved = JSON.parse(new TextDecoder().decode(files.get("app-publish/link.json")!.bytes)) as { hash: string };
-    files.set("app-publish/link.json", { bytes: new TextEncoder().encode(JSON.stringify({ ...saved, expiresAt: Date.now() - 1 })) });
+    // A link that was made for another build (before a deploy), and an expired link.
+    const saved = JSON.parse(new TextDecoder().decode(files.get("app-publish/link.json")!.bytes)) as { hash: string; build: string };
+    const store = (link: object) => files.set("app-publish/link.json", { bytes: new TextEncoder().encode(JSON.stringify(link)) });
+    store({ ...saved, build: "sha256-the-index-of-the-build-before-the-deploy" });
     expect((await put(env, `${second}/${js}`, BUILD[js]!)).status).toBe(404);
+    store({ ...saved, expiresAt: Date.now() - 1 });
+    expect((await put(env, `${second}/${js}`, BUILD[js]!)).status).toBe(404);
+    store(saved);
+    expect((await put(env, `${second}/${js}`, BUILD[js]!)).status).toBe(200);
+    files.delete(`app/${js}`);
     expect(files.has(`app/${js}`)).toBe(false);
   });
 
   it("rollback puts back the page that the last publish replaced", async () => {
     const { env, files, text } = setup();
     await expect(publish(env, { rollback: true })).rejects.toThrow("No earlier page is kept");
-    await publishAll(env);
+    const used = linkOf(await publish(env));
+    for (const path of Object.keys(BUILD)) expect((await put(env, `${used}/${path}`, BUILD[path]!)).status, path).toBe(200);
     expect(text("app/index.html")).toBe(PAGE);
     expect(await run(env, "app_publish", { rollback: true })).toMatchObject({ rolledBack: true, assets: ["assets/index-OLD.js"] });
+    expect(text("app/index.html")).toBe(OLD_PAGE);
+    // The link of the publish that was rolled back cannot put that build live again.
+    expect((await put(env, `${used}/index.html`, PAGE)).status).toBe(404);
     expect(text("app/index.html")).toBe(OLD_PAGE);
     expect(files.get("app/index.html")!.type).toBe("text/html; charset=utf-8");
     // The build is then not live, and only index.html must go up again.

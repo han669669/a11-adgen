@@ -8,7 +8,8 @@ import { InputError } from "./schema";
  * with no admin token. The Worker takes only the files of the build of its own commit: the deploy builds the web app
  * (wrangler.jsonc build.command) and puts the SHA-256 of each file into the bundle (dist/app-manifest.json). A body with
  * another SHA-256 is refused, so a caller cannot put other JavaScript on the site: only a merged build can go live.
- * The link is 24 random bytes for all files of one publish; only its SHA-256 is kept (R2, 15 minutes), and a new link replaces it.
+ * The link is 24 random bytes for all files of one publish; only its SHA-256 is kept (R2, 15 minutes). A new link, a rollback
+ * or a deploy with another build ends it.
  */
 const APP_MANIFEST: Record<string, string> = manifest;
 export const APP_PUBLISH_PATH = /^\/up\/app\/([0-9a-f]{48})\/(.+)$/;
@@ -55,7 +56,7 @@ export async function appPublish(env: Env, a: { rollback?: boolean } = {}) {
   if (files.every((f) => f.live)) return { live: true, files, note: "The live web app is the build of the commit this Worker runs. Nothing to upload." };
 
   const token = [...crypto.getRandomValues(new Uint8Array(24))].map((x) => x.toString(16).padStart(2, "0")).join("");
-  await env.MEDIA.put(LINK_KEY, JSON.stringify({ hash: await tokenHash(token), expiresAt: Date.now() + LINK_TTL_SECONDS * 1000 }));
+  await env.MEDIA.put(LINK_KEY, JSON.stringify({ hash: await tokenHash(token), expiresAt: Date.now() + LINK_TTL_SECONDS * 1000, build: APP_MANIFEST[INDEX] }));
   const base = `${new URL(env.PUBLIC_BASE_URL).origin}/up/app/${token}`;
   const missing = files.filter((f) => !f.live).map((f) => f.path);
   log("link", { missing });
@@ -65,7 +66,7 @@ export async function appPublish(env: Env, a: { rollback?: boolean } = {}) {
     expiresInSeconds: LINK_TTL_SECONDS,
     curl: missing.map((path) => `curl -fsS -T 'dist/app/${path}' '${base}/${path}'`),
     then: "On a clean checkout of main at the commit this Worker runs: npm ci && npm run build:app. Then run the curl lines from the repo root, in this order (index.html is last and makes the build live). Then call app_publish again: live must be true.",
-    note: "The link works for 15 minutes, only for these files, and a new app_publish call replaces it. Do not post it anywhere. A 422 answer, or a file that is not in dist/app, means your checkout is not the commit this Worker runs: pull main, or wait for the deploy.",
+    note: "The link works for 15 minutes, only for these files. A new app_publish call, a rollback or a new deploy ends it. Do not post it anywhere. A 422 answer, or a file that is not in dist/app, means your checkout is not the commit this Worker runs: pull main, or wait for the deploy.",
   };
 }
 
@@ -77,6 +78,8 @@ async function rollback(env: Env) {
   const assets = [...new TextDecoder().decode(page).matchAll(/(?:src|href)="\/(assets\/[A-Za-z0-9._-]+)"/g)].map((m) => m[1]!);
   const gone = (await Promise.all(assets.map(async (path) => ((await env.MEDIA.head(`app/${path}`)) ? null : path)))).filter((path) => path !== null);
   if (gone.length) throw new InputError(`The earlier page names files that are not in R2: ${gone.join(", ")}. Nothing was changed.`);
+  // The link of the publish that is rolled back must not put that build live again.
+  await env.MEDIA.delete(LINK_KEY);
   await env.MEDIA.put(`app/${INDEX}`, page, { httpMetadata: { contentType: typeOf(INDEX) } });
   log("rollback", { assets });
   return {
@@ -92,9 +95,9 @@ const refuse = (status: number, error: string) => Response.json({ error }, { sta
 export async function handleAppPublish(request: Request, env: Env, token: string, path: string): Promise<Response> {
   if (request.method !== "PUT") return new Response("Method not allowed", { status: 405, headers: { allow: "PUT" } });
   if (!Object.hasOwn(APP_MANIFEST, path)) return refuse(404, `${path} is not a file of the build this Worker runs. Pull main, or wait for the deploy, and build again.`);
-  const link = await (await env.MEDIA.get(LINK_KEY))?.json<{ hash: string; expiresAt: number }>();
+  const link = await (await env.MEDIA.get(LINK_KEY))?.json<{ hash: string; expiresAt: number; build: string }>();
   // Only hashes are compared, so the timing shows nothing about the link.
-  if (!link || link.expiresAt <= Date.now() || link.hash !== (await tokenHash(token))) return refuse(404, "This publish link is not valid or has expired. Ask app_publish for a new one.");
+  if (!link || link.expiresAt <= Date.now() || link.build !== APP_MANIFEST[INDEX] || link.hash !== (await tokenHash(token))) return refuse(404, "This publish link is not valid or has expired. Ask app_publish for a new one.");
   // Check the declared size before reading the body, so an oversized upload is never buffered.
   const declared = request.headers.get("content-length");
   if (declared === null) return refuse(411, "Content-Length required");
