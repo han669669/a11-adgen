@@ -17,13 +17,13 @@ import { iconResponse } from "./icon";
 const mcpHandler = {
   async fetch(request: Request, env: Env, context: ExecutionContext): Promise<Response> {
     // The provider adds props (what completeAuthorization stored, or the bearer fallback) and auth (the verified token) to the context.
-    const ctx = context as ExecutionContext & { props?: { email?: string; static?: boolean }; auth?: { scope?: string[] } };
+    const ctx = context as ExecutionContext & { props?: { email?: string; static?: boolean }; auth?: { scope?: string[]; clientId?: string } };
     const props = ctx.props ?? {};
     if (!props.static) {
       // A token from the login: the email must still be on the allow-list, and the grant must carry the scope.
       if (!stillAllowed(env, props.email) || !(ctx.auth?.scope ?? []).includes(MCP_SCOPE)) return new Response("Forbidden", { status: 403 });
     }
-    return handleMcp(request, env);
+    return handleMcp(request, env, props.static ? { client: "admin-token" } : { client: ctx.auth?.clientId, email: props.email });
   },
 };
 
