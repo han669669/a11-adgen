@@ -675,7 +675,7 @@ class PackCheck(Tmp):
     def test_a_near_neutral_stage_is_not_measured_as_the_pack(self):
         img = np.zeros((400, 300, 3))
         img[:] = (200, 175, 165)  # C8AFA5: saturation 0.175, under 0.2 but over 0.15
-        img[86:300, 50:250] = (60, 90, 140)
+        img[86:300, 50:250] = (165, 200, 175)  # a muted green pack: the same saturation and brightness, another hue
         code, log = self.check("--render", self.save("warm.png", img), "--at", "150,250", "--bg", "C8AFA5", "--packshot", self.packshot(214, 200))
         self.assertEqual(code, 0, log)
 
