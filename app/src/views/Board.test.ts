@@ -36,7 +36,7 @@ describe("Board final polling", () => {
   let root: Root;
   const getBatch = vi.fn<() => Promise<Response>>();
   const onSpend = vi.fn();
-  const refresh = vi.fn(() => Response.json({}));
+  const refresh = vi.fn<() => Promise<Response>>();
 
   const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
   const render = () => act(() => root.render(createElement(Board, { id: "batch-1", onSpend })));
@@ -51,7 +51,7 @@ describe("Board final polling", () => {
     });
     getBatch.mockReset().mockResolvedValueOnce(Response.json(batch()));
     onSpend.mockClear();
-    refresh.mockClear();
+    refresh.mockReset().mockImplementation(async () => Response.json({}));
     container = document.createElement("div");
     root = createRoot(container);
   });
@@ -98,5 +98,20 @@ describe("Board final polling", () => {
     await advance(24000);
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(getBatch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not request the batch after leaving during a render refresh", async () => {
+    let respond!: (response: Response) => void;
+    refresh.mockReturnValueOnce(new Promise((resolve) => { respond = resolve; }));
+    await render();
+    await advance(8000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(getBatch).toHaveBeenCalledTimes(1);
+
+    await act(() => root.render(null));
+    respond(Response.json({}));
+    await advance(8000);
+    expect(getBatch).toHaveBeenCalledTimes(1);
+    expect(onSpend).not.toHaveBeenCalled();
   });
 });
