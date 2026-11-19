@@ -85,6 +85,16 @@ describe("Board final polling", () => {
     expect(getBatch).toHaveBeenCalledTimes(3);
   });
 
+  it("shows a finished final with no logo and does not check it or draw on it", async () => {
+    getBatch.mockReset().mockResolvedValue(Response.json(batch({ status: "done", images: [{ key: "raw", url: "/raw.jpg" }] })));
+    await render();
+    await advance(24000);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(getBatch).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('img[alt="Final"]')?.getAttribute("src")).toBe("/raw.jpg");
+    expect(container.textContent).toContain("Render without the logo");
+  });
+
   it("does not overlap polls or restart a poll after leaving the board", async () => {
     let respond!: (response: Response) => void;
     getBatch.mockReturnValueOnce(new Promise((resolve) => { respond = resolve; }));
