@@ -18,7 +18,7 @@ Connected on 2026-11-08 (recorded in `docs/decisions.md`). The live Worker `a11a
 
 Rules:
 
-- `main` needs a pull request. No force push, no deleting `main`. A push to `main` is a production deploy. The review bot runs on every pull request, but the `protect-main` ruleset does not require it (owner, 2026-11-09). From 17-11-2026 the review bot is Macroscope: its "Macroscope - Correctness Check" runs on every push, and its Approvability check is manual. cubic is switched off until its free limit resets on 1-12-2026 (owner, 17-11-2026). Before a merge, check that the Macroscope check is green and its findings are answered. When the Macroscope credit runs out, CI and the thread's own code review are enough, until the owner names the next review tool.
+- `main` needs a pull request. No force push, no deleting `main`. A push to `main` is a production deploy. The review bot runs on every pull request, but the `protect-main` ruleset does not require it (owner, 2026-11-09). The review bot is Devin Review 2.0, for all code and security review (the owner's standing rule, recorded 19-11-2026). It replaces Macroscope (17-11-2026) and cubic. It reviews each pull request and writes its findings as comments. Before a merge, check that its review of the newest commit is done and that each finding is fixed or answered.
 - This path deploys the Worker only. The web app files in R2 `app/` (step 5 below) and D1 migrations (step 3 below) are still manual.
 - After each automatic deploy, check `/api/me` (401), the test portal link (200) and `spend_get` through `/mcp`. Workers Logs keep no invocation logs (`wrangler.jsonc`: they would keep the pack-link token from the URL). To see one request, use `wrangler tail`, which is not stored. Also read `GET /accounts/{id}/workers/scripts/a11adgen/subdomain`: `previews_enabled` must be `false`.
 - The dashboard may say "Update your Wrangler configuration with these changes" after a variable edit. Ignore it. Do not put `MCP_TOKEN_SHA256` or `SIGNUP_CODE_SHA256` in `wrangler.jsonc` vars: the repo is public. Both are Worker secrets since 2026-11-12, so a deploy keeps them, and a deploy stops when `MCP_TOKEN_SHA256` is missing (`secrets.required`).
@@ -40,8 +40,43 @@ The steps below are for the live Worker `a11adgen` (D1 `a11adgen-db`, R2 `a11adg
    - the bindings in `wrangler.jsonc` (including `{ "type": "images", "name": "IMAGES" }` and the KV namespace `OAUTH_KV` = live `a11adgen-oauth` `e29131310aa446489fa715d74e1c35ff`, for `a11adgen` only; a preview deploy uses its own, see the Preview deploy table), and `observability` `{ "enabled": true, "logs": { "enabled": true, "invocation_logs": false } }` (no invocation logs, as in `wrangler.jsonc`);
    - `keep_bindings: ["secret_text"]`, so the Worker's secrets stay: `FAL_KEY`, `EXA_API_KEY`, `ALLOWED_EMAILS`, `APIFY_TOKEN`, `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256`. Never send the two hashes as `plain_text`.
    - After the upload, turn per-version URLs off: `POST /accounts/{id}/workers/scripts/<worker>/subdomain` with `{"enabled": true, "previews_enabled": false}`. A connector upload does not read `preview_urls` from `wrangler.jsonc`.
-5. Web app: `npm run build:app`, then `PUT /admin/app/<path>` on the target Worker (same bearer token) for each file in `dist/app`, `index.html` last. It saves to `app/` in that Worker's bucket, and the Worker serves the app from there. Old hashed files in `app/assets/` can stay; `index.html` points to the new ones.
+5. Web app: `npm run build:app`, then `PUT /admin/app/<path>` on the target Worker (same bearer token) for each file in `dist/app`, `index.html` last. It saves to `app/` in that Worker's bucket, and the Worker serves the app from there. Old hashed files in `app/assets/` can stay; `index.html` points to the new ones. `scripts/upload_app.sh` does this step. The owner runs it: see "Web app upload" below.
 6. Smoke test: `spend_get` through `/mcp`, `/api/me` (401 without a session), one call of each changed tool, and `previews_enabled` is `false` on the Worker's subdomain setting.
+
+## Web app upload (step 5)
+
+A merge does not put a web app change on the live site. The owner runs this upload on his own computer, because only he holds the admin token (`AGENTS.md`, section 7). An agent prepares the merge and does the checks that need no token. It needs bash, git, Node 22 and curl 7.55 or later.
+
+```bash
+git switch main && git pull --ff-only && git status --porcelain   # prints nothing when the checkout is clean
+npm ci && npm run check && npm run build:app
+DRY_RUN=1 scripts/upload_app.sh   # all checks, no upload
+scripts/upload_app.sh             # the upload
+```
+
+The script asks for the admin token and does not show it. It does not print the token, save it or put it on a command line. Do not run it with `bash -x`. For a preview, set `BASE` to the preview origin.
+
+What `scripts/upload_app.sh` does, in this order. It stops at the first check that fails.
+
+1. It checks each file of `dist/app` against the rules of the route (name, content type, 3 MB limit), and prints the commit and the SHA-256 of each file.
+2. It saves the live `index.html` in `rollback-app/<UTC time>/` (not in git) and checks that the files it names are live. R2 keeps no old versions, so this is the only copy of the old page.
+3. It checks the token with `PUT /admin/stage/BAD%20NAME`: 400 with a valid token, 401 without. This request writes nothing. `DRY_RUN=1` stops here.
+4. It uploads each file, `index.html` last. After each upload it reads the file back from the site and compares the SHA-256.
+5. Proof: live `/` has the same SHA-256 as `dist/app/index.html`, and the script prints the file names in the live page. They must be the names that `npm run build:app` printed.
+
+Anyone can make the same proof later with no token, from a build of the same commit:
+
+```bash
+B=https://a11adgen.gamingcomputing.workers.dev
+curl -fsS $B/ | sha256sum; sha256sum dist/app/index.html
+for a in $(grep -oE 'assets/[A-Za-z0-9._-]+' dist/app/index.html | sort -u); do curl -fsS $B/$a | sha256sum; sha256sum dist/app/$a; done
+```
+
+An upload that stops before `index.html` changes nothing for a user: the live page still names the old files. Run the script again. After the upload, an open browser tab keeps the old app until a reload.
+
+Rollback: `ROLLBACK=rollback-app/<UTC time> scripts/rollback_app.sh` (the upload prints this line). It checks that the files in the saved page are still live, puts the saved `index.html` back with one `PUT`, and checks that live `/` is equal to it. The new hashed files can stay.
+
+`tests/app-upload.test.ts` runs both scripts against the Worker code on a local port: a wrong token, a dry run, a build with a missing file, the upload order and the rollback.
 
 ## One-time assets
 

@@ -104,7 +104,7 @@ The admin token (the static bearer token). The Worker keeps only its SHA-256 (`M
 | --- | --- | --- |
 | Product-lock reference image | `PUT /admin/ref/<uuid>.jpg` or `.png` | `scripts/product_lock.py` |
 | Repaired final | `PUT /admin/repair/<uuid>.jpg` (10 MB limit) | `scripts/box_print.py` |
-| Web app files into R2 `app/` | `PUT /admin/app/<path>` (Workers Builds does not cover them) | manual app deploy |
+| Web app files into R2 `app/` | `PUT /admin/app/<path>` (Workers Builds does not cover them) | `scripts/upload_app.sh`, `scripts/rollback_app.sh` |
 | Manual Worker deploy, fallback only | `PUT /admin/stage/<name>.js` (3 MB limit) | when Workers Builds is down |
 | `/mcp` with `Authorization: Bearer`, fallback only | `/mcp` | scripts that cannot open a browser |
 
@@ -130,7 +130,7 @@ The connector and the agents use OAuth for `/mcp`. That is separate from this to
 1. Never push to `main` directly. Work on a branch: `feat/`, `fix/`, `docs/`, `chore/`, `ci/`.
 2. Open a PR (ready, not draft). Title: `type(scope): subject`, lowercase subject, 72 characters or fewer.
 3. Before you push, run `npm run check` (typecheck, tests, build). All must pass.
-4. Merge only with the owner's yes, or under the standing rule of 09-11-2026: a thread may squash-merge its own pull request when it is confident and the review bot, CI (`npm run check`) and the code review are all clean. The review bot is Macroscope from 17-11-2026 (its Correctness check runs on every push; its Approvability check is manual): cubic's free monthly limit ran out, and the owner switched cubic off until its limit resets on 1-12-2026. Macroscope is paid from a small credit: keep pull requests small, and tell the owner when the credit is low. When the credit runs out, CI and the thread's own code review are enough, until the owner names the next review tool (owner, 17-11-2026). A merge to `main` deploys the Worker (section 7). A live D1 migration, a manual deploy and anything in section 10 still need the owner's explicit yes.
+4. Merge only with the owner's yes, or under the standing rule of 09-11-2026: a thread may squash-merge its own pull request when it is confident and the review bot, CI (`npm run check`) and the code review are all clean. The review bot is Devin Review 2.0, for all code and security review (the owner's standing rule, recorded 19-11-2026). It replaces Macroscope (17-11-2026) and cubic. Its review of the newest commit must be done, and each finding fixed or answered. A merge to `main` deploys the Worker (section 7). A live D1 migration, a manual deploy and anything in section 10 still need the owner's explicit yes.
 5. Commits and PR bodies in STE.
 6. **Security gate (owner rule, 2026-11-08).** Run `docs/security-checklist.md` on every change, without being asked. Put a "Security check" line in each PR body. After each deploy, run its live probes and check that the client and the owner can still do their jobs (its section 3). Treat the repository as public: report open weaknesses to the owner in chat, never in a file.
 7. **Project handoff.** Claude Code and Devin use the same [project progress and direction](docs/progress.md). Update it in the same PR as your change and follow its steps to hand work off to the Coordinator. Automate checks where practical. Use manual checks for what automation cannot verify.
