@@ -46,14 +46,8 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
     void load(true);
   }, [load]);
 
-  // Finals: poll each running final; a finished final gets the real logo drawn once (server side).
-  const pending = useMemo(
-    () =>
-      (batch?.ideas ?? [])
-        .flatMap((i) => i.finals)
-        .filter((f) => f.status === "queued" || (f.status === "done" && !f.composed && !f.composeError)),
-    [batch],
-  );
+  // Finals: poll each running final. A finished final is shown as it is: Claude adds the logo (compose_final), not the board.
+  const pending = useMemo(() => (batch?.ideas ?? []).flatMap((i) => i.finals).filter((f) => f.status === "queued"), [batch]);
   useEffect(() => {
     if (pending.length === 0) return;
     let cancelled = false;
@@ -234,7 +228,7 @@ function Finals({ finals }: { finals: Final[] }) {
                   : f.composeError
                     ? `Logo step failed: ${f.composeError}`
                     : f.status === "done"
-                      ? "Adding the logo…"
+                      ? "Render without the logo"
                       : "About 60 seconds"}
             </figcaption>
           </figure>

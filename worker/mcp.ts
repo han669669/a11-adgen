@@ -1143,7 +1143,7 @@ export const TOOLS: Tool[] = [
         grain: a.grain,
         grainPct: a.grainPct,
       });
-      // The newest compose is the one the board shows (this also clears a failed board compose).
+      // The newest compose is the one the board shows.
       await env.DB.prepare("UPDATE renders SET composed_key = ? WHERE id = ?").bind(out.key, String(a.key).split("/")[1]).run();
       return text(out);
     },
