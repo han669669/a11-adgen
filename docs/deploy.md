@@ -38,7 +38,7 @@ The steps below are for the live Worker `a11adgen` (D1 `a11adgen-db`, R2 `a11adg
 3. D1 migrations, before the new code goes live (the code may need the new tables): in the connector, read each staged SQL file, check its SHA-256, run it with the D1 query API on the target database, then insert its name into `d1_migrations`. Skip a file already listed there.
 4. Deploy with the connector: read `deploy/<name>.js` from the target bucket, check its SHA-256 against step 1, then `PUT /accounts/{id}/workers/scripts/<worker>` (multipart): upload the bundle as a JavaScript module part named `index.js` (`application/javascript+module`) and set metadata `main_module` to `index.js`, with:
    - `compatibility_date` `2026-10-20`, `compatibility_flags` `["nodejs_compat"]`;
-   - the bindings in `wrangler.jsonc` (including `{ "type": "images", "name": "IMAGES" }` and the KV namespace `OAUTH_KV` = live `a11adgen-oauth` `e29131310aa446489fa715d74e1c35ff`, for `a11adgen` only; a preview deploy uses its own, see the Preview deploy table), and `observability` `{ "enabled": true, "logs": { "enabled": true, "invocation_logs": false } }` (no invocation logs, as in `wrangler.jsonc`);
+   - the bindings in `wrangler.jsonc` (including `{ "type": "images", "name": "IMAGES" }` and the KV namespace `OAUTH_KV` = live `a11adgen-oauth` `e29131310aa446489fa715d74e1c35ff`, for `a11adgen` only; a preview deploy uses its own, see the Preview deploy table; and the rate limit `{ "type": "ratelimit", "name": "PUBLISH_LIMIT", "namespace_id": "20261119", "simple": { "limit": 20, "period": 60 } }`, without which the upload route of `app_publish` answers with an error and saves nothing), and `observability` `{ "enabled": true, "logs": { "enabled": true, "invocation_logs": false } }` (no invocation logs, as in `wrangler.jsonc`);
    - `keep_bindings: ["secret_text"]`, so the Worker's secrets stay: `FAL_KEY`, `EXA_API_KEY`, `ALLOWED_EMAILS`, `APIFY_TOKEN`, `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256`. Never send the two hashes as `plain_text`.
    - After the upload, turn per-version URLs off: `POST /accounts/{id}/workers/scripts/<worker>/subdomain` with `{"enabled": true, "previews_enabled": false}`. A connector upload does not read `preview_urls` from `wrangler.jsonc`.
 5. Web app: an agent publishes the build with the MCP tool `app_publish` of the target Worker ("Web app publish" below). The files go to `app/` in that Worker's bucket, and the Worker serves the app from there. Old hashed files in `app/assets/` can stay; `index.html` points to the new ones. The fallback is `PUT /admin/app/<path>` with the admin token (`scripts/upload_app.sh`), which only the owner can run.
@@ -57,7 +57,8 @@ What the tool can do, and no more:
 | How code gets into the list | Only by a merge to `main` (the owner's merge, or the merge rule in `AGENTS.md` section 9) and its deploy. |
 | The upload link | 24 random bytes, for the files of one publish. Only its SHA-256 is kept (R2 `app-publish/`, which no route serves). It works for 15 minutes. A new `app_publish` call, a rollback or a deploy with another build ends it. Never write it in a PR, a log or a chat. |
 | Order | The Worker refuses `index.html` until each file it needs is in R2 with the right SHA-256. A publish that stops early changes nothing for a user. |
-| Rollback | `rollback: true` puts back the page that the last publish replaced. It cannot put any other page live. |
+| Rate limit | The upload route is public, so the Worker counts each caller address before it reads R2: 20 requests a minute (`PUBLISH_LIMIT` in `wrangler.jsonc`), then HTTP 429 for that address. A publish needs 3. A name that is not in the build is refused before the count. Cloudflare counts in each of its locations, so the limit is approximate. |
+| Rollback | `rollback: true` puts back the page that the publish of this build replaced, and only while this build is the live page. It cannot put any other page live. The Worker keeps that page under a key of its own build before it writes the new page, so a failed write or a publish of another build cannot change it. |
 | Record | Workers Logs keep one line for each step (`"event":"app_publish"`: `link`, `file`, `refused`, `rollback`), never the link. They do not name the caller. |
 
 Steps, after the deploy of the merge:
@@ -81,7 +82,7 @@ Rollback:
 - To stay on an older build: revert the change on `main`. After that deploy the Worker takes only the older build. Publish it with `app_publish`.
 - The owner's fallback, with the admin token: `scripts/rollback_app.sh` (below).
 
-`tests/app-publish.test.ts` covers the tool and the route: other bytes, a name that is not in the build, `index.html` too early, a file in R2 without its SHA-256, a wrong, expired or replaced link, the size limits and the rollback. For a preview, call `app_publish` on the preview Worker. It takes only the build of the branch it was deployed from: build that branch (not `main`) in step 1, and set `B` in the proof to the preview address.
+`tests/app-publish.test.ts` covers the tool and the route: other bytes, a name that is not in the build, `index.html` too early, a file in R2 without its SHA-256, a wrong, expired or replaced link, the size limits, the rate limit, a failed write of the new page and the rollback. For a preview, call `app_publish` on the preview Worker. It takes only the build of the branch it was deployed from: build that branch (not `main`) in step 1, and set `B` in the proof to the preview address.
 
 ### Fallback: upload with the admin token (owner only)
 
@@ -140,6 +141,7 @@ Deploy a branch to `a11adgen-preview` with the same steps, but with these bindin
 | `DB` | D1 `a11adgen-preview-db` (`2c28c64f-f8c0-46f9-9e2d-7ca70d2a0f70`) |
 | `MEDIA` | R2 `a11adgen-preview-assets` |
 | `OAUTH_KV` | KV `a11adgen-preview-oauth` (`830b5d7881a049fb8712411763495000`) |
+| `PUBLISH_LIMIT` | Rate limit with its own `namespace_id` `20261120` (the live one is `20261119`), so the preview and the live site do not share a count |
 | `PUBLIC_BASE_URL` | `https://a11adgen-preview.gamingcomputing.workers.dev` |
 | `ALLOWED_EMAILS` | a plain test address, not the owner's list |
 | `SIGNUP_CODE_SHA256` | the hash of a test code, never the live one (or leave it out to keep sign-up closed) |
