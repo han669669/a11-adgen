@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import manifest from "../dist/app-manifest.json";
 import { toBase64 } from "./b64";
 import type { Env } from "./env";
@@ -19,7 +20,13 @@ const LINK_TTL_SECONDS = 900;
 const INDEX = "index.html";
 // app-publish/ is private: no route serves it.
 const LINK_KEY = "app-publish/link.json";
-const PREVIOUS_KEY = "app-publish/previous-index.html";
+/**
+ * The kept page of this build: the page that the build's index.html replaced. Each build has its own key,
+ * so a publish cannot overwrite the kept page of another build, also when the write of the new page fails.
+ */
+const previousKey = () => `app-publish/previous/${Buffer.from((APP_MANIFEST[INDEX] ?? "").slice("sha256-".length), "base64").toString("hex")}.html`;
+/** The one kept page of the first version of this tool (before each build had its own key). Read only. */
+const LEGACY_PREVIOUS_KEY = "app-publish/previous-index.html";
 
 const TYPES: Record<string, string> = {
   html: "text/html; charset=utf-8",
@@ -70,10 +77,13 @@ export async function appPublish(env: Env, a: { rollback?: boolean } = {}) {
   };
 }
 
-/** Put back the page that the last publish replaced. The files it names must still be in R2. */
+/** Put back the page that the publish of this build replaced. The files it names must still be in R2. */
 async function rollback(env: Env) {
-  const previous = await env.MEDIA.get(PREVIOUS_KEY);
-  if (!previous) throw new InputError("No earlier page is kept: app_publish has not replaced a page yet.");
+  // Only the publish of this build can be rolled back, so the tool goes one step back and no more.
+  const live = await (await env.MEDIA.get(`app/${INDEX}`))?.arrayBuffer();
+  if (!live || sri(await sha256(live)) !== APP_MANIFEST[INDEX]) throw new InputError("The build of this Worker is not the live page, so there is no publish to roll back.");
+  const previous = (await env.MEDIA.get(previousKey())) ?? (await env.MEDIA.get(LEGACY_PREVIOUS_KEY));
+  if (!previous) throw new InputError("No earlier page is kept for this build.");
   const page = await previous.arrayBuffer();
   const assets = [...new TextDecoder().decode(page).matchAll(/(?:src|href)="\/(assets\/[A-Za-z0-9._-]+)"/g)].map((m) => m[1]!);
   const gone = (await Promise.all(assets.map(async (path) => ((await env.MEDIA.head(`app/${path}`)) ? null : path)))).filter((path) => path !== null);
@@ -95,6 +105,9 @@ const refuse = (status: number, error: string) => Response.json({ error }, { sta
 export async function handleAppPublish(request: Request, env: Env, token: string, path: string): Promise<Response> {
   if (request.method !== "PUT") return new Response("Method not allowed", { status: 405, headers: { allow: "PUT" } });
   if (!Object.hasOwn(APP_MANIFEST, path)) return refuse(404, `${path} is not a file of the build this Worker runs. Pull main, or wait for the deploy, and build again.`);
+  // The route is public: limit each address before the first read of R2 (docs/security-checklist.md).
+  if (!(await env.PUBLISH_LIMIT.limit({ key: request.headers.get("cf-connecting-ip") ?? "unknown" })).success)
+    return Response.json({ error: "Too many requests. Try again in a minute." }, { status: 429, headers: { "retry-after": "60" } });
   const link = await (await env.MEDIA.get(LINK_KEY))?.json<{ hash: string; expiresAt: number; build: string }>();
   // Only hashes are compared, so the timing shows nothing about the link.
   if (!link || link.expiresAt <= Date.now() || link.build !== APP_MANIFEST[INDEX] || link.hash !== (await tokenHash(token))) return refuse(404, "This publish link is not valid or has expired. Ask app_publish for a new one.");
@@ -115,7 +128,7 @@ export async function handleAppPublish(request: Request, env: Env, token: string
     if (missing.length) return refuse(409, `Upload these files first, then index.html: ${missing.join(", ")}.`);
     // R2 keeps no old versions: keep the page that this one replaces, for app_publish rollback.
     const previous = await (await env.MEDIA.get(`app/${INDEX}`))?.arrayBuffer();
-    if (previous && sri(await sha256(previous)) !== APP_MANIFEST[INDEX]) await env.MEDIA.put(PREVIOUS_KEY, previous);
+    if (previous && sri(await sha256(previous)) !== APP_MANIFEST[INDEX]) await env.MEDIA.put(previousKey(), previous);
   }
   await env.MEDIA.put(`app/${path}`, body, { httpMetadata: { contentType: typeOf(path) }, sha256: digest });
   log("file", { path, bytes: body.byteLength });

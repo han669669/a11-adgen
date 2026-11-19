@@ -10,6 +10,8 @@ import { run } from "./helpers/engine3";
 const PAGE = '<script src="/assets/index-TEST.js"></script><link href="/assets/index-TEST.css">';
 const BUILD: Record<string, string> = { "assets/index-TEST.css": "test css", "assets/index-TEST.js": "test js", "index.html": PAGE };
 const OLD_PAGE = '<script src="/assets/index-OLD.js"></script>';
+/** The kept page of the test build: its key holds the SHA-256 of the build's index.html. */
+const KEPT = `app-publish/previous/${createHash("sha256").update(PAGE).digest("hex")}.html`;
 
 interface Saved {
   bytes: Uint8Array;
@@ -90,7 +92,7 @@ describe("app_publish", () => {
     expect(text("app/index.html")).toBe(PAGE);
     expect(files.get("app/assets/index-TEST.js")!.type).toBe("text/javascript; charset=utf-8");
     expect(files.get("app/index.html")!.type).toBe("text/html; charset=utf-8");
-    expect(text("app-publish/previous-index.html")).toBe(OLD_PAGE);
+    expect(text(KEPT)).toBe(OLD_PAGE);
     // The site serves the new page; the private prefix is not served.
     expect(await (await worker.fetch(new Request("https://w.example/"), env)).text()).toBe(PAGE);
     expect((await worker.fetch(new Request("https://w.example/app-publish/link.json"), env)).status).toBe(404);
@@ -104,7 +106,7 @@ describe("app_publish", () => {
     const second = linkOf(await publish(env));
     await put(env, `${second}/assets/index-TEST.css`, BUILD["assets/index-TEST.css"]!);
     expect((await put(env, `${second}/index.html`, PAGE)).status).toBe(200);
-    expect(text("app-publish/previous-index.html")).toBe(OLD_PAGE);
+    expect(text(KEPT)).toBe(OLD_PAGE);
     // Each step is logged, and no log line has the link.
     const lines = logs.mock.calls.map((c) => JSON.parse(String(c[0])) as { event: string; action: string; path?: string });
     expect(lines.filter((l) => l.event === "app_publish").map((l) => l.action)).toEqual(["link", "file", "file", "file", "link", "file", "file"]);
@@ -173,7 +175,7 @@ describe("app_publish", () => {
 
   it("rollback puts back the page that the last publish replaced", async () => {
     const { env, files, text } = setup();
-    await expect(publish(env, { rollback: true })).rejects.toThrow("No earlier page is kept");
+    await expect(publish(env, { rollback: true })).rejects.toThrow("not the live page");
     const used = linkOf(await publish(env));
     for (const path of Object.keys(BUILD)) expect((await put(env, `${used}/${path}`, BUILD[path]!)).status, path).toBe(200);
     expect(text("app/index.html")).toBe(PAGE);
@@ -238,6 +240,18 @@ describe("app_publish", () => {
     expect(text(other)).toBe("the page before an earlier build");
   });
 
+  it("rollback still finds the page that the first version of the tool kept", async () => {
+    // The build is live, and its kept page is under the one key of the first version (a publish made before this change).
+    const { env, files, text } = setup({ "app/index.html": PAGE, "app/assets/index-OLD.js": "old js", "app-publish/previous-index.html": OLD_PAGE });
+    expect(await run(env, "app_publish", { rollback: true })).toMatchObject({ rolledBack: true, assets: ["assets/index-OLD.js"] });
+    expect(text("app/index.html")).toBe(OLD_PAGE);
+    // With no kept page at all, the tool says so and changes nothing.
+    files.set("app/index.html", { bytes: new TextEncoder().encode(PAGE) });
+    files.delete("app-publish/previous-index.html");
+    await expect(publish(env, { rollback: true })).rejects.toThrow("No earlier page is kept for this build");
+    expect(text("app/index.html")).toBe(PAGE);
+  });
+
   it("answers through /mcp, and the schema refuses other fields", async () => {
     const { env } = setup();
     const call = (args: unknown) =>
@@ -246,7 +260,7 @@ describe("app_publish", () => {
     expect(ok.isError).toBeUndefined();
     expect(JSON.parse(ok.content[0]!.text)).toMatchObject({ live: false });
     const none = ((await (await call({ rollback: true })).json()) as { result: { isError?: boolean; content: { text: string }[] } }).result;
-    expect(none).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("Bad input: No earlier page is kept") }] });
+    expect(none).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("Bad input: The build of this Worker is not the live page") }] });
     const tool = TOOLS.find((t) => t.name === "app_publish")!;
     for (const a of [{ rollback: "yes" }, { path: "index.html" }, { sha256: "x" }]) expect(() => validate(tool.inputSchema as never, a), JSON.stringify(a)).toThrow();
   });

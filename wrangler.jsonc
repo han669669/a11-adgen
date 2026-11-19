@@ -29,6 +29,8 @@
   "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "e29131310aa446489fa715d74e1c35ff" }],
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "a11adgen-assets" }],
   "images": { "binding": "IMAGES" },
+  // The public upload route of app_publish: at most 20 requests a minute for each address, counted before any read of R2.
+  "ratelimits": [{ "name": "PUBLISH_LIMIT", "namespace_id": "1132", "simple": { "limit": 20, "period": 60 } }],
   "vars": {
     "SPEND_CAP_USD": "100.00",
     "PUBLIC_BASE_URL": "https://a11adgen.gamingcomputing.workers.dev"
