@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { hashPassword, verifyPassword } from "../worker/auth";
 import type { Env } from "../worker/env";
@@ -106,6 +107,33 @@ describe("web app accounts", () => {
     expect(bad.status).toBe(400);
     expect(await bad.json()).toEqual({ error: "Send picks as a list." });
     expect((await call(env, path, { body: { picks: [] }, cookie })).status).toBe(200);
+  });
+
+  it("refuses an over-long pick note with a 400 and keeps a note at the limit whole", async () => {
+    const { env } = makeEnv();
+    const B = "bbbbbbbb-0000-4000-8000-000000000001";
+    const R = "dddddddd-0000-4000-8000-000000000003";
+    const key = `renders/${R}/1.jpg`;
+    const raw = (env.DB as unknown as { raw: DatabaseSync }).raw;
+    raw.exec(`
+      INSERT INTO brands (id, slug, name, created_at, updated_at) VALUES ('br', 'cat', 'Cat', 't', 't');
+      INSERT INTO subjects (id, brand_id, kind, title, created_at) VALUES ('su', 'br', 'product', 'Cake', 't');
+      INSERT INTO batches (id, brand_id, subject_id, kit_version, label, status, created_at, updated_at) VALUES ('${B}', 'br', 'su', 1, 'W47', 'drafts', 't', 't');
+      INSERT INTO ideas (id, batch_id, n, format, insight, visual, headline, created_at) VALUES ('i1', '${B}', 1, 'tof', 'in', 'v', 'h', 't');
+      INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, usd_est, image_keys, created_at, updated_at)
+        VALUES ('${R}', '${B}', 'i1', 'draft', 'done', 'p', '[]', 1024, 1280, 'low', 1, 0.01, '["${key}"]', 't', 't');
+    `);
+    const cookie = cookieOf(await call(env, "/api/signup", { body: signupBody }));
+    const path = `/api/batches/${B}/picks`;
+    const saved = () => raw.prepare("SELECT note FROM picks WHERE render_key = ?").get(key) as { note: string } | undefined;
+
+    const long = await call(env, path, { body: { picks: [{ key, note: "x".repeat(601) }] }, cookie });
+    expect(long.status).toBe(400);
+    expect(await long.json()).toEqual({ error: "A note can have at most 600 characters." });
+    expect(saved()).toBeUndefined();
+
+    expect((await call(env, path, { body: { picks: [{ key, note: "y".repeat(600) }] }, cookie })).status).toBe(200);
+    expect(saved()?.note).toBe("y".repeat(600));
   });
 
   it("refuses a second sign-up for the same email", async () => {
