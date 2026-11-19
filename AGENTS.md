@@ -27,7 +27,7 @@ For work on a11-engine v3, also read these files in this order. The owner wrote 
 5. `docs/engine-3-overhaul.md`: why the first real engine 3 batch failed the owner's bar (18-11-2026), and the overhaul plan with the decisions it waits on.
 
 These five files are a plan. They do not describe the live system. Until a v3 unit is merged and verified, `docs/blueprint.md` and the rules in this file describe what is live.
-The model named for the original implementation session in the kickoff is historical. Use the owner's current model choice for main and child agent sessions. This does not change the image render model.
+When a v3 plan names a model for an implementation or rollout session, that name records the original plan. Use the owner's current model choice for main and child agent sessions. This does not change the image render model.
 
 The plan started in a Claude Code session on 2026-11-06 SGT. The plan page is in the owner's Claude account (private; its link is not kept in this public repo). The files in `docs/` are the source of truth. When the page and the files disagree, the files win.
 
