@@ -45,7 +45,7 @@ def stage_mask(rgb, bg):
     v0 = max(bg) / 255
     if s0 < 0.2:
         # A grey, white or black stage has no hue to follow: the stage is any near-neutral pixel from its shadow up to it.
-        return (s < 0.15) & (mx >= 0.35 * v0) & (mx <= v0 + 0.08)
+        return (s < max(0.15, s0 + 0.05)) & (mx >= 0.35 * v0) & (mx <= v0 + 0.08)
     dh = np.abs(h - h0)
     dh = np.minimum(dh, 1 - dh)
     if v0 < 0.3:
@@ -57,7 +57,8 @@ def stage_mask(rgb, bg):
 
 def close_bands(mask):
     """Bridge thin bands of stage colour inside the pack (a yellow print line from edge to edge), so the pack stays one
-    region: a vertical closing about 3% of the picture high. A gap that tall between the pack and the stage stays open."""
+    region: a vertical closing about 3% of the picture high. A gap that tall between the pack and the stage stays open.
+    A thicker band still splits the pack: the printed pixel height then is too small, so check it against the picture."""
     k = max(3, int(round(mask.shape[0] * 0.03)) | 1)
     return cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((k, 1), np.uint8)).astype(bool)
 

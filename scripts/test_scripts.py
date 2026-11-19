@@ -672,6 +672,13 @@ class PackCheck(Tmp):
         code, log = self.check("--render", self.save("grey.png", img), "--at", "150,250", "--bg", "C8C8C8", "--packshot", self.packshot(214, 200))
         self.assertEqual(code, 0, log)
 
+    def test_a_near_neutral_stage_is_not_measured_as_the_pack(self):
+        img = np.zeros((400, 300, 3))
+        img[:] = (200, 175, 165)  # C8AFA5: saturation 0.175, under 0.2 but over 0.15
+        img[86:300, 50:250] = (60, 90, 140)
+        code, log = self.check("--render", self.save("warm.png", img), "--at", "150,250", "--bg", "C8AFA5", "--packshot", self.packshot(214, 200))
+        self.assertEqual(code, 0, log)
+
     def test_a_dark_coloured_stage_is_not_measured_as_the_pack(self):
         img = np.zeros((400, 300, 3))
         img[:] = (64, 0, 0)  # a deep red stage, 400000
