@@ -16,7 +16,7 @@ export const pasteKey = (renderId: string) => `renders/${renderId}/paste.json`;
  * Returns the merged JPEG (re-encoded at quality 95, so outside the boxes it is visually the original),
  * or null when the render has no paste plan (not a food fix). Throws when a plan exists but the merge cannot run.
  */
-export async function pasteBack(env: Env, renderId: string, fixed: ArrayBuffer): Promise<ArrayBuffer | null> {
+export async function pasteBack(env: Env, renderId: string, fixed: ArrayBuffer | Uint8Array): Promise<ArrayBuffer | null> {
   const planObj = await env.MEDIA.get(pasteKey(renderId));
   if (!planObj) return null;
   const plan = JSON.parse(await new Response(planObj.body).text()) as PastePlan;

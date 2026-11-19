@@ -17,6 +17,7 @@
   "secrets": { "required": ["FAL_KEY", "EXA_API_KEY", "MCP_TOKEN_SHA256"] },
   // No invocation logs: they keep the full request URL, and a pack link carries its secret token in the path (/c/<token>).
   // console.error logs and uncaught errors are still kept. Request counts and CPU time stay in the Worker's metrics.
+  // Each MCP tool call writes one console.log line (the tool, the client, the email, ok or error; worker/mcp.ts). It holds no argument and no token.
   "observability": { "enabled": true, "logs": { "invocation_logs": false } },
   "d1_databases": [
     {
