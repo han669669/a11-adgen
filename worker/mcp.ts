@@ -1299,7 +1299,22 @@ async function callTool(env: Env, params: any): Promise<ToolResult> {
   }
 }
 
-async function handleOne(env: Env, msg: RpcRequest): Promise<object | null> {
+/** Who sent an MCP request: the OAuth client id (or "admin-token" for the static bearer) and the signed-in email. */
+export interface McpCaller {
+  client?: string;
+  email?: string;
+}
+
+/**
+ * One line in Workers Logs for each tool call, so a change can be traced to the client that made it.
+ * Never the arguments or the answer (they hold client data), and never a tool name that is not ours.
+ */
+function logToolCall(name: unknown, caller: McpCaller, result: ToolResult): void {
+  const tool = TOOLS.some((t) => t.name === name) ? name : "unknown";
+  console.log(JSON.stringify({ event: "mcp_tool_call", tool, client: caller.client, email: caller.email, result: result.isError ? "error" : "ok" }));
+}
+
+async function handleOne(env: Env, msg: RpcRequest, caller: McpCaller): Promise<object | null> {
   if (msg?.jsonrpc !== "2.0" || typeof msg.method !== "string") return rpcError(msg?.id, -32600, "Invalid request");
   // A notification (no id) never gets an answer, and never runs a tool.
   if (msg.id === undefined) return null;
@@ -1328,8 +1343,11 @@ async function handleOne(env: Env, msg: RpcRequest): Promise<object | null> {
       return rpcResult(msg.id, {});
     case "tools/list":
       return rpcResult(msg.id, { tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
-    case "tools/call":
-      return rpcResult(msg.id, await callTool(env, msg.params));
+    case "tools/call": {
+      const result = await callTool(env, msg.params);
+      logToolCall(msg.params?.name, caller, result);
+      return rpcResult(msg.id, result);
+    }
     case "prompts/list":
       return rpcResult(msg.id, { prompts: promptList() });
     case "prompts/get": {
@@ -1345,7 +1363,7 @@ async function handleOne(env: Env, msg: RpcRequest): Promise<object | null> {
 /** Largest MCP request body. The largest real call (an idea burst of 30 ideas) is far below it. */
 const MAX_RPC_BYTES = 1_000_000;
 
-export async function handleMcp(request: Request, env: Env): Promise<Response> {
+export async function handleMcp(request: Request, env: Env, caller: McpCaller): Promise<Response> {
   if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: { Allow: "POST" } });
   // The size limit holds before the body is parsed, and when no Content-Length was sent.
   const tooLarge = () => Response.json(rpcError(null, -32600, `Request too large: at most ${MAX_RPC_BYTES} bytes.`), { status: 413 });
@@ -1363,7 +1381,7 @@ export async function handleMcp(request: Request, env: Env): Promise<Response> {
   // In order, one at a time: a multi-step batch never runs half of its steps side by side.
   const answers = [];
   for (const m of msgs) {
-    const a = await handleOne(env, m);
+    const a = await handleOne(env, m, caller);
     if (a !== null) answers.push(a);
   }
   if (answers.length === 0) return new Response(null, { status: 202 });

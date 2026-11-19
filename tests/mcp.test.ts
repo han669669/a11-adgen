@@ -129,7 +129,7 @@ describe("mcp handler", () => {
   it("refuses a body of more than 1 MB, by its declared size and by its real size", async () => {
     const big = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping", params: { pad: "x".repeat(1_000_001) } });
     const req = (headers: Record<string, string>) => new Request("https://x/mcp", { method: "POST", headers, body: big });
-    for (const r of [await handleMcp(req({ "content-length": String(big.length) }), {} as Env), await handleMcp(req({}), {} as Env)]) {
+    for (const r of [await handleMcp(req({ "content-length": String(big.length) }), {} as Env, CALLER), await handleMcp(req({}), {} as Env, CALLER)]) {
       expect(r.status).toBe(413);
       expect(((await r.json()) as any).error.message).toBe("Request too large: at most 1000000 bytes.");
     }
