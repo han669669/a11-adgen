@@ -190,10 +190,19 @@ describe("web app accounts", () => {
     expect((await call(env, "/api/login", { body: { ...good, email: "second@a11.example" }, ip: "203.0.113.200" })).status).toBe(401);
   });
 
+  it("counts the wrong passwords from before this lock for the email", async () => {
+    const { env } = makeEnv();
+    await call(env, "/api/signup", { body: signupBody });
+    // Before the lock counted addresses, a wrong try wrote one row with the email as its key.
+    for (let i = 0; i < 20; i++) await env.DB.prepare("INSERT INTO login_failures (email, at) VALUES (?, ?)").bind(good.email, new Date().toISOString()).run();
+    expect((await call(env, "/api/login", { body: good, ip: "203.0.113.7" })).status).toBe(429);
+  });
+
   it("clears its own attempt on a good sign-in", async () => {
     const { env } = makeEnv();
     await call(env, "/api/signup", { body: signupBody });
-    for (let i = 0; i < 6; i++) expect((await call(env, "/api/login", { body: good })).status).toBe(200);
+    for (let i = 0; i < 21; i++) expect((await call(env, "/api/login", { body: good, ip: "203.0.113.7" })).status).toBe(200);
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM login_failures").first()).toEqual({ n: 0 });
   });
 
   it("refuses an over-long password before hashing it", async () => {
