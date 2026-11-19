@@ -48,11 +48,14 @@ function setup(live: Record<string, string> = { "app/index.html": OLD_PAGE, "app
   });
   type Hook = ((key: string) => void | Promise<void>) | undefined;
   /** beforePut and afterPut run around each write: a test uses them for a request that overlaps another. */
-  const state = { reads: 0, failPut: "", limited: false, limitKeys: [] as string[], beforePut: undefined as Hook, afterPut: undefined as Hook };
+  const state = { reads: 0, failPut: "", failDelete: "", limited: false, limitKeys: [] as string[], beforePut: undefined as Hook, afterPut: undefined as Hook };
   const MEDIA = {
     head: async (k: string) => (state.reads++, files.has(k) ? view(files.get(k)!) : null),
     get: async (k: string) => (state.reads++, files.has(k) ? view(files.get(k)!) : null),
-    delete: async (k: string | string[]) => void [k].flat().forEach((key) => files.delete(key)),
+    delete: async (k: string | string[]) => {
+      if ([k].flat().includes(state.failDelete)) throw new Error("R2: the delete failed");
+      [k].flat().forEach((key) => files.delete(key));
+    },
     put: async (k: string, v: ArrayBuffer | string, o?: { sha256?: ArrayBuffer; httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string>; onlyIf?: { etagMatches?: string } }) => {
       await state.beforePut?.(k);
       if (k === state.failPut) throw new Error("R2: the write failed");
@@ -365,7 +368,7 @@ describe("app_publish", () => {
   it("a rollback to the page of the first version does not open the way back of that version again", async () => {
     // A publish replaced the page of the first version, and its delete of the old key did not run.
     const first = readFileSync(new URL("./fixtures/first-publish-index.html", import.meta.url), "utf8");
-    const { env, text } = setup(
+    const { env, text, state } = setup(
       {
         "app/index.html": PAGE,
         "app/assets/index-CzN-NH7R.js": "first js",
@@ -376,8 +379,12 @@ describe("app_publish", () => {
       },
       { "app/index.html": { previous: ID_A } },
     );
-    expect(await run(env, "app_publish", { rollback: true })).toMatchObject({ rolledBack: true });
+    // The delete of the old key fails again, after the rollback put the page back: the old key stays in R2.
+    state.failDelete = "app-publish/previous-index.html";
+    await expect(publish(env, { rollback: true })).rejects.toThrow("R2: the delete failed");
+    state.failDelete = "";
     expect(text("app/index.html")).toBe(first);
+    expect(text("app-publish/previous-index.html")).toBe(OLD_PAGE);
     // One step only: the page of the first version is live by a rollback, so the old key is not its way back.
     await expect(publish(env, { rollback: true })).rejects.toThrow("No earlier page is kept");
     expect(text("app/index.html")).toBe(first);
