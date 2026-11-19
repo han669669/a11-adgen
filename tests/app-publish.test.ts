@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../worker/env";
 import worker from "../worker/index";
@@ -275,16 +276,21 @@ describe("app_publish", () => {
     expect(text(KEPT)).toBe(OLD_PAGE);
   });
 
-  it("rollback still finds the page that the first version of the tool kept", async () => {
-    // The build is live, and its kept page is under the one key of the first version (a publish made before this change).
-    const { env, files, text } = setup({ "app/index.html": PAGE, "app/assets/index-OLD.js": "old js", "app-publish/previous-index.html": OLD_PAGE });
+  it("rollback uses the page that the first version of the tool kept only for the publish of that version", async () => {
+    // The first version had one key for all publishes, and made one publish (19-11-2026). Its page is live.
+    const first = readFileSync(new URL("./fixtures/first-publish-index.html", import.meta.url), "utf8");
+    const { env, files, text } = setup({ "app/index.html": first, "app/assets/index-OLD.js": "old js", "app-publish/previous-index.html": OLD_PAGE });
     expect(await run(env, "app_publish", { rollback: true })).toMatchObject({ rolledBack: true, assets: ["assets/index-OLD.js"] });
     expect(text("app/index.html")).toBe(OLD_PAGE);
-    // With no kept page at all, the tool says so and changes nothing.
-    files.set("app/index.html", { bytes: new TextEncoder().encode(PAGE) });
-    files.delete("app-publish/previous-index.html");
+    expect(files.has("app-publish/previous-index.html")).toBe(false);
+  });
+
+  it("rollback does not use the page of the first version for another live page", async () => {
+    // Another build is live and has no kept page of its own. The old key still has a page (its delete did not run).
+    const { env, text } = setup({ "app/index.html": PAGE, "app/assets/index-OLD.js": "old js", "app-publish/previous-index.html": OLD_PAGE });
     await expect(publish(env, { rollback: true })).rejects.toThrow("No earlier page is kept");
     expect(text("app/index.html")).toBe(PAGE);
+    expect(text("app-publish/previous-index.html")).toBe(OLD_PAGE);
   });
 
   it("answers through /mcp, and the schema refuses other fields", async () => {
