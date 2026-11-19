@@ -91,6 +91,24 @@ describe("pack_publish", () => {
     expect(raw.prepare("SELECT COUNT(*) AS n FROM packs").get()).toEqual({ n: 0 });
   });
 
+  it("checks a number against every fact of a lasting product that has more than 200 facts", async () => {
+    // A lasting product keeps its subject across batches (subject_save reuses it), so its fact sheet grows. The number
+    // check read the oldest 200 facts only and refused a number that only a newer fact holds.
+    const { env, raw, files } = makeEnv();
+    const { b, finals } = await seed(env, raw, files);
+    const subjectId = (raw.prepare("SELECT subject_id AS s FROM batches WHERE id = ?").get(b.id) as { s: string }).s;
+    for (let i = 0; i < 5; i++)
+      await batch.factsSave(env, subjectId, Array.from({ length: 40 }, (_, j) => ({ label: `Note ${i}-${j}`, value: "no number", quote: "no number", sourceUrl: "https://b.example/p" })));
+    await batch.factsSave(env, subjectId, [{ label: "Bundle", value: "S$29.90 for four jars", quote: "Bundle of 4 S$29.90", sourceUrl: "https://b.example/p" }]);
+    const r = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy({ headlines: ["Four jars for S$29.90", "Gone in one sitting"] }) }] });
+    const content = JSON.parse((raw.prepare("SELECT content FROM packs WHERE id = ?").get(r.packId) as { content: string }).content) as pack.PackContent;
+    expect(content.factCheck.find((c) => c.claim === "29.90")?.fact).toBe("Bundle: S$29.90 for four jars");
+    // The price and the delivery fact are now older than the newest 200: they still count.
+    expect(content.factCheck.find((c) => c.claim === "8.90")?.fact).toBe("Price: S$8.90 a jar");
+    expect(content.factCheck.find((c) => c.claim === "35")?.fact).toBe("Delivery: Free delivery from S$35");
+    await expect(pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy({ headlines: ["Only S$7.90 a jar", "Gone in one sitting"] }) }] })).rejects.toThrow(/number 7\.90.*not in the fact sheet/);
+  });
+
   it("refuses a render that is a draft, from another batch, not composed, or used twice", async () => {
     const { env, raw, files } = makeEnv();
     const { b, ideas, finals } = await seed(env, raw, files);
