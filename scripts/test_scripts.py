@@ -680,6 +680,23 @@ class PackCheck(Tmp):
         code, log = self.check("--render", self.save("dark.png", img), "--at", "150,250", "--bg", "400000", "--packshot", self.packshot(214, 200))
         self.assertEqual(code, 0, log)
 
+    def test_a_deep_shadow_of_a_bright_stage_is_not_measured_as_the_pack(self):
+        img = np.zeros((400, 300, 3))
+        img[:] = (255, 212, 25)
+        img[86:300, 50:250] = (120, 80, 50)
+        img[300:320, 40:260] = (60, 49, 5)  # a deep shadow that touches the pack
+        code, log = self.check("--render", self.save("deep.png", img), "--at", "150,250", "--bg", "FFD419", "--packshot", self.packshot(214, 200))
+        self.assertEqual(code, 0, log)
+
+    def test_a_pack_on_its_side_passes_with_sideways(self):
+        img = np.zeros((400, 400, 3))
+        img[:] = (255, 212, 25)
+        img[150:250, 50:350] = (120, 80, 50)  # the pack on its side: 100 high, 300 wide
+        args = ["--render", self.save("side.png", img), "--at", "200,200", "--bg", "FFD419", "--packshot", self.packshot(300, 100)]
+        self.assertEqual(self.check(*args)[0], 1)
+        code, log = self.check(*args, "--sideways")
+        self.assertEqual(code, 0, log)
+
     def test_a_point_on_the_stage_and_a_packshot_without_a_cut_out_stop_with_a_clear_message(self):
         r = self.stage(214, 200)
         self.assertIn("not inside the pack", exit_message(pack_check.main, ["--render", r, "--at", "5,5", "--bg", "FFD419", "--packshot", self.packshot(214, 200)]))

@@ -51,7 +51,8 @@ def stage_mask(rgb, bg):
     if v0 < 0.3:
         # A dark coloured stage (deep red, navy): follow its hue, from its shadow up to it, with no brightness floor.
         return (dh < 0.045) & (s > 0.45 * s0) & (mx <= v0 + 0.08)
-    return (dh < 0.045) & (s > 0.45 * s0) & (mx > 0.25)
+    # The floor is relative to the stage, so a deep shadow of a bright stage is still stage.
+    return (dh < 0.045) & (s > 0.45 * s0) & (mx > 0.2 * v0)
 
 
 def close_bands(mask):
@@ -110,6 +111,7 @@ def main(argv=None):
     ap.add_argument("--at", required=True, help="X,Y: a point inside the pack, in render pixels")
     ap.add_argument("--bg", required=True, help="the stage colour as RRGGBB")
     ap.add_argument("--packshot", required=True, help="the brand's cut-out packshot, or its grey alpha mask")
+    ap.add_argument("--sideways", action="store_true", help="the pack lies on its side (product_lock.py turn): turn the packshot too")
     ap.add_argument("--tolerance", type=float, default=0.02)
     a = ap.parse_args(argv)
     try:
@@ -123,7 +125,8 @@ def main(argv=None):
     alpha = np.asarray(shot if shot.mode == "L" else shot.convert("RGBA").getchannel("A"))
     if alpha.min() > 128:
         sys.exit("--packshot needs the cut-out packshot (transparent round the pack) or its grey alpha mask")
-    r, h, w = ratio(alpha > 128)
+    mask = alpha > 128
+    r, h, w = ratio(np.rot90(mask) if a.sideways else mask)
     q, qh, qw = ratio(pack)
     diff = q / r - 1
     ok = abs(diff) <= a.tolerance
