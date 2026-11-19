@@ -1,6 +1,8 @@
 # Project progress and direction
 
-This is the shared handoff for `a11-adgen`. It records what changed, what is still open and what to do next. Use the [blueprint](blueprint.md) for the system design, the [decisions log](decisions.md) for owner decisions and the [backlog](backlog.md) for work that is parked or declined.
+This is the shared handoff for `a11-adgen`. It records what changed, what is still open and what to do next. The old `ai-ad-generator` is a reference only. Use the [v1 lessons](v1-lessons.md) to inform work in this repo, not as a separate workstream.
+
+Use the [blueprint](blueprint.md) for the system design, the [decisions log](decisions.md) for owner decisions and the [backlog](backlog.md) for work that is parked or declined.
 
 ## Current state
 
