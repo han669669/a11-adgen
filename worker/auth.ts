@@ -8,7 +8,12 @@ export const PBKDF2_ITERATIONS = 100_000; // the Workers maximum for PBKDF2
 export const MIN_PASSWORD = 12;
 export const MAX_PASSWORD = 200;
 const SESSION_DAYS = 30;
-const COOKIE = "a11s";
+// `__Host-`: a browser takes this cookie only over HTTPS, for this host alone (no Domain) and with Path=/, so another site on a parent domain cannot set it.
+const COOKIE = "__Host-a11s";
+// The name before the prefix. A session lasts SESSION_DAYS, so no session from before the rename is left after this date: then remove both constants.
+const LEGACY_COOKIE = "a11s";
+const LEGACY_COOKIE_UNTIL = Date.parse("2026-12-31T00:00:00+08:00");
+const COOKIE_ATTRS = "Path=/; HttpOnly; Secure; SameSite=Lax";
 const MAX_FAILURES = 5;
 const MAX_EMAIL_FAILURES = 20; // sign-in tries for one email from all addresses together
 const FAILURE_WINDOW = "-15 minutes";
@@ -71,7 +76,7 @@ async function newSession(env: Env, email: string): Promise<string> {
   await env.DB.prepare("INSERT INTO sessions (token_hash, email, expires_at, created_at) VALUES (?, ?, ?, ?)")
     .bind(await sha256(token), email, expires.toISOString(), now.toISOString())
     .run();
-  return `${COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86_400}`;
+  return `${COOKIE}=${token}; ${COOKIE_ATTRS}; Max-Age=${SESSION_DAYS * 86_400}`;
 }
 
 /**
@@ -198,14 +203,16 @@ export async function reserveRegistration(env: Env): Promise<void> {
   await reserveAttempt(env, REGISTER_KEY, REGISTER_MAX_PER_HOUR, "-1 hour", "Too many registrations. Try again later.");
 }
 
-function tokenFrom(request: Request): string | null {
-  const m = (request.headers.get("cookie") ?? "").match(new RegExp(`(?:^|;\\s*)${COOKIE}=([A-Za-z0-9_-]{20,})`));
-  return m?.[1] ?? null;
+/** The session tokens in the request: the `__Host-` cookie first, then the old name while it is still accepted. */
+function tokensFrom(request: Request): string[] {
+  const header = request.headers.get("cookie") ?? "";
+  const names = Date.now() < LEGACY_COOKIE_UNTIL ? [COOKIE, LEGACY_COOKIE] : [COOKIE];
+  return names.flatMap((name) => header.match(new RegExp(`(?:^|;\\s*)${name}=([A-Za-z0-9_-]{20,})`))?.[1] ?? []);
 }
 
 /** The signed-in email, or null. An email removed from the allow-list loses access at once. */
 export async function currentUser(env: Env, request: Request): Promise<string | null> {
-  const token = tokenFrom(request);
+  const [token] = tokensFrom(request);
   if (!token) return null;
   const row = await env.DB.prepare("SELECT email FROM sessions WHERE token_hash = ? AND expires_at > ?")
     .bind(await sha256(token), new Date().toISOString())
@@ -213,8 +220,8 @@ export async function currentUser(env: Env, request: Request): Promise<string | 
   return row && allowed(env, row.email) ? row.email : null;
 }
 
-export async function logout(env: Env, request: Request): Promise<string> {
-  const token = tokenFrom(request);
-  if (token) await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256(token)).run();
-  return `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+/** Ends every session the request carries. Returns one Set-Cookie value for each cookie name, to clear both. */
+export async function logout(env: Env, request: Request): Promise<string[]> {
+  for (const token of tokensFrom(request)) await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256(token)).run();
+  return [COOKIE, LEGACY_COOKIE].map((name) => `${name}=; ${COOKIE_ATTRS}; Max-Age=0`);
 }

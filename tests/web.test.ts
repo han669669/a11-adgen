@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { hashPassword, verifyPassword } from "../worker/auth";
 import type { Env } from "../worker/env";
 import worker from "../worker/index";
@@ -99,6 +99,52 @@ describe("web app accounts", () => {
     expect(await (await call(env, "/api/me", { cookie })).json()).toEqual({ email: "owner@a11.example" });
     await call(env, "/api/logout", { body: {}, cookie });
     expect((await call(env, "/api/me", { cookie })).status).toBe(401);
+  });
+
+  it("names the session cookie with the __Host- prefix: Secure, Path=/ and no Domain", async () => {
+    const { env } = makeEnv();
+    const r = await call(env, "/api/signup", { body: signupBody });
+    expect(r.headers.get("set-cookie")).toMatch(/^__Host-a11s=[A-Za-z0-9_-]{43}; Path=\/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000$/);
+  });
+
+  describe("a session signed in under the old cookie name (a11s)", () => {
+    afterEach(() => void vi.useRealTimers());
+    /** The cookie a browser still holds from before the rename: the same token under the old name. */
+    const oldCookieOf = (r: Response) => `a11s=${cookieOf(r).split("=")[1]}`;
+
+    it("keeps working, and sign-out ends it and clears both cookie names", async () => {
+      const { env } = makeEnv();
+      const old = oldCookieOf(await call(env, "/api/signup", { body: signupBody }));
+      expect(await (await call(env, "/api/me", { cookie: old })).json()).toEqual({ email: "owner@a11.example" });
+      const out = await call(env, "/api/logout", { body: {}, cookie: old });
+      expect(out.headers.getSetCookie()).toEqual([
+        "__Host-a11s=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
+        "a11s=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
+      ]);
+      expect((await call(env, "/api/me", { cookie: old })).status).toBe(401);
+    });
+
+    it("gives way to the new name after a new sign-in, and one sign-out ends both sessions", async () => {
+      const { env } = makeEnv();
+      const old = oldCookieOf(await call(env, "/api/signup", { body: signupBody }));
+      const fresh = cookieOf(await call(env, "/api/login", { body: good, cookie: old }));
+      expect(fresh).toMatch(/^__Host-a11s=/);
+      // A wrong value under the new name is not rescued by the old cookie.
+      expect((await call(env, "/api/me", { cookie: `${old}; __Host-a11s=${"x".repeat(43)}` })).status).toBe(401);
+      await call(env, "/api/logout", { body: {}, cookie: `${old}; ${fresh}` });
+      expect((await call(env, "/api/me", { cookie: old })).status).toBe(401);
+      expect((await call(env, "/api/me", { cookie: fresh })).status).toBe(401);
+    });
+
+    it("is refused from 31-12-2026 SGT, when no session from before the rename can be left", async () => {
+      const { env } = makeEnv();
+      vi.useFakeTimers({ now: new Date("2026-12-30T23:59:59+08:00"), toFake: ["Date"] });
+      const r = await call(env, "/api/signup", { body: signupBody });
+      expect((await call(env, "/api/me", { cookie: oldCookieOf(r) })).status).toBe(200);
+      vi.setSystemTime(new Date("2026-12-31T00:00:00+08:00"));
+      expect((await call(env, "/api/me", { cookie: oldCookieOf(r) })).status).toBe(401);
+      expect((await call(env, "/api/me", { cookie: cookieOf(r) })).status).toBe(200);
+    });
   });
 
   it("saves picks only from a list: a missing field is refused, an empty list clears", async () => {
@@ -299,6 +345,20 @@ describe("web app files", () => {
     expect(page.headers.get("content-security-policy")).toMatch(/frame-ancestors 'none'/);
     expect((await call(env, "/assets/missing.js")).status).toBe(404);
     expect((await call(env, "/index.html")).headers.get("content-security-policy")).toMatch(/frame-ancestors 'none'/);
+  });
+  it("sends the CSP, no-referrer and a permissions policy on every app file, not only on the page", async () => {
+    const { env } = makeEnv();
+    await put(env, "index.html", "<html>app</html>");
+    await put(env, "assets/index-abc.js", "console.log(1)");
+    await put(env, "assets/logo.svg", "<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>");
+    for (const path of ["/", "/b/some-batch", "/index.html", "/assets/index-abc.js", "/assets/logo.svg"]) {
+      const r = await call(env, path);
+      expect(r.status, path).toBe(200);
+      expect(r.headers.get("content-security-policy"), path).toMatch(/^default-src 'self';.* frame-ancestors 'none';/);
+      expect(r.headers.get("referrer-policy"), path).toBe("no-referrer");
+      expect(r.headers.get("permissions-policy"), path).toBe("camera=(), microphone=(), geolocation=(), payment=(), usb=()");
+      expect(r.headers.get("x-content-type-options"), path).toBe("nosniff");
+    }
   });
 });
 
