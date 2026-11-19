@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { api, type Batch, type Final, type Idea } from "@/lib/api";
 
@@ -138,8 +138,34 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
                     >
                       <img src={d.url} alt={`Draft for ${idea.headline}`} loading="lazy" className="aspect-[4/5] w-full object-cover" />
                       <span className="absolute left-2 top-2 flex items-center gap-2">
-                        <span className="pointer-events-none rounded-md bg-background/90 px-1.5 py-0.5">
-                          <Checkbox checked={on} tabIndex={-1} aria-hidden />
+                        <span aria-hidden className="pointer-events-none rounded-md bg-background/90 px-1.5 py-0.5">
+                          <span className={`relative inline-flex size-4 items-end rounded-[5px] border-[1.5px] border-solid bg-transparent p-0 before:block before:content-[''] ${on ? "border-transparent" : "border-border"}`}>
+                            <AnimatePresence initial={false}>
+                              {on && (
+                                <motion.svg
+                                  width={18}
+                                  height={18}
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth={2}
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-foreground"
+                                  initial={{ opacity: 1 }}
+                                  animate={{ opacity: 1 }}
+                                  exit={{ opacity: 1 }}
+                                >
+                                  <motion.path
+                                    d="M6 12L10 16L18 8"
+                                    initial={{ pathLength: 0 }}
+                                    animate={{ pathLength: 1, transition: { duration: 0.08, ease: "easeOut" } }}
+                                    exit={{ pathLength: 0, transition: { duration: 0.04, ease: "easeIn" } }}
+                                  />
+                                </motion.svg>
+                              )}
+                            </AnimatePresence>
+                          </span>
                         </span>
                         {revealed && d.rank && <span className="rounded-md bg-background/90 px-1.5 py-0.5 text-caption font-medium">#{d.rank}</span>}
                       </span>
