@@ -81,7 +81,7 @@ Rollback:
 - To stay on an older build: revert the change on `main`. After that deploy the Worker takes only the older build. Publish it with `app_publish`.
 - The owner's fallback, with the admin token: `scripts/rollback_app.sh` (below).
 
-`tests/app-publish.test.ts` covers the tool and the route: other bytes, a name that is not in the build, `index.html` too early, a file in R2 without its SHA-256, a wrong, expired or replaced link, the size limits and the rollback. For a preview, call `app_publish` on the preview Worker: it takes the build of the branch it was deployed from.
+`tests/app-publish.test.ts` covers the tool and the route: other bytes, a name that is not in the build, `index.html` too early, a file in R2 without its SHA-256, a wrong, expired or replaced link, the size limits and the rollback. For a preview, call `app_publish` on the preview Worker. It takes only the build of the branch it was deployed from: build that branch (not `main`) in step 1, and set `B` in the proof to the preview address.
 
 ### Fallback: upload with the admin token (owner only)
 
