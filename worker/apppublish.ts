@@ -31,6 +31,8 @@ const keptKey = (page: string) => `app-publish/previous/${Buffer.from(page.slice
  * publish (19-11-2026), so this page is the way back of that publish only. Never written.
  */
 const LEGACY_KEPT_KEY = "app-publish/previous-index.html";
+/** The SHA-256 of the page that the publish of the first version made live. */
+const LEGACY_PUBLISHED_PAGE = "sha256-q6nCuLBDaeOEXTsQGnI70xT7mKjNi3ZwvDJ5ZZc6SSg=";
 
 const TYPES: Record<string, string> = {
   html: "text/html; charset=utf-8",
@@ -87,7 +89,7 @@ async function rollback(env: Env) {
   const live = await (await env.MEDIA.get(`app/${INDEX}`))?.arrayBuffer();
   const livePage = live && sri(await sha256(live));
   const liveKey = livePage && keptKey(livePage);
-  const previous = liveKey ? ((await env.MEDIA.get(liveKey)) ?? (await env.MEDIA.get(LEGACY_KEPT_KEY))) : null;
+  const previous = liveKey ? ((await env.MEDIA.get(liveKey)) ?? (livePage === LEGACY_PUBLISHED_PAGE ? await env.MEDIA.get(LEGACY_KEPT_KEY) : null)) : null;
   if (!liveKey || !previous) throw new InputError("No earlier page is kept: no publish made the live page, or it was rolled back already.");
   const page = await previous.arrayBuffer();
   const assets = [...new TextDecoder().decode(page).matchAll(/(?:src|href)="\/(assets\/[A-Za-z0-9._-]+)"/g)].map((m) => m[1]!);
