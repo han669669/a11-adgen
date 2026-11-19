@@ -34,9 +34,11 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
       const b = await api<Batch>(`/api/batches/${id}`);
       setBatch(b);
       if (resetPicks) setPicks(initialPicks(b));
+      return true;
     } catch (e) {
       // Only the first load replaces the page; a failed background refresh keeps the board.
       if (resetPicks) setLoadError((e as Error).message);
+      return false;
     }
   }, [id]);
 
@@ -54,12 +56,22 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
   );
   useEffect(() => {
     if (pending.length === 0) return;
-    const t = setTimeout(async () => {
+    let cancelled = false;
+    let timer = setTimeout(poll, 8000);
+
+    async function poll() {
       await Promise.allSettled(pending.map((f) => api(`/api/renders/${f.id}/refresh`, { body: {} })));
-      await load(false);
+      if (cancelled) return;
+      const loaded = await load(false);
       onSpend();
-    }, 8000);
-    return () => clearTimeout(t);
+      // A failed load leaves pending unchanged, so the effect will not run again on its own.
+      if (!loaded && !cancelled) timer = setTimeout(poll, 8000);
+    }
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [pending, load, onSpend]);
 
   if (loadError) return <p className="text-body text-red-700">{loadError}</p>;
