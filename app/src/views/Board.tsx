@@ -165,8 +165,8 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
           </p>
         )}
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
-          <p className="text-body text-muted-foreground">
-            {`${picks.size} of ${ideas.length} picked.`}
+          <p className={`text-body ${tooLong ? "text-red-700" : "text-muted-foreground"}`}>
+            {tooLong ? `A note is over ${NOTE_MAX} characters. Shorten it to save.` : `${picks.size} of ${ideas.length} picked.`}
           </p>
           <Button disabled={!dirty || tooLong} loading={busy} onClick={save}>
             Save my picks
