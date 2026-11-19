@@ -1,11 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Env } from "../worker/env";
 import { handleMcp, INSTRUCTIONS, TOOLS } from "../worker/mcp";
 import { validate } from "../worker/schema";
 
 const env = { PUBLIC_BASE_URL: "https://x.example" } as Env;
+const CALLER = { client: "client-abc", email: "owner@a11.example" };
 const post = (body: unknown) =>
-  handleMcp(new Request("https://x/mcp", { method: "POST", body: JSON.stringify(body) }), env);
+  handleMcp(new Request("https://x/mcp", { method: "POST", body: JSON.stringify(body) }), env, CALLER);
 
 describe("mcp handler", () => {
   it("answers initialize with a supported version", async () => {
@@ -292,8 +293,53 @@ describe("mcp handler", () => {
     }
   });
   it("refuses GET", async () => {
-    const r = await handleMcp(new Request("https://x/mcp"), env);
+    const r = await handleMcp(new Request("https://x/mcp"), env, CALLER);
     expect(r.status).toBe(405);
+  });
+});
+
+describe("tool call log", () => {
+  const call = (id: number, name: unknown, args: unknown = {}) => ({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  /** Runs the requests and returns what the Worker wrote with console.log. */
+  async function logged(...bodies: unknown[]): Promise<string[]> {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      for (const b of bodies) await post(b);
+      return log.mock.calls.map((c) => String(c[0]));
+    } finally {
+      log.mockRestore();
+    }
+  }
+
+  it("writes one line for each tool call: the tool, the caller and the result", async () => {
+    const lines = await logged(
+      call(1, "prompt_get", { name: "final", arguments: { batchId: "abc-123" } }),
+      [call(2, "pack_revoke", { packId: "not-a-pack-id" }), call(3, "prompt_get", { name: "learn", arguments: {} })],
+    );
+    expect(lines.map((l) => JSON.parse(l))).toEqual([
+      { event: "mcp_tool_call", tool: "prompt_get", ...CALLER, result: "ok" },
+      { event: "mcp_tool_call", tool: "pack_revoke", ...CALLER, result: "error" },
+      { event: "mcp_tool_call", tool: "prompt_get", ...CALLER, result: "ok" },
+    ]);
+  });
+  it("never writes the arguments, the answer or a tool name the caller made up", async () => {
+    const lines = await logged(
+      call(1, "pack_revoke", { packId: "SECRET-ARGUMENT" }),
+      call(2, "SECRET-TOOL-NAME\nforged line", { key: "SECRET-ARGUMENT" }),
+      call(3, { made: "up" }),
+    );
+    expect(lines).toHaveLength(3);
+    expect(lines.join("\n")).not.toMatch(/SECRET|forged|Bad input|made/);
+    expect(lines.map((l) => JSON.parse(l).tool)).toEqual(["pack_revoke", "unknown", "unknown"]);
+    for (const l of lines) expect(l).not.toContain("\n");
+  });
+  it("writes nothing for a request that runs no tool", async () => {
+    const lines = await logged(
+      { jsonrpc: "2.0", id: 1, method: "tools/list" },
+      { jsonrpc: "2.0", id: 2, method: "prompts/list" },
+      { jsonrpc: "2.0", method: "tools/call", params: { name: "spend_get", arguments: {} } },
+    );
+    expect(lines).toEqual([]);
   });
 });
 

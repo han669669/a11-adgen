@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { hashPassword } from "../worker/auth";
 import type { Env } from "../worker/env";
 import entry from "../worker/entry";
@@ -248,6 +248,30 @@ describe("MCP OAuth login", () => {
     const r = await go(env, url, { headers: { cookie: await signIn(env, "/authorize") } });
     expect(r.status).toBe(400);
     expect(r.headers.get("location")).toBeNull();
+  });
+});
+
+describe("MCP tool call log", () => {
+  const callTool = (env: Env, auth: string) =>
+    go(env, "/mcp", { method: "POST", headers: { "content-type": "application/json", Authorization: auth }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "spend_get", arguments: {} } }) });
+
+  it("names the OAuth client and its email, or the admin token, and never holds a token", async () => {
+    const env = await makeEnv();
+    const { access_token, clientId } = await fullLogin(env);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      expect((await callTool(env, `Bearer ${access_token}`)).status).toBe(200);
+      expect((await callTool(env, `Bearer ${BEARER}`)).status).toBe(200);
+      expect((await callTool(env, "Bearer wrong")).status).toBe(401);
+      const lines = log.mock.calls.map((c) => String(c[0]));
+      expect(lines.map((l) => JSON.parse(l))).toEqual([
+        { event: "mcp_tool_call", tool: "spend_get", client: clientId, email: EMAIL, result: "ok" },
+        { event: "mcp_tool_call", tool: "spend_get", client: "admin-token", result: "ok" },
+      ]);
+      for (const secret of [access_token, BEARER, env.MCP_TOKEN_SHA256]) expect(lines.join("\n")).not.toContain(secret);
+    } finally {
+      log.mockRestore();
+    }
   });
 });
 
