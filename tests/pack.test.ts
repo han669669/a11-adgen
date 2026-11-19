@@ -109,6 +109,22 @@ describe("pack_publish", () => {
     await expect(pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy({ headlines: ["Only S$7.90 a jar", "Gone in one sitting"] }) }] })).rejects.toThrow(/number 7\.90.*not in the fact sheet/);
   });
 
+  it("finds an old number that many newer facts hold only inside a longer number", async () => {
+    // Review of #134: an old "4 jars" fact, then more than 400 newer facts with "40g". The digits "4" are in each of them,
+    // so one page of the search for older facts held no fact with the number 4 itself.
+    const { env, raw, files } = makeEnv();
+    const { b, finals } = await seed(env, raw, files);
+    const subjectId = (raw.prepare("SELECT subject_id AS s FROM batches WHERE id = ?").get(b.id) as { s: string }).s;
+    await batch.factsSave(env, subjectId, [{ label: "Bundle", value: "4 jars in a box", quote: "Box of 4 jars", sourceUrl: "https://b.example/p" }]);
+    for (let i = 0; i < 11; i++)
+      await batch.factsSave(env, subjectId, Array.from({ length: 40 }, (_, j) => ({ label: `Weight ${i}-${j}`, value: "40g a pack", quote: "40g", sourceUrl: "https://b.example/p" })));
+    const ads = (headline: string) => [{ renderId: finals[0]!, ...copy({ primaryTexts: ["The jar is empty again, so go on.", "Air-popped, not fried, and gone."], headlines: [headline, "Gone in one sitting"] }) }];
+    const r = await pack.packPublish(env, { batchId: b.id, ads: ads("A box of 4 jars") });
+    const content = JSON.parse((raw.prepare("SELECT content FROM packs WHERE id = ?").get(r.packId) as { content: string }).content) as pack.PackContent;
+    expect(content.factCheck).toEqual([expect.objectContaining({ claim: "4", fact: "Bundle: 4 jars in a box" })]);
+    await expect(pack.packPublish(env, { batchId: b.id, ads: ads("A box of 0 jars") })).rejects.toThrow(/number 0 .*not in the fact sheet/);
+  });
+
   it("refuses a render that is a draft, from another batch, not composed, or used twice", async () => {
     const { env, raw, files } = makeEnv();
     const { b, ideas, finals } = await seed(env, raw, files);

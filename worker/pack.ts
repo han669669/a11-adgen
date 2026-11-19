@@ -71,6 +71,8 @@ const sha256Hex = async (s: string) =>
   [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 const FACT_COLS = "SELECT id, label, value, quote, source_url FROM facts";
+/** The number check reads at most this many pages of 200 older facts for one number. */
+const OLDER_FACT_PAGES = 50;
 
 interface FactRow {
   label: string;
@@ -109,9 +111,18 @@ export async function packPublish(
     .bind(b.subject_id).all<FactRow>()).results;
   const holds = (n: string) => (x: FactRow) => numbersIn(`${x.value} ${x.quote}`).includes(n);
   // An older fact still counts (the price from the first batch): look for the number in the rest of the sheet, newest first.
-  const olderFact = async (n: string) =>
-    (await env.DB.prepare(`${FACT_COLS} WHERE subject_id = ? AND (instr(value, ?) > 0 OR instr(quote, ?) > 0) ORDER BY id DESC LIMIT 200`)
-      .bind(b.subject_id, n, n).all<FactRow>()).results.find(holds(n));
+  // instr finds the digits inside a longer number too ("4" in "40g"), so read page after page until a fact holds the number itself.
+  const olderFact = async (n: string) => {
+    let before = Number.MAX_SAFE_INTEGER;
+    for (let page = 0; page < OLDER_FACT_PAGES; page++) {
+      const rows = (await env.DB.prepare(`${FACT_COLS} WHERE subject_id = ? AND id < ? AND (instr(value, ?) > 0 OR instr(quote, ?) > 0) ORDER BY id DESC LIMIT 200`)
+        .bind(b.subject_id, before, n, n).all<FactRow & { id: number }>()).results;
+      const f = rows.find(holds(n));
+      if (f || rows.length < 200) return f;
+      before = rows[rows.length - 1]!.id;
+    }
+    return undefined;
+  };
   const week = isoWeek(singaporeClock(a.at ?? new Date()));
   // Approved copy is copied by the server, never typed again (owner, 09-11-2026: v4 and v5 held rewritten copy).
   let source: PackContent | null = null;
