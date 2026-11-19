@@ -10,6 +10,7 @@ export const MAX_PASSWORD = 200;
 const SESSION_DAYS = 30;
 const COOKIE = "a11s";
 const MAX_FAILURES = 5;
+const MAX_EMAIL_FAILURES = 20; // sign-in tries for one email from all addresses together
 const FAILURE_WINDOW = "-15 minutes";
 
 export class AuthError extends Error {
@@ -107,12 +108,35 @@ export async function signup(env: Env, body: { email?: unknown; password?: unkno
   return newSession(env, email);
 }
 
-export async function login(env: Env, body: { email?: unknown; password?: unknown }): Promise<string> {
+/**
+ * The caller's address for the sign-in lock, from Cloudflare's `cf-connecting-ip` (a caller cannot set it).
+ * An IPv6 caller holds a whole /64, so its key is the /64. Callers with no address share one key.
+ */
+export function callerAddress(request: Request): string {
+  const ip = (request.headers.get("cf-connecting-ip") ?? "").trim().toLowerCase();
+  if (!ip.includes(":")) return ip || "unknown";
+  const [head = "", tail] = ip.split("::");
+  const groups = head ? head.split(":") : [];
+  if (tail !== undefined) {
+    const rest = tail ? tail.split(":") : [];
+    groups.push(...Array<string>(Math.max(0, 8 - groups.length - rest.length)).fill("0"), ...rest);
+  }
+  return `${groups
+    .slice(0, 4)
+    .map((g) => g.replace(/^0+(?=.)/, ""))
+    .join(":")}::/64`;
+}
+
+/**
+ * `address` is callerAddress(request). Wrong tries lock one email for one address (MAX_FAILURES), so a stranger cannot lock the owner out.
+ * A higher limit for the email from all addresses together (MAX_EMAIL_FAILURES) still stops a guess from many addresses.
+ */
+export async function login(env: Env, body: { email?: unknown; password?: unknown }, address: string): Promise<string> {
   const email = cleanEmail(body.email);
   const bad = new AuthError("Wrong email or password.");
   if (!allowed(env, email)) throw bad;
   if (typeof body.password !== "string" || body.password.length > MAX_PASSWORD) throw bad;
-  const attemptId = await reserveAttempt(env, email);
+  const attemptId = await reserveLoginAttempt(env, email, address);
   const user = await env.DB.prepare("SELECT pw_hash FROM users WHERE email = ?").bind(email).first<{ pw_hash: string }>();
   if (!user || !(await verifyPassword(body.password, user.pw_hash))) throw bad;
   // Success: drop this attempt, old failures and expired sessions (keeps both tables small).
@@ -140,6 +164,24 @@ async function reserveAttempt(env: Env, key: string, max = MAX_FAILURES, window 
     .bind(key, new Date().toISOString(), key, max)
     .run();
   if (res.meta.changes !== 1) throw new AuthError(message, 429);
+  return Number(res.meta.last_row_id);
+}
+
+/**
+ * Reserve one sign-in try, with the same rules as reserveAttempt and two limits in one statement.
+ * The key is `<email> <address>` (an email has no space). All keys of one email are in the range from `<email> ` to `<email>!`,
+ * so the count for the email uses the index too.
+ */
+async function reserveLoginAttempt(env: Env, email: string, address: string): Promise<number> {
+  const since = `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '${FAILURE_WINDOW}')`;
+  const res = await env.DB.prepare(
+    `INSERT INTO login_failures (email, at)
+     SELECT ?, ? WHERE (SELECT COUNT(*) FROM login_failures WHERE email = ? AND at > ${since}) < ?
+       AND (SELECT COUNT(*) FROM login_failures WHERE email >= ? AND email < ? AND at > ${since}) < ?`,
+  )
+    .bind(`${email} ${address}`, new Date().toISOString(), `${email} ${address}`, MAX_FAILURES, `${email} `, `${email}!`, MAX_EMAIL_FAILURES)
+    .run();
+  if (res.meta.changes !== 1) throw new AuthError("Too many tries. Wait 15 minutes.", 429);
   return Number(res.meta.last_row_id);
 }
 
