@@ -145,6 +145,15 @@ describe("MCP OAuth login", () => {
     expect((await bad()).status).toBe(429);
   });
 
+  it("does not lock the owner out of the sign-in form for the wrong passwords of another address", async () => {
+    const env = await makeEnv();
+    const post = (password: string, ip: string) =>
+      go(env, "/authorize/signin", { method: "POST", headers: { ...FORM, "cf-connecting-ip": ip }, body: form({ email: EMAIL, password, next: "/authorize" }) });
+    for (let i = 0; i < 5; i++) await post("wrong wrong wrong", "203.0.113.7");
+    expect((await post(PASSWORD, "203.0.113.7")).status).toBe(429);
+    expect((await post(PASSWORD, "198.51.100.20")).status).toBe(303);
+  });
+
   it("does not sign in an email that is not on the allow-list", async () => {
     const env = await makeEnv();
     env.ALLOWED_EMAILS = "someone-else@a11.example";
