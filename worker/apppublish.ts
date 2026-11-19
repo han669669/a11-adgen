@@ -24,9 +24,11 @@ const LINK_KEY = "app-publish/link.json";
  * names it (customMetadata.previous) in the same write that puts the page live. So the way back belongs to one publish:
  * no other publish or rollback has that key, and a live page that names no kept page has no way back.
  * The request that replaces the live page deletes the kept page that the live page named.
+ * A page that a rollback put back says so (NO_WAY_BACK): no kept page is its way back, also not the one of the first version.
  */
 const keptKey = (id: string) => `app-publish/previous/${id}.html`;
 const KEPT_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+const NO_WAY_BACK = { previous: "none" };
 /**
  * The one kept page of the first version of this tool, which had one key for all publishes. That version made one
  * publish (19-11-2026), so this page is the way back of that publish only. Never written.
@@ -117,10 +119,10 @@ async function rollback(env: Env) {
   if (gone.length) throw new InputError(`The earlier page names files that are not in R2: ${gone.join(", ")}. Nothing was changed.`);
   // The link of the publish that is rolled back must not put that build live again.
   await env.MEDIA.delete(LINK_KEY);
-  // One step back only: the page that goes live again names no kept page. A publish that went live in between keeps its page.
-  if (!(await env.MEDIA.put(`app/${INDEX}`, page, { httpMetadata: { contentType: typeOf(INDEX) }, onlyIf: unchanged(live) }))) throw new InputError(`${PAGE_CHANGED} Call app_publish again.`);
-  // The kept page is used, and only the page that this request replaced named it.
-  await env.MEDIA.delete(key);
+  // One step back only: the page that goes live again has no way back. A publish that went live in between keeps its page.
+  if (!(await env.MEDIA.put(`app/${INDEX}`, page, { httpMetadata: { contentType: typeOf(INDEX) }, customMetadata: NO_WAY_BACK, onlyIf: unchanged(live) }))) throw new InputError(`${PAGE_CHANGED} Call app_publish again.`);
+  // The kept page is used, and only the page that this request replaced named it. The kept page of the first version is old.
+  await env.MEDIA.delete([key, LEGACY_KEPT_KEY]);
   log("rollback", { assets });
   return {
     rolledBack: true,
@@ -143,7 +145,7 @@ async function putPage(env: Env, body: ArrayBuffer, digest: ArrayBuffer): Promis
     id = crypto.randomUUID();
     await env.MEDIA.put(keptKey(id), previous);
   }
-  // The same page again keeps the kept page that the live page names (a page with no saved SHA-256 names none).
+  // The same page again keeps what the live page says of its way back (a page with no saved SHA-256 names no kept page).
   const customMetadata = id ? { previous: id } : live?.customMetadata;
   const saved = await env.MEDIA.put(`app/${INDEX}`, body, { httpMetadata: { contentType: typeOf(INDEX) }, sha256: digest, customMetadata, onlyIf: live ? unchanged(live) : undefined });
   if (!saved) {
