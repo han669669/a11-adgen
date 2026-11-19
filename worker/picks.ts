@@ -2,6 +2,23 @@ import type { Env } from "./env";
 import { mediaUrl } from "./fal";
 import { InputError } from "./schema";
 
+/** R2 metadata reads in flight at once: under the Workers limit of 6 simultaneous open connections per request. */
+export const HEAD_CONCURRENCY = 6;
+
+/** fn over items with at most `limit` calls in flight; the results keep the order of items. */
+export async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 /**
  * The owner's draft picks for one batch, with where each one stands on the way to the pack:
  * every final made for the picked idea (newest first), whether the newest composed final is a repaired picture
@@ -47,14 +64,20 @@ export async function picksGet(env: Env, batchId: string) {
     copyOf.set(p.version, { launchPlan: c.launchPlan, ads: ads.map(({ imageKey: _, ...x }) => x) });
   }
 
+  const composedOf = (f: { composed_key: string | null }) => (f.composed_key?.startsWith("renders/") ? f.composed_key : null);
+  const pickedIdeas = new Set(picks.map((p) => p.idea_id));
+  const composedKeys = [...new Set(finals.filter((f) => pickedIdeas.has(f.idea)).flatMap((f) => composedOf(f) ?? []))];
+  // final_attach marks the picture it saves; a compose_final picture has no mark.
+  const repairedFlags = await mapLimit(composedKeys, HEAD_CONCURRENCY, async (k) => Boolean((await env.MEDIA.head(k))?.customMetadata?.repairedFrom));
+  const repairedKeys = new Set(composedKeys.filter((_, i) => repairedFlags[i]));
+
   const out = [];
   for (const p of picks) {
     const mine = finals.filter((f) => f.idea === p.idea_id);
     const list = [];
     for (const f of mine) {
-      const composed = f.composed_key?.startsWith("renders/") ? f.composed_key : null;
-      // final_attach marks the picture it saves; a compose_final picture has no mark.
-      const repaired = composed ? Boolean((await env.MEDIA.head(composed))?.customMetadata?.repairedFrom) : false;
+      const composed = composedOf(f);
+      const repaired = composed ? repairedKeys.has(composed) : false;
       list.push({
         renderId: f.id,
         status: f.status,
