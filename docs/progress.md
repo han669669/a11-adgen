@@ -12,7 +12,7 @@ Reviewed 19-11-2026 SGT. Merged means on `main`; it does not mean verified in pr
 | Engine 3 roughs | Roughs before copy review are merged ([PR 114](https://github.com/han669669/a11-adgen/pull/114)). This handoff does not verify the live state of D1 migration `0017_roughs`. | Confirm the live migration before relying on roughs. If it is not live, get the owner's approval before applying it. |
 | Engine 2 and client delivery | Engine 2 stays the default. The client pack and results path are built; the first paying client week is still pending in the [blueprint](blueprint.md#10-build-plan). | Keep the daily Engine 2 process unchanged. Verify the pack and results loop in the first approved client week. |
 
-Keep Engine 3 opt-in: start it only when the owner asks for it, as recorded in the [decisions log](decisions.md). A paid run, a live D1 migration and a production deploy keep their existing approval gates. A merge to `main` deploys the Worker; follow the [deploy guide](deploy.md).
+Keep Engine 3 opt-in: start it only when the owner asks for it, as recorded in the [decisions log](decisions.md). Get the owner's approval before a paid run, a live D1 migration or a manual deploy. A merge to `main` deploys the Worker automatically; follow the [merge rule](../AGENTS.md#9-workflow) and the [deploy guide](deploy.md).
 
 ## Keep this handoff current
 
