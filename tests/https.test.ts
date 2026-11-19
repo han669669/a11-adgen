@@ -50,8 +50,8 @@ describe("Strict-Transport-Security", () => {
 });
 
 describe("local development", () => {
-  it.each(["localhost:8787", "127.0.0.1:8787", "[::1]:8787"])("serves plain HTTP on %s, without the header", async (host) => {
-    const r = await go(`http://${host}/api/me`);
+  it.each(["http://localhost:8787", "http://127.0.0.1:8787", "http://[::1]:8787", "https://localhost:8787"])("serves %s as before, without the header", async (origin) => {
+    const r = await go(`${origin}/api/me`);
     expect(r.status).toBe(401);
     expect(r.headers.get("strict-transport-security")).toBeNull();
   });
