@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { api, NOTE_MAX, type Batch, type Final, type Idea } from "@/lib/api";
 
@@ -151,9 +151,7 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
                     >
                       <img src={d.url} alt={`Draft for ${idea.headline}`} loading="lazy" className="aspect-[4/5] w-full object-cover" />
                       <span className="absolute left-2 top-2 flex items-center gap-2">
-                        <span className="pointer-events-none rounded-md bg-background/90 px-1.5 py-0.5">
-                          <Checkbox checked={on} tabIndex={-1} aria-hidden />
-                        </span>
+                        <PickMark on={on} />
                         {revealed && d.rank && <span className="rounded-md bg-background/90 px-1.5 py-0.5 text-caption font-medium">#{d.rank}</span>}
                       </span>
                     </button>
@@ -241,5 +239,40 @@ function Finals({ finals }: { finals: Final[] }) {
         );
       })}
     </div>
+  );
+}
+
+/** The mark on a draft card: the look of the Checkbox, with no control in it. The card button is the control. */
+function PickMark({ on }: { on: boolean }) {
+  return (
+    <span aria-hidden className="flex rounded-md bg-background/90 p-1.5">
+      <span className={`relative size-4 rounded-[5px] border-[1.5px] transition-[border-color] duration-80 ${on ? "border-transparent" : "border-border"}`}>
+        <AnimatePresence initial={false}>
+          {on && (
+            <motion.svg
+              width={18}
+              height={18}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-foreground"
+              initial={{ opacity: 1 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 1 }}
+            >
+              <motion.path
+                d="M6 12L10 16L18 8"
+                initial={{ pathLength: 0 }}
+                animate={{ pathLength: 1, transition: { duration: 0.08, ease: "easeOut" } }}
+                exit={{ pathLength: 0, transition: { duration: 0.04, ease: "easeIn" } }}
+              />
+            </motion.svg>
+          )}
+        </AnimatePresence>
+      </span>
+    </span>
   );
 }
