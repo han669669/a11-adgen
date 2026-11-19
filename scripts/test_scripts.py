@@ -657,6 +657,21 @@ class PackCheck(Tmp):
         self.assertEqual(code, 1, log)
         self.assertIn("FAIL", log)
 
+    def test_a_stage_coloured_band_across_the_pack_does_not_split_it(self):
+        img = np.zeros((400, 300, 3))
+        img[:] = (255, 212, 25)
+        img[86:300, 50:250] = (120, 80, 50)  # the pack, 214 x 200
+        img[180:186, 50:250] = (255, 212, 25)  # a yellow print band from edge to edge
+        code, log = self.check("--render", self.save("band.png", img), "--at", "150,250", "--bg", "FFD419", "--packshot", self.packshot(214, 200))
+        self.assertEqual(code, 0, log)
+
+    def test_a_grey_stage_is_not_measured_as_the_pack(self):
+        img = np.full((400, 300, 3), 200.0)
+        img[300:320, 40:280] = 150  # its shadow
+        img[86:300, 50:250] = (120, 80, 50)
+        code, log = self.check("--render", self.save("grey.png", img), "--at", "150,250", "--bg", "C8C8C8", "--packshot", self.packshot(214, 200))
+        self.assertEqual(code, 0, log)
+
     def test_a_point_on_the_stage_and_a_packshot_without_a_cut_out_stop_with_a_clear_message(self):
         r = self.stage(214, 200)
         self.assertIn("not inside the pack", exit_message(pack_check.main, ["--render", r, "--at", "5,5", "--bg", "FFD419", "--packshot", self.packshot(214, 200)]))

@@ -14,13 +14,14 @@ print (a round badge) as well.
   python3 scripts/pack_check.py --render <picture> --at X,Y --bg RRGGBB --packshot <cut-out packshot or its alpha mask> [--tolerance 0.02]
 
 --at is a point inside the pack, in pixels of the render. --bg is the stage colour (the kit's brand colour); its shadow
-counts as stage too. It prints the two ratios and the difference, and exits with 1 when the difference is over the
-tolerance (relative), so a draft check can use it. Needs Python 3 with Pillow and numpy.
+counts as stage too (on a grey, white or dark stage: any near-neutral pixel from its shadow up to it). It prints the two ratios and the difference, and exits with 1 when the difference is over the
+tolerance (relative), so a draft check can use it. Needs Python 3 with Pillow, numpy and OpenCV (scripts/requirements.txt).
 """
 import argparse
 import colorsys
 import sys
 
+import cv2
 import numpy as np
 from PIL import Image
 
@@ -41,9 +42,20 @@ def stage_mask(rgb, bg):
     d = np.maximum(mx - mn, 1e-6)
     r, g, b = a[..., 0], a[..., 1], a[..., 2]
     h = np.where(mx == r, ((g - b) / d) % 6, np.where(mx == g, (b - r) / d + 2, (r - g) / d + 4)) / 6
+    v0 = max(bg) / 255
+    if s0 < 0.2 or v0 < 0.3:
+        # A grey, white or dark stage has no hue to follow: the stage is any near-neutral pixel from its shadow up to it.
+        return (s < 0.15) & (mx >= 0.35 * v0) & (mx <= v0 + 0.08)
     dh = np.abs(h - h0)
     dh = np.minimum(dh, 1 - dh)
     return (dh < 0.045) & (s > 0.45 * s0) & (mx > 0.25)
+
+
+def close_bands(mask):
+    """Bridge thin bands of stage colour inside the pack (a yellow print line from edge to edge), so the pack stays one
+    region: a vertical closing about 3% of the picture high. A gap that tall between the pack and the stage stays open."""
+    k = max(3, int(round(mask.shape[0] * 0.03)) | 1)
+    return cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((k, 1), np.uint8)).astype(bool)
 
 
 def region(mask, x, y):
@@ -102,7 +114,7 @@ def main(argv=None):
     except ValueError:
         sys.exit("--at needs X,Y in whole pixels")
     rgb = np.asarray(Image.open(a.render).convert("RGB"))
-    pack = region(~stage_mask(rgb, hex_rgb(a.bg)), x, y)
+    pack = region(close_bands(~stage_mask(rgb, hex_rgb(a.bg))), x, y)
     shot = Image.open(a.packshot)
     # A grey mask (as product_lock.py --alpha) is the alpha itself; any other file must carry its own transparency.
     alpha = np.asarray(shot if shot.mode == "L" else shot.convert("RGBA").getchannel("A"))
