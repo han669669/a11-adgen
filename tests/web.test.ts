@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { hashPassword, verifyPassword } from "../worker/auth";
 import type { Env } from "../worker/env";
 import worker from "../worker/index";
+import { picksGet } from "../worker/picks";
 import { fakeD1 } from "./helpers/d1";
 
 const ORIGIN = "https://a11.example";
@@ -260,5 +261,50 @@ describe("web app files", () => {
     expect(page.headers.get("content-security-policy")).toMatch(/frame-ancestors 'none'/);
     expect((await call(env, "/assets/missing.js")).status).toBe(404);
     expect((await call(env, "/index.html")).headers.get("content-security-policy")).toMatch(/frame-ancestors 'none'/);
+  });
+});
+
+describe("board check of a final", () => {
+  const B = "aaaaaaaa-0000-4000-8000-000000000001";
+  const FINAL = "bbbbbbbb-0000-4000-8000-000000000002";
+  const DRAFT = "renders/cccccccc-0000-4000-8000-000000000003/1.jpg";
+
+  it("does not draw the logo on a finished final or change the next step of its pick", async () => {
+    const { env, files } = makeEnv();
+    const kit = { logo: { key: "brands/br/logo.png" }, placement: { logoWidthPct: 28, logoTopPct: 3 } };
+    (env.DB as unknown as { raw: DatabaseSync }).raw.exec(`
+      INSERT INTO brands (id, slug, name, created_at, updated_at) VALUES ('br', 'cat', 'Cat', 't', 't');
+      INSERT INTO brand_kits (id, brand_id, version, kit, created_at) VALUES ('k1', 'br', 1, '${JSON.stringify(kit)}', 't');
+      INSERT INTO subjects (id, brand_id, kind, title, created_at) VALUES ('su', 'br', 'product', 'Cake', 't');
+      INSERT INTO batches (id, brand_id, subject_id, kit_version, label, status, created_at, updated_at) VALUES ('${B}', 'br', 'su', 1, 'W47', 'finals', 't', 't');
+      INSERT INTO ideas (id, batch_id, n, format, insight, visual, headline, created_at) VALUES ('i1', '${B}', 1, 'tof', 'in', 'v', 'H', 't');
+      INSERT INTO picks (render_key, batch_id, idea_id, final_render_id, created_at, by_owner) VALUES ('${DRAFT}', '${B}', 'i1', '${FINAL}', 't', 1);
+      INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, image_keys, usd_est, created_at, updated_at)
+        VALUES ('${FINAL}', '${B}', 'i1', 'final', 'done', 'p', '[]', 1536, 1920, 'high', 1, '["renders/${FINAL}/1.jpg"]', 0.07, 't', 't');
+    `);
+    // Everything a compose needs is there, so only the board's own rule keeps the final as it is.
+    for (const k of [`renders/${FINAL}/1.jpg`, kit.logo.key, "assets/grain.png"]) files.set(k, { body: k, type: "image/png" });
+    const before = [...files.keys()];
+    let drawn = 0;
+    const picture = () => {
+      drawn++;
+      const self = { transform: () => self, draw: () => self, output: async () => ({ response: () => new Response("jpeg") }) };
+      return self;
+    };
+    (env as unknown as { IMAGES: unknown }).IMAGES = { input: picture };
+    const cookie = cookieOf(await call(env, "/api/signup", { body: { email: "owner@a11.example", password: "a long enough password", code: CODE } }));
+
+    const r = await call(env, `/api/renders/${FINAL}/refresh`, { body: {}, cookie });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({ id: FINAL, kind: "final", status: "done", images: [{ key: `renders/${FINAL}/1.jpg` }] });
+
+    expect(drawn).toBe(0);
+    expect([...files.keys()]).toEqual(before);
+    const row = (env.DB as unknown as { raw: DatabaseSync }).raw.prepare("SELECT composed_key FROM renders WHERE id = ?").get(FINAL);
+    expect(row).toEqual({ composed_key: null });
+    const final = (await ((await call(env, `/api/batches/${B}`, { cookie })).json() as Promise<{ ideas: { finals: unknown[] }[] }>)).ideas[0]!.finals[0];
+    expect(final).toMatchObject({ status: "done", composed: null, composeError: null });
+    // Claude's step is still the compose: the board did not make a picture that a pack can use.
+    expect((await picksGet(env, B)).picks[0]).toMatchObject({ latest: null, next: "compose_final" });
   });
 });
