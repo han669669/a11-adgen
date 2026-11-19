@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
-import { api, type Batch, type Final, type Idea } from "@/lib/api";
+import { api, NOTE_MAX, type Batch, type Final, type Idea } from "@/lib/api";
 
 const FORMAT: Record<Idea["format"], string> = {
   tof: "Top of funnel",
@@ -73,6 +73,7 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
   const savedKeys = new Set(batch.picks.filter((p) => p.byOwner && !p.finalRenderId).map((p) => p.key));
   const savedNotes = new Map(batch.picks.map((p) => [p.key, p.note ?? ""]));
   const dirty = toSave.length !== savedKeys.size || toSave.some((k) => !savedKeys.has(k) || (picks.get(k) ?? "") !== (savedNotes.get(k) ?? ""));
+  const tooLong = toSave.some((k) => (picks.get(k) ?? "").length > NOTE_MAX);
 
   // One draft per idea: tapping another draft of the same idea swaps the pick.
   function toggle(idea: Idea, key: string) {
@@ -146,12 +147,7 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
                     </button>
                     {revealed && d.reason && <figcaption className="text-caption text-muted-foreground">{d.reason}</figcaption>}
                     {on && !locked && (
-                      <Textarea
-                        placeholder="Note for the final (optional)"
-                        rows={2}
-                        value={picks.get(d.key) ?? ""}
-                        onChange={(e) => setPicks((prev) => new Map(prev).set(d.key, e.target.value))}
-                      />
+                      <NoteField value={picks.get(d.key) ?? ""} onChange={(v) => setPicks((prev) => new Map(prev).set(d.key, v))} />
                     )}
                   </figure>
                 );
@@ -172,11 +168,32 @@ export function Board({ id, onSpend }: { id: string; onSpend: () => void }) {
           <p className="text-body text-muted-foreground">
             {`${picks.size} of ${ideas.length} picked.`}
           </p>
-          <Button disabled={!dirty} loading={busy} onClick={save}>
+          <Button disabled={!dirty || tooLong} loading={busy} onClick={save}>
             Save my picks
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** The note on a pick, with its length against the limit, so a long note is shortened by the owner and never cut. */
+function NoteField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const id = useId();
+  const over = value.length > NOTE_MAX;
+  return (
+    <div className="flex flex-col gap-1">
+      <Textarea
+        placeholder="Note for the final (optional)"
+        rows={2}
+        value={value}
+        aria-invalid={over || undefined}
+        aria-describedby={id}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <p id={id} className={`self-end text-caption tabular-nums ${over ? "text-red-700" : "text-muted-foreground"}`}>
+        {over ? `${value.length - NOTE_MAX} over the ${NOTE_MAX} limit` : `${value.length}/${NOTE_MAX}`}
+      </p>
     </div>
   );
 }
