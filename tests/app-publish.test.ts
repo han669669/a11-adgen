@@ -194,7 +194,7 @@ describe("app_publish", () => {
   it("answers through /mcp, and the schema refuses other fields", async () => {
     const { env } = setup();
     const call = (args: unknown) =>
-      handleMcp(new Request("https://w.example/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "app_publish", arguments: args } }) }), env);
+      handleMcp(new Request("https://w.example/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "app_publish", arguments: args } }) }), env, { client: "test-client" });
     const ok = ((await (await call({})).json()) as { result: { isError?: boolean; content: { text: string }[] } }).result;
     expect(ok.isError).toBeUndefined();
     expect(JSON.parse(ok.content[0]!.text)).toMatchObject({ live: false });
