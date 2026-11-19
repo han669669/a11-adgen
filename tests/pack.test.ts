@@ -91,6 +91,40 @@ describe("pack_publish", () => {
     expect(raw.prepare("SELECT COUNT(*) AS n FROM packs").get()).toEqual({ n: 0 });
   });
 
+  it("checks a number against every fact of a lasting product that has more than 200 facts", async () => {
+    // A lasting product keeps its subject across batches (subject_save reuses it), so its fact sheet grows. The number
+    // check read the oldest 200 facts only and refused a number that only a newer fact holds.
+    const { env, raw, files } = makeEnv();
+    const { b, finals } = await seed(env, raw, files);
+    const subjectId = (raw.prepare("SELECT subject_id AS s FROM batches WHERE id = ?").get(b.id) as { s: string }).s;
+    for (let i = 0; i < 5; i++)
+      await batch.factsSave(env, subjectId, Array.from({ length: 40 }, (_, j) => ({ label: `Note ${i}-${j}`, value: "no number", quote: "no number", sourceUrl: "https://b.example/p" })));
+    await batch.factsSave(env, subjectId, [{ label: "Bundle", value: "S$29.90 for four jars", quote: "Bundle of 4 S$29.90", sourceUrl: "https://b.example/p" }]);
+    const r = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy({ headlines: ["Four jars for S$29.90", "Gone in one sitting"] }) }] });
+    const content = JSON.parse((raw.prepare("SELECT content FROM packs WHERE id = ?").get(r.packId) as { content: string }).content) as pack.PackContent;
+    expect(content.factCheck.find((c) => c.claim === "29.90")?.fact).toBe("Bundle: S$29.90 for four jars");
+    // The price and the delivery fact are now older than the newest 200: they still count.
+    expect(content.factCheck.find((c) => c.claim === "8.90")?.fact).toBe("Price: S$8.90 a jar");
+    expect(content.factCheck.find((c) => c.claim === "35")?.fact).toBe("Delivery: Free delivery from S$35");
+    await expect(pack.packPublish(env, { batchId: b.id, ads: [{ renderId: finals[0]!, ...copy({ headlines: ["Only S$7.90 a jar", "Gone in one sitting"] }) }] })).rejects.toThrow(/number 7\.90.*not in the fact sheet/);
+  });
+
+  it("finds an old number that many newer facts hold only inside a longer number", async () => {
+    // Review of #134: an old "4 jars" fact, then more than 400 newer facts with "40g". The digits "4" are in each of them,
+    // so one page of the search for older facts held no fact with the number 4 itself.
+    const { env, raw, files } = makeEnv();
+    const { b, finals } = await seed(env, raw, files);
+    const subjectId = (raw.prepare("SELECT subject_id AS s FROM batches WHERE id = ?").get(b.id) as { s: string }).s;
+    await batch.factsSave(env, subjectId, [{ label: "Bundle", value: "4 jars in a box", quote: "Box of 4 jars", sourceUrl: "https://b.example/p" }]);
+    for (let i = 0; i < 11; i++)
+      await batch.factsSave(env, subjectId, Array.from({ length: 40 }, (_, j) => ({ label: `Weight ${i}-${j}`, value: "40g a pack", quote: "40g", sourceUrl: "https://b.example/p" })));
+    const ads = (headline: string) => [{ renderId: finals[0]!, ...copy({ primaryTexts: ["The jar is empty again, so go on.", "Air-popped, not fried, and gone."], headlines: [headline, "Gone in one sitting"] }) }];
+    const r = await pack.packPublish(env, { batchId: b.id, ads: ads("A box of 4 jars") });
+    const content = JSON.parse((raw.prepare("SELECT content FROM packs WHERE id = ?").get(r.packId) as { content: string }).content) as pack.PackContent;
+    expect(content.factCheck).toEqual([expect.objectContaining({ claim: "4", fact: "Bundle: 4 jars in a box" })]);
+    await expect(pack.packPublish(env, { batchId: b.id, ads: ads("A box of 0 jars") })).rejects.toThrow(/number 0 .*not in the fact sheet/);
+  });
+
   it("refuses a render that is a draft, from another batch, not composed, or used twice", async () => {
     const { env, raw, files } = makeEnv();
     const { b, ideas, finals } = await seed(env, raw, files);
@@ -266,6 +300,40 @@ describe("pack_publish", () => {
     expect([x.version, y.version].sort()).toEqual([1, 2]);
     expect(x.adNames[0]).toMatch(new RegExp(`_v${x.version}$`));
     expect(y.adNames[0]).toMatch(new RegExp(`_v${y.version}$`));
+  });
+
+  it("names an ad of a brand's batch 100 and idea 100 so that results_save takes the name", async () => {
+    // adName pads to 2 digits and does not cut: batch 100 is _b100. The results pattern took 2 digits only, so
+    // results_save refused the name that pack_publish wrote.
+    const { env, raw, files } = makeEnv();
+    const first = await seed(env, raw, files);
+    const subjectId = (raw.prepare("SELECT subject_id AS s FROM batches WHERE id = ?").get(first.b.id) as { s: string }).s;
+    for (let i = 2; i <= 99; i++) await batch.batchCreate(env, { brandSlug: "won-gi", subjectId, label: `W45-${i}` });
+    const b = await batch.batchCreate(env, { brandSlug: "won-gi", subjectId, label: "W45-100" });
+    raw.prepare("UPDATE batches SET created_at = ? WHERE id = ?").run("2999-01-01T00:00:00.000Z", b.id); // fixed time: the newest batch of the brand
+    let idea: { id: string; n: number } | undefined;
+    for (let i = 0; i < 4; i++)
+      idea = (await batch.ideasSave(env, b.id, Array.from({ length: 25 }, (_, j) => ({ format: "bof" as const, insight: "bundle", visual: "four jars", headline: "One shot buy four.", picked: i === 3 && j === 24 })))).at(-1);
+    expect(idea!.n).toBe(100);
+    const id = "cccccccc-cccc-cccc-cccc-000000000000";
+    raw
+      .prepare(
+        `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, image_keys, composed_key, usd_est, created_at, updated_at)
+         VALUES (?, ?, ?, 'final', 'done', 'p', '[]', 1536, 1920, 'high', 1, ?, ?, 0.06, 'now', 'now')`,
+      )
+      .run(id, b.id, idea!.id, JSON.stringify([`renders/${id}/1.jpg`]), `renders/${id}/1-c1.jpg`);
+    files.set(`renders/${id}/1-c1.jpg`, "jpeg-c");
+    const published = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: id, ...copy() }], at: new Date("2026-11-07T04:00:00Z") });
+    expect(published.adNames).toEqual(["a11_W45_wongi_b100_bof_c100_v1"]);
+    const run = async (name: string, args: unknown) => {
+      const t = TOOLS.find((x) => x.name === name)!;
+      const c = (await t.run(env, validate(t.inputSchema, args))).content[0]!;
+      return JSON.parse(c.type === "text" ? c.text : "{}");
+    };
+    await run("results_save", { brand: "won-gi", reportDate: "2026-11-10", source: "client screenshot", rows: [{ adName: published.adNames[0], impressions: 2000, clicks: 40 }] });
+    const got = await run("results_get", { brand: "won-gi" });
+    expect(got.ads.map((a: { adName: string; stage: string; idea: number; version: number }) => [a.adName, a.stage, a.idea, a.version]))
+      .toEqual([["a11_W45_wongi_b100_bof_c100_v1", "bof", 100, 1]]);
   });
 
   it("keeps two batches of one brand in one week apart, with the batch number in the ad name", async () => {

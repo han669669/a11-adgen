@@ -8,8 +8,11 @@ const now = () => new Date().toISOString();
 /** An ad is judged only after this many impressions (the launch plan in the pack says the same). */
 export const MIN_IMPRESSIONS = 1000;
 
-/** a11_W47_catfiddle_b01_tof_c03_v1 (see adName in pack.ts). Packs made before batch numbers have no _bNN part: it is optional here. */
-export const AD_NAME_PATTERN = "^a11_W(\\d{2})_([a-z0-9]+)(?:_b(\\d{2}))?_([a-z]+)_c(\\d{2})_v(\\d+)$";
+/**
+ * a11_W47_catfiddle_b01_tof_c03_v1 (see adName in pack.ts). Packs made before batch numbers have no _bNN part: it is optional here.
+ * adName pads the batch number and the idea number to 2 digits and does not cut them, so a brand's batch 100 is _b100.
+ */
+export const AD_NAME_PATTERN = "^a11_W(\\d{2})_([a-z0-9]+)(?:_b(\\d{2,}))?_([a-z]+)_c(\\d{2,})_v(\\d+)$";
 export const AD_NAME = new RegExp(AD_NAME_PATTERN);
 
 export interface ResultRowInput {
