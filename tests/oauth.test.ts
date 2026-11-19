@@ -152,6 +152,16 @@ describe("MCP OAuth login", () => {
     expect(r.status).toBe(401);
   });
 
+  it("shows the consent page to a session signed in under the old cookie name (a11s)", async () => {
+    const env = await makeEnv();
+    const { challenge } = pkce();
+    const url = authorizeUrl(await register(env), challenge);
+    const session = await signIn(env, url);
+    expect(session).toMatch(/^__Host-a11s=/);
+    const html = await (await go(env, url, { headers: { cookie: `a11s=${session.split("=")[1]}` } })).text();
+    expect(html).toContain('value="approve"');
+  });
+
   it("escapes the app's name on the consent page", async () => {
     const env = await makeEnv();
     const clientId = await register(env, `<script>alert(1)</script>"x`);
