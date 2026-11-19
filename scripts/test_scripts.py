@@ -672,6 +672,14 @@ class PackCheck(Tmp):
         code, log = self.check("--render", self.save("grey.png", img), "--at", "150,250", "--bg", "C8C8C8", "--packshot", self.packshot(214, 200))
         self.assertEqual(code, 0, log)
 
+    def test_a_dark_coloured_stage_is_not_measured_as_the_pack(self):
+        img = np.zeros((400, 300, 3))
+        img[:] = (64, 0, 0)  # a deep red stage, 400000
+        img[300:320, 40:280] = (36, 0, 0)  # its shadow: the same hue, darker
+        img[86:300, 50:250] = (230, 225, 210)  # a pale pack
+        code, log = self.check("--render", self.save("dark.png", img), "--at", "150,250", "--bg", "400000", "--packshot", self.packshot(214, 200))
+        self.assertEqual(code, 0, log)
+
     def test_a_point_on_the_stage_and_a_packshot_without_a_cut_out_stop_with_a_clear_message(self):
         r = self.stage(214, 200)
         self.assertIn("not inside the pack", exit_message(pack_check.main, ["--render", r, "--at", "5,5", "--bg", "FFD419", "--packshot", self.packshot(214, 200)]))

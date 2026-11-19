@@ -43,11 +43,14 @@ def stage_mask(rgb, bg):
     r, g, b = a[..., 0], a[..., 1], a[..., 2]
     h = np.where(mx == r, ((g - b) / d) % 6, np.where(mx == g, (b - r) / d + 2, (r - g) / d + 4)) / 6
     v0 = max(bg) / 255
-    if s0 < 0.2 or v0 < 0.3:
-        # A grey, white or dark stage has no hue to follow: the stage is any near-neutral pixel from its shadow up to it.
+    if s0 < 0.2:
+        # A grey, white or black stage has no hue to follow: the stage is any near-neutral pixel from its shadow up to it.
         return (s < 0.15) & (mx >= 0.35 * v0) & (mx <= v0 + 0.08)
     dh = np.abs(h - h0)
     dh = np.minimum(dh, 1 - dh)
+    if v0 < 0.3:
+        # A dark coloured stage (deep red, navy): follow its hue, from its shadow up to it, with no brightness floor.
+        return (dh < 0.045) & (s > 0.45 * s0) & (mx <= v0 + 0.08)
     return (dh < 0.045) & (s > 0.45 * s0) & (mx > 0.25)
 
 
