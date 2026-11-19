@@ -1,8 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-
-const { checkSession } = await vi.importActual<{
-  checkSession: () => Promise<{ status: string; email?: string }>;
-}>("../app/src/lib/session");
+import { checkSession } from "./session";
 
 afterEach(() => vi.unstubAllGlobals());
 

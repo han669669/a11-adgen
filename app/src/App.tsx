@@ -18,13 +18,17 @@ function useHash() {
 
 export function App() {
   const [session, setSession] = useState<Session | null>(null);
+  const [checking, setChecking] = useState(false);
   const [spend, setSpend] = useState<Spend | null>(null);
   const [outError, setOutError] = useState<string | null>(null);
   const hash = useHash();
 
   const check = useCallback(() => {
-    setSession(null);
-    void checkSession().then(setSession);
+    setChecking(true);
+    void checkSession().then((next) => {
+      setSession(next);
+      setChecking(false);
+    });
   }, []);
   useEffect(check, [check]);
   useEffect(() => {
@@ -47,7 +51,7 @@ export function App() {
       <p role="alert" className="mt-1 text-body text-muted-foreground">
         We couldn't check your session. Please try again.
       </p>
-      <Button className="mt-6" onClick={check}>Retry</Button>
+      <Button className="mt-6" loading={checking} onClick={check}>Retry</Button>
     </main>
   );
 
