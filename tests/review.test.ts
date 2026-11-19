@@ -295,9 +295,9 @@ describe("the words of the pick rule (design pack §2.11, risk R5)", () => {
     const critic = readFileSync("plugin/agents/critic.md", "utf8");
     const review = critic.slice(critic.indexOf("**Review the concepts (engine 3).**"), critic.indexOf("**Rank drafts blind.**"));
     expect(review).toContain("Two concepts can have one role.");
-    expect(review).toContain("the point, local-truth and appetite tests pass");
+    expect(review).toContain("the point, local-truth, appetite and real-world tests pass");
     expect(readFileSync("plugin/agents/writer.md", "utf8")).toContain("Picture device first (owner, 18-11-2026");
-    expect(readFileSync("plugin/agents/art-director.md", "utf8")).toContain("Product truth from real photos (owner, 18-11-2026)");
+    expect(readFileSync("plugin/agents/art-director.md", "utf8")).toContain("Product truth from real photos (owner, 18-11-2026; 19-11-2026");
     expect(review).not.toMatch(stageRule);
   });
 });

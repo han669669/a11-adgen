@@ -245,6 +245,23 @@ On the IRVINS engine 3 test (batch 44b748e2) the owner picked 3 concepts from th
 - **High quality for the pick.** The owner's pick is made at high quality (kind `final`) with the picked draft first and the brand's real photos as the truth references.
 - **No rough.** A concept with no rough starts from a plan made from real whole-product photos only (§7.4 A, §7.9), with a simple scene of few large objects.
 
+### 7.9 The brand's real photos for food and pack size (owner, 19-11-2026)
+
+The owner: "try to find the real food, the same way u did for the cake slices", and the pack "has to match the actual real life packaging in size, in all dimensions". The size guide is the brand's own reference photos, never an earlier render of ours ("u shouldnt use once you start as size guide, use the actual reference images from the brand's photo").
+
+- **Find the real food first.** Before a draft, look for the brand's own photos of the food on its product pages and site (a cut-out of one piece, a pile, a plated shot; IRVINS: `sefs_chip.png` and the pile of chips on the product page). Upload each with `upload_link` kind `ref` and give it as a reference: "every piece looks exactly like images 2 and 3". This is the same rule as the real cake slices (§7.4, art director step 4a).
+- **Never cut food shapes out of a texture photo.** Shapes cut from a plate photo are pieces that do not exist; the model copies them and the food looks pasted (IRVINS tally strips).
+- **Pack size from the brand.** The pack's proportions come from the brand's packshot and its own product photos. After each draft and final, run `python3 scripts/pack_check.py --render <raw> --at X,Y --bg <stage RRGGBB> --packshot <cut-out packshot>` and save its height over width as `measured` in the draft check (tolerance 0.02). A fold or a crop changes the height: say so, and judge the print too (a round badge must stay round). On the IRVINS test the rolled pouch measured 11.6% short; the approved final with one fold, 6.4% short.
+- **Simple scenes.** Few large real objects (3 slices and a daisy) read real; a dozen small pieces placed by hand read as a paste-up.
+
+### 7.10 Real-world handling (owner, 19-11-2026)
+
+Every pack and food in the picture must be something a person could do or find in real life.
+
+- **One fold.** A pouch folds at most once, above its print: there is little film above the logo. A fold, clip or hand never covers the brand name, the logo or the product name. A clip that the real pack does not need (a resealable pouch) is fine when the idea needs it.
+- **Real food shapes.** A concept that needs food in a shape it never has (long straight fish skin strips) fails at the concept: the critic and the art director say so before any render.
+- **No model-drawn side food.** Rice, sauce or a dish beside the product gives the picture away (IRVINS egg bowl). Use only food the brand has real photos of, or leave it out.
+
 ## 8. The owner's copy standard (owner, 09-11-2026)
 
 The owner approved the W47 v3 Meta text and rejected the rewrite in packs v4 and v5 ("the previously v3 copywriting's much much much better"). Approved copy is reused word for word in every later pack of the batch (`pack` prompt, step 4). Do not retype it: give `pack_publish` `copyFromVersion` (the approved pack's version) and the render ids, with no Meta text, and the server copies the text exactly. The launch plan and the health note of that version stay unless the call gives new ones. `picks_get` shows each pack version's copy. Write new copy only when no earlier pack exists or the owner asks for it, and show it next to the approved copy before you publish.
