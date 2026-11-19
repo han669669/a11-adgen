@@ -70,6 +70,10 @@ export function numbersIn(text: string): string[] {
 const sha256Hex = async (s: string) =>
   [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
+const FACT_COLS = "SELECT id, label, value, quote, source_url FROM facts";
+/** The number check reads at most this many pages of 200 older facts for one number. */
+const OLDER_FACT_PAGES = 50;
+
 interface FactRow {
   label: string;
   value: string;
@@ -102,8 +106,23 @@ export async function packPublish(
   // The batch's place among the brand's batches, oldest first (index batches_brand). It never changes, so every version of a pack keeps it.
   const batchNo = (await env.DB.prepare("SELECT COUNT(*) AS n FROM batches WHERE brand_id = ? AND (created_at < ? OR (created_at = ? AND id <= ?))")
     .bind(b.brand_id, b.created_at, b.created_at, b.id).first<{ n: number }>())!.n;
-  const facts = (await env.DB.prepare("SELECT label, value, quote, source_url FROM facts WHERE subject_id = ? ORDER BY id LIMIT 200")
+  // The newest 200, oldest first, as facts_get shows them: a lasting product (subject_save reused) keeps growing, and a new fact must count.
+  const facts = (await env.DB.prepare(`SELECT label, value, quote, source_url FROM (${FACT_COLS} WHERE subject_id = ? ORDER BY id DESC LIMIT 200) ORDER BY id`)
     .bind(b.subject_id).all<FactRow>()).results;
+  const holds = (n: string) => (x: FactRow) => numbersIn(`${x.value} ${x.quote}`).includes(n);
+  // An older fact still counts (the price from the first batch): look for the number in the rest of the sheet, newest first.
+  // instr finds the digits inside a longer number too ("4" in "40g"), so read page after page until a fact holds the number itself.
+  const olderFact = async (n: string) => {
+    let before = Number.MAX_SAFE_INTEGER;
+    for (let page = 0; page < OLDER_FACT_PAGES; page++) {
+      const rows = (await env.DB.prepare(`${FACT_COLS} WHERE subject_id = ? AND id < ? AND (instr(value, ?) > 0 OR instr(quote, ?) > 0) ORDER BY id DESC LIMIT 200`)
+        .bind(b.subject_id, before, n, n).all<FactRow & { id: number }>()).results;
+      const f = rows.find(holds(n));
+      if (f || rows.length < 200) return f;
+      before = rows[rows.length - 1]!.id;
+    }
+    return undefined;
+  };
   const week = isoWeek(singaporeClock(a.at ?? new Date()));
   // Approved copy is copied by the server, never typed again (owner, 09-11-2026: v4 and v5 held rewritten copy).
   let source: PackContent | null = null;
@@ -141,7 +160,7 @@ export async function packPublish(
     }
     const texts = [...copy.primaryTexts, ...copy.headlines, copy.description];
     for (const n of new Set(texts.flatMap(numbersIn))) {
-      const f = facts.find((x) => numbersIn(`${x.value} ${x.quote}`).includes(n));
+      const f = facts.find(holds(n)) ?? (facts.length === 200 ? await olderFact(n) : undefined);
       if (!f) throw new InputError(`The number ${n} in the copy for "${r.headline}" is not in the fact sheet. Add the fact with its source (facts_save) or remove the number.`);
       const fact = `${f.label}: ${f.value}`;
       if (!factCheck.some((c) => c.claim === n && c.fact === fact)) factCheck.push({ claim: n, fact, quote: f.quote, sourceUrl: f.source_url });
