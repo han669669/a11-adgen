@@ -71,4 +71,4 @@ done
 # 5. Proof: the live page is the page of this build, byte for byte.
 [ "$(curl -fsS "$BASE/" | sha)" = "$(sha <"$DIST/index.html")" ] || { echo "Live / is not the index.html of this build."; exit 1; }
 echo "Live page now names: $(curl -fsS "$BASE/" | assets | tr '\n' ' ')"
-echo "Done. To roll back: ROLLBACK=$ROLLBACK scripts/rollback_app.sh"
+echo "Done. To roll back: BASE=$BASE ROLLBACK=$ROLLBACK scripts/rollback_app.sh"

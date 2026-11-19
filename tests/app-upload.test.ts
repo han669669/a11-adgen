@@ -110,6 +110,7 @@ describe.skipIf(!hasTools)("web app upload and rollback scripts", () => {
     expect(puts).toEqual(["app/assets/index-NEW.css", "app/assets/index-NEW.js", "app/index.html"]);
     expect(text("app/index.html")).toBe(NEW_PAGE);
     expect(up.out).toContain("Live page now names: assets/index-NEW.css assets/index-NEW.js");
+    expect(up.out).toContain(`To roll back: BASE=${base} ROLLBACK=${rollback} scripts/rollback_app.sh`);
     expect(up.out).not.toContain(TOKEN);
 
     const back = await run("rollback_app.sh", {});

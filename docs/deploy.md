@@ -74,7 +74,7 @@ for a in $(grep -oE 'assets/[A-Za-z0-9._-]+' dist/app/index.html | sort -u); do 
 
 An upload that stops before `index.html` changes nothing for a user: the live page still names the old files. Run the script again. After the upload, an open browser tab keeps the old app until a reload.
 
-Rollback: `ROLLBACK=rollback-app/<UTC time> scripts/rollback_app.sh` (the upload prints this line). It checks that the files in the saved page are still live, puts the saved `index.html` back with one `PUT`, and checks that live `/` is equal to it. The new hashed files can stay.
+Rollback: `BASE=<origin> ROLLBACK=rollback-app/<UTC time> scripts/rollback_app.sh`. The upload prints this line with its own target, so a rollback of a preview does not go to the live site. It checks that the files in the saved page are still live, puts the saved `index.html` back with one `PUT`, and checks that live `/` is equal to it. The new hashed files can stay.
 
 `tests/app-upload.test.ts` runs both scripts against the Worker code on a local port: a wrong token, a dry run, a build with a missing file, the upload order and the rollback.
 
