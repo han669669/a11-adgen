@@ -297,6 +297,19 @@ class LayoutReprint(Tmp):
         rgb = got[badge].mean(axis=0)
         self.assertLess(rgb.max() - rgb.min(), 6, f"the white badge turned yellow: {rgb.round(1)}")
 
+    def test_layout_leaves_no_dark_ring_on_a_soft_edge(self):
+        # The piece was pasted with its own alpha as the mask, so the alpha applied twice: a soft edge came out darker
+        # than both the item and the backdrop (a white item on a white backdrop showed a grey ring, 255 down to 223).
+        white = np.full((120, 100, 3), 255, np.uint8)
+        mask = np.zeros((120, 100), np.uint8); mask[10:110, 10:90] = 255
+        self.save("white.png", white); self.save("m_white.png", mask)
+        for blur in (0, 6):
+            item = {"cx": 0.5, "base": 0.8, "height": 0.4, "rot": 7, "photo": "white.png", "alpha": "m_white.png", "blur": blur}
+            with contextlib.redirect_stdout(io.StringIO()):
+                product_lock.layout(self.ns(packshot=None, box=None, plan=self.plan(bg="#FFFFFF", shapes=[], products=[item])))
+            sk = np.asarray(Image.open(os.path.join(self.dir.name, "out.png")).convert("RGB"))
+            self.assertGreaterEqual(int(sk.min()), 250, f"blur {blur}: a white item on a white backdrop stays white")
+
     def test_layout_lets_a_product_bleed_off_the_edge(self):
         # A lying carton cut by the left and top frame edges (the playbook asks for a box end past the edge).
         plan = self.plan(products=[{"cx": 0.02, "base": 0.1, "height": 0.4, "side": "R"}])
