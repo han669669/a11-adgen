@@ -3,7 +3,7 @@ import { InputError, type ObjectSchema, type StringProp } from "./schema";
 
 /**
  * a11-engine v3 Phase 3: the art direction of a picked concept (design pack §3.3, §3.4). The server checks the shape only:
- * 3 drafts, each with a question, a layout plan and a prompt, and the diversity pairs. The rubric is taste: it is in
+ * 3 drafts, each with a question, a layout plan or the rough it edits, and a prompt, and the diversity pairs. The rubric is taste: it is in
  * plugin/agents/art-director.md. A pair with fewer than 3 axes gets a warning, not a refusal.
  */
 
@@ -62,12 +62,19 @@ export const DIRECTION_SCHEMA: ObjectSchema = {
           axes: obj(Object.fromEntries(AXES.map((k) => [k, line(300)]))),
           plan: {
             ...line(20000),
-            description: "The layout plan JSON as scripts/product_lock.py layout reads it (the text of the plan file): reprint needs the same plan.",
+            description:
+              "The layout plan JSON as scripts/product_lock.py layout reads it (the text of the plan file): reprint needs the same plan. Give a plan, fromRough, or both.",
+          },
+          fromRough: {
+            type: "string",
+            pattern: ID,
+            description:
+              "The render id of this idea's rough that the draft edits (owner, 19-11-2026: drafts start from the rough he picked; the id is in the rough's key, renders/<id>/1.jpg). Give a plan, fromRough, or both.",
           },
           prompt: { ...line(6000), description: "The draft prompt before the server adds its suffix." },
           renderId: { type: "string", pattern: ID, description: "A later version, after render_submit: the draft render made from this plan and prompt." },
         },
-        required: ["n", "question", "axes", "plan", "prompt"],
+        required: ["n", "question", "axes", "prompt"],
         additionalProperties: false,
       },
     },
@@ -78,7 +85,7 @@ export const DIRECTION_SCHEMA: ObjectSchema = {
   additionalProperties: false,
 };
 
-type Draft = { n: number; question: string; axes: Record<string, string>; plan: string; prompt: string; renderId?: string };
+type Draft = { n: number; question: string; axes: Record<string, string>; plan?: string; fromRough?: string; prompt: string; renderId?: string };
 export type Direction = {
   why: string;
   mechanism: { type: string; productionRisk: string; riskReason?: string };
@@ -161,11 +168,27 @@ export async function directionSave(env: Env, batchId: string, ideaId: string, d
     const bad = renderIds.filter((id) => !ok.has(id));
     if (bad.length) throw new InputError(`Not a draft render of idea ${idea.n}: ${bad.join(", ")}.`);
   }
-  const drafts = [...direction.drafts].sort((x, y) => x.n - y.n).map((d) => ({ ...d, plan: parsePlan(d.n, d.plan) }));
+  for (const d of direction.drafts)
+    if (!d.plan && !d.fromRough)
+      throw new InputError(`drafts n ${d.n}: give a layout plan or fromRough (the rough of this idea that the draft edits).`);
+  const roughIds = [...new Set(direction.drafts.flatMap((d) => (d.fromRough ? [d.fromRough] : [])))];
+  if (roughIds.length) {
+    const found = await env.DB.prepare(
+      "SELECT id FROM renders WHERE batch = ? AND idea = ? AND kind = 'rough' AND status = 'done' AND id IN (SELECT value FROM json_each(?))",
+    ).bind(batchId, ideaId, JSON.stringify(roughIds)).all<{ id: string }>();
+    const ok = new Set(found.results.map((r) => r.id));
+    const bad = roughIds.filter((id) => !ok.has(id));
+    if (bad.length) throw new InputError(`Not a finished rough of idea ${idea.n}: ${bad.join(", ")}.`);
+  }
+  const drafts = [...direction.drafts]
+    .sort((x, y) => x.n - y.n)
+    .map(({ plan, ...d }) => (plan ? { ...d, plan: parsePlan(d.n, plan) } : d));
 
   // Warnings: the rubric and the calm rules of design pack §3.4. Not refusals.
   const warnings: string[] = [];
-  for (const [pair, axes] of Object.entries(direction.diversity.pairs)) {
+  // Drafts that all edit the owner's picked rough stay close to it on purpose (owner, 19-11-2026): no diversity warning.
+  const allFromRough = direction.drafts.every((d) => d.fromRough);
+  for (const [pair, axes] of allFromRough ? [] : Object.entries(direction.diversity.pairs)) {
     const set = new Set(axes);
     if (set.size < 3) warnings.push(`Drafts ${pair} differ on ${set.size} axis(es): each pair needs 3 or more. Change one draft, or say why in the report.`);
     if (!["composition", "camera", "scale"].some((a) => set.has(a))) warnings.push(`Drafts ${pair} do not differ in composition, camera or scale: one of them is needed.`);
@@ -223,7 +246,7 @@ export async function directionsGet(env: Env, batchId: string, withPlans = false
   for (const r of rows.results) {
     const body = JSON.parse(r.body) as Direction & { drafts: (Omit<Draft, "plan"> & { plan?: unknown })[] };
     // The plan goes back as the text of a plan file: the session writes it to disk for reprint, or sends it back as it is.
-    const drafts = body.drafts.map(({ plan, ...d }) => (withPlans ? { ...d, plan: JSON.stringify(plan) } : d));
+    const drafts = body.drafts.map(({ plan, ...d }) => (withPlans && plan !== undefined ? { ...d, plan: JSON.stringify(plan) } : d));
     out.set(r.idea_id, { version: r.version, promptVersion: r.prompt_version, savedAt: r.created_at, current: r.current === 1, ...body, drafts });
   }
   return out;

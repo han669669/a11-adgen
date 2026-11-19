@@ -235,6 +235,16 @@ The owner liked the light film grain on the W46 Sonnet finals and asked for more
 
 The owner saw the W47 Oatside drafts (batch e8d74f93) with the finish and a without/with crop: "i like it! tune it however u see fitting ... overall it looks much more less ai image looking at first glance" (16-11-2026). It is the standard; tune the strength by eye per picture.
 
+### 7.8 Engine 3: drafts start from the picked rough (owner, 19-11-2026)
+
+On the IRVINS engine 3 test (batch 44b748e2) the owner picked 3 concepts from their roughs. The drafts were then built again from new collage skeletons (food shapes cut from a texture photo, the pouch forced to an exact outline) and long prompts of rules (about 2,100 characters). All 7 drafts looked worse than the roughs: "simply using the rough output ... would have suffice ... u've somehow made everything worse than before". The model copied the collage literally, so the pieces looked pasted and the pouch looked CG. More control made the pictures look more like AI, not less. The rough of the same concept, made again at high quality, was the one he approved ("honestly looks great to me. its usable, good to become final").
+
+- **The rough is the start.** When the owner picks a concept from its rough, each draft edits that rough: the rough's URL is the first reference, then the brand's real photos (food, pack: §7.9). The draft's `fromRough` in `direction_save` names the rough (its id is in the key, `renders/<id>/1.jpg`). No new collage skeleton.
+- **Change only what is asked.** Each draft keeps the rough's scene and changes only what its question asks: the owner's fix, the room for the words, a crop or the light. The drafts stay close to the rough; `direction_save` gives no diversity warning when all 3 edit the rough.
+- **Short prompts.** "Make this photograph again: the same composition, camera, light and positions as image 1. Change only: ..." then the product truth in one or two sentences and the exclusions. Keep it under about 900 characters.
+- **High quality for the pick.** The owner's pick is made at high quality (kind `final`) with the picked draft first and the brand's real photos as the truth references.
+- **No rough.** A concept with no rough starts from a plan made from real whole-product photos only (§7.4 A, §7.9), with a simple scene of few large objects.
+
 ## 8. The owner's copy standard (owner, 09-11-2026)
 
 The owner approved the W47 v3 Meta text and rejected the rewrite in packs v4 and v5 ("the previously v3 copywriting's much much much better"). Approved copy is reused word for word in every later pack of the batch (`pack` prompt, step 4). Do not retype it: give `pack_publish` `copyFromVersion` (the approved pack's version) and the render ids, with no Meta text, and the server copies the text exactly. The launch plan and the health note of that version stay unless the call gives new ones. `picks_get` shows each pack version's copy. Write new copy only when no earlier pack exists or the owner asks for it, and show it next to the approved copy before you publish.

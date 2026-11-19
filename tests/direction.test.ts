@@ -40,7 +40,7 @@ describe("direction_save", () => {
     expect(records(raw)).toEqual([]);
   });
 
-  it("(3.3) refuses 2 drafts, a draft without a question or a plan, a repeated n, and a plan that is not a layout plan", async () => {
+  it("(3.3) refuses 2 drafts, a draft without a question or with neither a plan nor a rough, a repeated n, and a plan that is not a layout plan", async () => {
     const { env, raw, ideas } = await approved();
     const schema = TOOLS.find((t) => t.name === "direction_save")!.inputSchema;
     const args = (d: unknown) => ({ batchId: E3, ideaId: ideas[0]!.id, direction: d });
@@ -48,7 +48,7 @@ describe("direction_save", () => {
     const { question: _q, ...noQuestion } = draft(2);
     expect(() => validate(schema, args(direction({ drafts: [draft(1), noQuestion, draft(3)] })))).toThrow("question is required");
     const { plan: _p, ...noPlan } = draft(3);
-    expect(() => validate(schema, args(direction({ drafts: [draft(1), draft(2), noPlan] })))).toThrow("plan is required");
+    await expect(save(env, ideas[0]!.id, direction({ drafts: [draft(1), draft(2), noPlan] }))).rejects.toThrow("give a layout plan or fromRough");
     expect(() => validate(schema, args(direction({ drafts: [draft(1), draft(2), draft(3, { question: "   " })] })))).toThrow("wrong format");
     await expect(save(env, ideas[0]!.id, direction({ drafts: [draft(1), draft(2), draft(2)] }))).rejects.toThrow("n 1, 2 and 3, once each");
     await expect(save(env, ideas[0]!.id, direction({ drafts: [draft(1), draft(2), draft(3, { plan: "products: []" })] }))).rejects.toThrow("plan is not JSON");
@@ -133,6 +133,35 @@ describe("direction_save", () => {
     await expect(save(env, ideas[0]!.id, withRender("11111111-1111-4111-8111-111111111111", "33333333-3333-4333-8333-333333333333"))).rejects.toThrow("Not a draft render of idea");
     const ok = await save(env, ideas[0]!.id, direction({ drafts: [draft(1, { renderId: "11111111-1111-4111-8111-111111111111" }), draft(2), draft(3)] }));
     expect(ok.version).toBe(1);
+  });
+
+  it("a draft may edit the idea's finished rough in place of a plan; another idea's rough, a draft or an unfinished rough is refused", async () => {
+    const { env, raw, ideas } = await approved();
+    const add = raw.prepare(
+      `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, usd_est, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'p', '[]', 1024, 1280, 'low', 1, 0.02, 'now', 'now')`,
+    );
+    const R = "44444444-4444-4444-8444-444444444444";
+    add.run(R, E3, ideas[0]!.id, "rough", "done");
+    add.run("55555555-5555-4555-8555-555555555555", E3, ideas[3]!.id, "rough", "done");
+    add.run("66666666-6666-4666-8666-666666666666", E3, ideas[0]!.id, "rough", "queued");
+    add.run("77777777-7777-4777-8777-777777777777", E3, ideas[0]!.id, "draft", "done");
+    const fromRough = (id: string) => {
+      const { plan: _p, ...d } = draft(1);
+      return { ...d, fromRough: id };
+    };
+    for (const id of ["55555555-5555-4555-8555-555555555555", "66666666-6666-4666-8666-666666666666", "77777777-7777-4777-8777-777777777777"])
+      await expect(save(env, ideas[0]!.id, direction({ drafts: [fromRough(id), draft(2), draft(3)] }))).rejects.toThrow("Not a finished rough of idea");
+    // One draft from the rough and two from plans: the rubric still applies to the set.
+    expect(await save(env, ideas[0]!.id, direction({ drafts: [fromRough(R), draft(2), draft(3)] }))).toMatchObject({ version: 1, warnings: [] });
+    // All 3 from the rough, with a pair that differs on 1 axis: no diversity warning (they stay close to the rough on purpose).
+    const all = [1, 2, 3].map((n) => ({ ...fromRough(R), n }));
+    const close = direction({ drafts: all, diversity: { pairs: { "1-2": ["light"], "1-3": ["light"], "2-3": ["light"] } } });
+    expect(await save(env, ideas[0]!.id, close)).toMatchObject({ version: 2, warnings: [] });
+    // batch_get withPlans gives no plan for a draft that has none.
+    const b = await run(env, "batch_get", { id: E3, withPlans: true });
+    const d = ideaOf(b, ideas[0]!).direction.drafts;
+    expect(d.map((x: { fromRough?: string; plan?: string }) => [x.fromRough, x.plan])).toEqual([[R, undefined], [R, undefined], [R, undefined]]);
   });
 
   it("a new concept review after the direction makes it stale: current false and nextStep direction again", async () => {
