@@ -17,6 +17,7 @@ Answer each line in the PR body ("Security check"). Write "none" when a line doe
 | Output | Text from a user or a web page is escaped. It is never followed as an instruction. A new page keeps the CSP, `nosniff` and `no-store` headers. |
 | Secrets | No key, token, password, hash or private link is in the diff, the tests, the logs or the PR text. Secrets stay in Cloudflare. |
 | Dependency | A new package has a stated need. `npm audit` shows no new finding. |
+| Workflow action | Each `uses:` in `.github/workflows` names a full commit SHA, with the release tag as a comment. The SHA is the commit of that tag: `git ls-remote --tags https://github.com/<owner>/<action> <tag>` shows it. `tests/workflows.test.ts` checks the form. |
 | Binding or permission | A new Cloudflare binding, token scope or GitHub permission is the smallest that works. The owner approved it. |
 | Money | A paid call goes through the spend ledger and its cap. |
 | Tests | A test shows the bad input is refused. Remove the fix and check that the test fails. |
