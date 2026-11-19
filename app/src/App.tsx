@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { api, SIGNED_OUT, type Spend } from "@/lib/api";
+import { checkSession, type Session } from "@/lib/session";
 import { Batches } from "@/views/Batches";
 import { Board } from "@/views/Board";
 import { SignIn } from "@/views/SignIn";
@@ -16,20 +17,22 @@ function useHash() {
 }
 
 export function App() {
-  const [me, setMe] = useState<string | null | undefined>(undefined);
+  const [session, setSession] = useState<Session | null>(null);
+  const [checking, setChecking] = useState(false);
   const [spend, setSpend] = useState<Spend | null>(null);
   const [outError, setOutError] = useState<string | null>(null);
   const hash = useHash();
 
   const check = useCallback(() => {
-    api<{ email: string }>("/api/me").then(
-      (r) => setMe(r.email),
-      () => setMe(null),
-    );
+    setChecking(true);
+    void checkSession().then((next) => {
+      setSession(next);
+      setChecking(false);
+    });
   }, []);
   useEffect(check, [check]);
   useEffect(() => {
-    const out = () => setMe(null);
+    const out = () => setSession({ status: "signed-out" });
     addEventListener(SIGNED_OUT, out);
     return () => removeEventListener(SIGNED_OUT, out);
   }, []);
@@ -37,11 +40,20 @@ export function App() {
     api<Spend>("/api/spend").then(setSpend, () => setSpend(null));
   }, []);
   useEffect(() => {
-    if (me) loadSpend();
-  }, [me, hash, loadSpend]);
+    if (session?.status === "signed-in") loadSpend();
+  }, [session, hash, loadSpend]);
 
-  if (me === undefined) return null;
-  if (me === null) return <SignIn onDone={check} />;
+  if (session === null) return null;
+  if (session.status === "signed-out") return <SignIn onDone={check} />;
+  if (session.status === "error") return (
+    <main className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-4">
+      <h1 className="text-display font-semibold tracking-tight">a11 adgen</h1>
+      <p role="alert" className="mt-1 text-body text-muted-foreground">
+        We couldn't check your session. Please try again.
+      </p>
+      <Button className="mt-6" loading={checking} onClick={check}>Retry</Button>
+    </main>
+  );
 
   const board = hash.match(/^#\/b\/([0-9a-f-]{36})$/);
   return (
@@ -63,7 +75,7 @@ export function App() {
               setOutError(null);
               try {
                 await api("/api/logout", { body: {} });
-                setMe(null);
+                setSession({ status: "signed-out" });
               } catch (e) {
                 setOutError(`Sign-out failed: ${(e as Error).message}`);
               }
