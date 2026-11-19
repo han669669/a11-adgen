@@ -362,6 +362,27 @@ describe("app_publish", () => {
     expect(files.has("app-publish/previous-index.html")).toBe(false);
   });
 
+  it("a rollback to the page of the first version does not open the way back of that version again", async () => {
+    // A publish replaced the page of the first version, and its delete of the old key did not run.
+    const first = readFileSync(new URL("./fixtures/first-publish-index.html", import.meta.url), "utf8");
+    const { env, text } = setup(
+      {
+        "app/index.html": PAGE,
+        "app/assets/index-CzN-NH7R.js": "first js",
+        "app/assets/index-CvgHpLh_.css": "first css",
+        "app/assets/index-OLD.js": "old js",
+        [kept(ID_A)]: first,
+        "app-publish/previous-index.html": OLD_PAGE,
+      },
+      { "app/index.html": { previous: ID_A } },
+    );
+    expect(await run(env, "app_publish", { rollback: true })).toMatchObject({ rolledBack: true });
+    expect(text("app/index.html")).toBe(first);
+    // One step only: the page of the first version is live by a rollback, so the old key is not its way back.
+    await expect(publish(env, { rollback: true })).rejects.toThrow("No earlier page is kept");
+    expect(text("app/index.html")).toBe(first);
+  });
+
   it("rollback does not use the page of the first version for another live page", async () => {
     // Another build is live and has no kept page of its own. The old key still has a page (its delete did not run).
     const { env, text } = setup({ "app/index.html": PAGE, "app/assets/index-OLD.js": "old js", "app-publish/previous-index.html": OLD_PAGE });
