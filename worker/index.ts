@@ -1,5 +1,6 @@
 import type { Env } from "./env";
 import { handleApi } from "./api";
+import { APP_PUBLISH_PATH, handleAppPublish, typeOf } from "./apppublish";
 import { handleMcp } from "./mcp";
 import { handleComment, handlePortal, handleUpload } from "./portal";
 import { FILES_PER_SEND } from "./uploads";
@@ -34,18 +35,6 @@ function sameHex(a: string, b: string): boolean {
 }
 
 const APP_PATH = /^(?!.*\.\.)[a-zA-Z0-9][a-zA-Z0-9._/-]{0,199}$/;
-const TYPES: Record<string, string> = {
-  html: "text/html; charset=utf-8",
-  js: "text/javascript; charset=utf-8",
-  css: "text/css; charset=utf-8",
-  svg: "image/svg+xml",
-  png: "image/png",
-  jpg: "image/jpeg",
-  ico: "image/x-icon",
-  woff2: "font/woff2",
-  json: "application/json",
-};
-const typeOf = (path: string) => TYPES[path.split(".").pop() ?? ""] ?? "application/octet-stream";
 
 async function stage(request: Request, env: Env, name: string, pattern: RegExp, prefix: string, maxBytes = STAGE_MAX_BYTES): Promise<Response> {
   if (!(await tokenOk(request, env.MCP_TOKEN_SHA256))) return new Response("Unauthorized", { status: 401 });
@@ -110,6 +99,10 @@ export default {
     if (url.pathname.startsWith("/admin/repair/") && request.method === "PUT") {
       return stage(request, env, url.pathname.slice("/admin/repair/".length), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$/, "repairs/", REPAIR_MAX_BYTES);
     }
+
+    // A file of the web app build, sent with the link from the MCP tool app_publish, so agents need no admin token.
+    const appFile = APP_PUBLISH_PATH.exec(url.pathname);
+    if (appFile) return handleAppPublish(request, env, appFile[1]!, appFile[2]!);
 
     // A one-time upload link from the MCP tool upload_link (a repaired final or a skeleton), so agents need no admin token.
     const upload = UPLOAD_PATH.exec(url.pathname);

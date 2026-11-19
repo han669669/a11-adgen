@@ -23,6 +23,7 @@ import { DIRECTION_SCHEMA, type Direction, directionSave, dropDirectionServerFie
 import { REVIEW_SCHEMA } from "./review";
 import { PROMPTS, promptGet, promptList } from "./prompts";
 import { picksGet } from "./picks";
+import { appPublish } from "./apppublish";
 import { createUploadLink } from "./uploadlink";
 import * as pack from "./pack";
 import * as fal from "./fal";
@@ -1182,6 +1183,17 @@ export const TOOLS: Tool[] = [
       additionalProperties: false,
     },
     run: async (env, a) => text(await createUploadLink(env, { kind: a.kind, key: a.key, ext: a.ext })),
+  },
+  {
+    name: "app_publish",
+    description:
+      "Put the web app build of main live (the files in R2 app/ that the site serves), with no admin token. A merge deploys the Worker only; this is the second step of a merge that changes app/. The Worker takes only the files of the build of its own commit: its deploy builds the web app and keeps the SHA-256 of each file, and a file with another SHA-256 is refused. So this tool cannot put other JavaScript on the site. Call it with no arguments: it shows each file of the build with live true or false. When a file is not live, the answer has a curl line for each such file: on a clean checkout of main at the commit this Worker runs, run npm ci && npm run build:app, then the curl lines from the repo root in the order given (index.html is last and makes the build live), then call app_publish again and check live true. The link in the lines works for 15 minutes and a new call replaces it; never post it anywhere. rollback true puts back the page that was live before the last publish: use it only when the new build is broken, and tell the owner. Free.",
+    inputSchema: {
+      type: "object",
+      properties: { rollback: { type: "boolean", description: "Put back the page that the last publish replaced. Default false" } },
+      additionalProperties: false,
+    },
+    run: async (env, a) => text(await appPublish(env, { rollback: a.rollback })),
   },
   {
     name: "picks_get",
