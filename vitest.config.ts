@@ -14,6 +14,8 @@ export default defineConfig({
     alias: {
       "cloudflare:workers": fileURLToPath(new URL("./tests/helpers/cloudflare-workers.ts", import.meta.url)),
       "@": fileURLToPath(new URL("./app/src", import.meta.url)),
+      // The Worker imports the list of the web app build, which only a build writes. Tests use a fixed list.
+      "../dist/app-manifest.json": fileURLToPath(new URL("./tests/fixtures/app-manifest.json", import.meta.url)),
     },
   },
 });
