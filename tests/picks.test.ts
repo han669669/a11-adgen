@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import type { Env } from "../worker/env";
 import { TOOLS } from "../worker/mcp";
-import { picksGet } from "../worker/picks";
+import { HEAD_CONCURRENCY, mapLimit, picksGet } from "../worker/picks";
 import { validate } from "../worker/schema";
 import { createUploadLink, handleUploadLink } from "../worker/uploadlink";
 import { fakeD1 } from "./helpers/d1";
@@ -92,6 +92,75 @@ describe("picks_get", () => {
     expect(() => validate(tool.inputSchema as never, { batchId: B, extra: 1 })).toThrow();
     const res = (await tool.run(env, validate(tool.inputSchema as never, { batchId: B }))) as { content: { text: string }[] };
     expect(JSON.parse(res.content[0]!.text).picks[0].latest.renderId).toBe(NEW);
+  });
+});
+
+describe("picks_get metadata reads", () => {
+  /** Adds `n` more done, composed finals to idea 7, each one minute newer than the last; every third one is repaired. */
+  function manyFinals(n: number) {
+    const s = setup();
+    const ids: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const id = `33333333-0000-4000-8000-${String(i).padStart(12, "0")}`;
+      const at = `2026-11-08T${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}:00Z`;
+      s.raw
+        .prepare(
+          `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, usd_est, created_at, updated_at, composed_key)
+           VALUES (?, ?, 'i7', 'final', 'done', 'p', '[]', 1536, 1920, 'high', 1, 0.07, ?, ?, ?)`,
+        )
+        .run(id, B, at, at, `renders/${id}/1-c.jpg`);
+      if (i % 3 === 0) s.files.set(`renders/${id}/1-c.jpg`, { bytes: new Uint8Array(), meta: { repairedFrom: "x" } });
+      ids.unshift(id);
+    }
+    return { ...s, ids };
+  }
+
+  it("keeps newest-first order and each final's own repaired flag when the reads finish out of order", async () => {
+    const { env, ids } = manyFinals(20);
+    const head = env.MEDIA.head.bind(env.MEDIA);
+    let calls = 0;
+    // Each read waits less than the one before, so later reads finish first.
+    (env.MEDIA as unknown as { head: (k: string) => Promise<unknown> }).head = async (k: string) => {
+      const wait = 40 - calls++;
+      await new Promise((r) => setTimeout(r, wait));
+      return head(k);
+    };
+    const p = (await picksGet(env, B)).picks[0]!;
+    expect(p.finals.map((f) => f.renderId)).toEqual([...ids, NEW, OLD]);
+    for (const [j, f] of p.finals.entries()) expect(f.repaired, f.renderId).toBe(j < 20 && (19 - j) % 3 === 0);
+    expect(p.latest).toMatchObject({ renderId: ids[0], repaired: false });
+  });
+
+  it("reads each composed picture once, with at most HEAD_CONCURRENCY reads in flight", async () => {
+    const { env, raw } = manyFinals(20);
+    // A second pick of the same idea must not read its finals again.
+    raw.exec(`INSERT INTO picks (render_key, batch_id, idea_id, note, final_render_id, created_at, by_owner) VALUES ('renders/dddddddd-0000-4000-8000-000000000004/1.jpg', '${B}', 'i7', null, null, 't', 0)`);
+    const head = env.MEDIA.head.bind(env.MEDIA);
+    const seen: string[] = [];
+    let inFlight = 0;
+    let peak = 0;
+    (env.MEDIA as unknown as { head: (k: string) => Promise<unknown> }).head = async (k: string) => {
+      seen.push(k);
+      peak = Math.max(peak, ++inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight--;
+      return head(k);
+    };
+    const out = await picksGet(env, B);
+    expect(out.picks).toHaveLength(2);
+    expect(seen).toHaveLength(22);
+    expect(new Set(seen).size).toBe(22);
+    expect(peak).toBe(HEAD_CONCURRENCY);
+  });
+
+  it("mapLimit keeps input order, handles no items and passes a failure through", async () => {
+    const out = await mapLimit([30, 10, 20, 0], 2, async (ms) => {
+      await new Promise((r) => setTimeout(r, ms));
+      return ms;
+    });
+    expect(out).toEqual([30, 10, 20, 0]);
+    expect(await mapLimit([], 6, async () => 1)).toEqual([]);
+    await expect(mapLimit([1, 2], 6, async (n) => (n === 2 ? Promise.reject(new Error("r2 down")) : n))).rejects.toThrow("r2 down");
   });
 });
 

@@ -7,6 +7,9 @@ export class ApiError extends Error {
   }
 }
 
+/** The longest note the API saves on a pick (worker/api.ts refuses a longer one). */
+export const NOTE_MAX = 600;
+
 export const SIGNED_OUT = "a11:signed-out";
 
 export async function api<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {

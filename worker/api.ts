@@ -8,6 +8,8 @@ import { BudgetError, totals } from "./spend";
 
 const UUID = "[0-9a-f-]{36}";
 const DRAFT_KEY = /^renders\/[0-9a-f-]{36}\/\d+\.jpg$/;
+/** The longest note the owner can save on a pick. The board shows the same limit (app/src/lib/api.ts). */
+const NOTE_MAX = 600;
 
 const json = (data: unknown, status = 200, headers: Record<string, string> = {}) =>
   Response.json(data, { status, headers: { "cache-control": "no-store", ...headers } });
@@ -120,7 +122,8 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
       if (picks.length > 8) return fail(400, "Pick 0 to 8 drafts (none clears the picks that have no final yet).");
       const clean = picks.map((p: any) => {
         if (typeof p?.key !== "string" || !DRAFT_KEY.test(p.key)) throw new AuthError("Bad draft key.", 400);
-        const note = typeof p.note === "string" ? p.note.slice(0, 600) : undefined;
+        const note = typeof p.note === "string" ? p.note : undefined;
+        if (note && note.length > NOTE_MAX) throw new AuthError(`A note can have at most ${NOTE_MAX} characters.`, 400);
         return { key: p.key, note };
       });
       return json(await batch.picksSave(env, m[1]!, clean));
