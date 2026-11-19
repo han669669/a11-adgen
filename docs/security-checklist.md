@@ -35,6 +35,9 @@ Run these on the live address for a production deploy. For a preview deploy, run
 | `PUT /up/000000000000000000000000000000000000000000000000` (a wrong 48-character key) | 404 |
 | `GET /m/deploy/x.js` | 404 |
 | `GET /` and a pack page | CSP present, no `unsafe-inline` in `script-src` |
+| `GET http://` the live address, any path | 301 to the same path on `https://` |
+| `POST http://` the live address, `/mcp`, with a wrong bearer | 403 `HTTPS required.`, no `www-authenticate` challenge |
+| Any `https://` answer | `strict-transport-security: max-age=31536000; includeSubDomains` |
 | `POST /oauth/register` with a body over 8 KB | 413 |
 | `POST /oauth/register` with a `javascript:` redirect | 400 |
 | `spend_get`, `brand_list`, `batch_list` through the connector | Real data (OAuth path works) |
