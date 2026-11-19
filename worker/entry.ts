@@ -5,6 +5,7 @@ import { AuthError, reserveRegistration } from "./auth";
 import { MCP_SCOPE, boundRegistration, handleAuthorize, stillAllowed } from "./oauth";
 import type { Env } from "./env";
 import { fontResponse } from "./font";
+import { httpsOnly } from "./https";
 import { iconResponse } from "./icon";
 
 /**
@@ -16,13 +17,13 @@ import { iconResponse } from "./icon";
 const mcpHandler = {
   async fetch(request: Request, env: Env, context: ExecutionContext): Promise<Response> {
     // The provider adds props (what completeAuthorization stored, or the bearer fallback) and auth (the verified token) to the context.
-    const ctx = context as ExecutionContext & { props?: { email?: string; static?: boolean }; auth?: { scope?: string[] } };
+    const ctx = context as ExecutionContext & { props?: { email?: string; static?: boolean }; auth?: { scope?: string[]; clientId?: string } };
     const props = ctx.props ?? {};
     if (!props.static) {
       // A token from the login: the email must still be on the allow-list, and the grant must carry the scope.
       if (!stillAllowed(env, props.email) || !(ctx.auth?.scope ?? []).includes(MCP_SCOPE)) return new Response("Forbidden", { status: 403 });
     }
-    return handleMcp(request, env);
+    return handleMcp(request, env, props.static ? { client: "admin-token" } : { client: ctx.auth?.clientId, email: props.email });
   },
 };
 
@@ -67,20 +68,22 @@ function providerFor(env: Env): OAuthProvider<Env> {
   return p;
 }
 
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    // Open client registration: keep the body small and the rate low, so nobody can fill the KV with client records.
-    if (request.method === "POST" && new URL(request.url).pathname === "/oauth/register") {
-      const bounded = await boundRegistration(request);
-      if (bounded instanceof Response) return bounded;
-      request = bounded;
-      try {
-        await reserveRegistration(env);
-      } catch (e) {
-        if (!(e instanceof AuthError)) throw e;
-        return Response.json({ error: "temporarily_unavailable", error_description: e.message }, { status: 429, headers: { "retry-after": "3600", "cache-control": "no-store" } });
-      }
+async function serve(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  // Open client registration: keep the body small and the rate low, so nobody can fill the KV with client records.
+  if (request.method === "POST" && new URL(request.url).pathname === "/oauth/register") {
+    const bounded = await boundRegistration(request);
+    if (bounded instanceof Response) return bounded;
+    request = bounded;
+    try {
+      await reserveRegistration(env);
+    } catch (e) {
+      if (!(e instanceof AuthError)) throw e;
+      return Response.json({ error: "temporarily_unavailable", error_description: e.message }, { status: 429, headers: { "retry-after": "3600", "cache-control": "no-store" } });
     }
-    return providerFor(env).fetch(request, env, ctx);
-  },
+  }
+  return providerFor(env).fetch(request, env, ctx);
+}
+
+export default {
+  fetch: (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> => httpsOnly(request, () => serve(request, env, ctx)),
 } satisfies ExportedHandler<Env>;

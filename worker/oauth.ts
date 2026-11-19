@@ -1,5 +1,5 @@
 import { AuthorizationError, CimdFetchError, type ConsentDescription } from "@cloudflare/workers-oauth-provider";
-import { AuthError, allowed, currentUser, login } from "./auth";
+import { AuthError, allowed, callerAddress, currentUser, login } from "./auth";
 import type { Env } from "./env";
 import { TooLargeError, readCapped } from "./images";
 
@@ -79,7 +79,7 @@ export async function handleAuthorize(request: Request, env: Env): Promise<Respo
     const form = await request.formData().catch(() => null);
     const next = safeNext(form?.get("next"));
     try {
-      const cookie = await login(env, { email: form?.get("email"), password: form?.get("password") });
+      const cookie = await login(env, { email: form?.get("email"), password: form?.get("password") }, callerAddress(request));
       return new Response(null, { status: 303, headers: { Location: next, "Set-Cookie": cookie, "cache-control": "no-store" } });
     } catch (e) {
       if (e instanceof AuthError) return signInPage(next, e.message, e.status);

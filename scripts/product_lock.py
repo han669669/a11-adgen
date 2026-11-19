@@ -574,7 +574,7 @@ def layout(a):
             img, pad = soften(img, q["blur"])
             x, y = x - pad, y - pad
         layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))   # paste clips a piece that bleeds off an edge; alpha_composite refuses it
-        layer.paste(img, (x, y), img)
+        layer.paste(img, (x, y))   # no mask: a mask would apply the alpha twice and leave a dark ring on every soft edge
         canvas.alpha_composite(layer)
         print(f"product {len(boxes) + 1}: x {x},{x + img.width} y {y},{y + img.height}")
         boxes.append((x, y))

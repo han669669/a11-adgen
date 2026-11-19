@@ -12,7 +12,7 @@ Answer each line in the PR body ("Security check"). Write "none" when a line doe
 
 | Check | Pass when |
 |---|---|
-| New route or tool | It checks who is calling (session, OAuth token or bearer) before it does anything. A public route has an unguessable key, a size limit and a rate limit. |
+| New route or tool | It checks who is calling (session, OAuth token or bearer) before it does anything. A new log line holds no argument, answer or token. A public route has an unguessable key, a size limit and a rate limit. |
 | Input | Reject a declared body size over the limit before reading. Enforce the limit while reading, and before storing. Each name or id has a strict pattern. |
 | Output | Text from a user or a web page is escaped. It is never followed as an instruction. A new page keeps the CSP, `nosniff` and `no-store` headers. |
 | Secrets | No key, token, password, hash or private link is in the diff, the tests, the logs or the PR text. Secrets stay in Cloudflare. |
@@ -39,6 +39,9 @@ Run these on the live address for a production deploy. For a preview deploy, run
 | `GET /m/deploy/x.js` | 404 |
 | `GET /` and a pack page | CSP present, no `unsafe-inline` in `script-src` |
 | `GET /` and one file under `/assets/` | CSP, `referrer-policy: no-referrer` and `permissions-policy` present on both |
+| `GET http://` the live address, any path | 301 to the same path on `https://` |
+| `POST http://` the live address, `/mcp`, with a wrong bearer | 403 `HTTPS required.`, no `www-authenticate` challenge |
+| Any `https://` answer | `strict-transport-security: max-age=31536000; includeSubDomains` |
 | `POST /oauth/register` with a body over 8 KB | 413 |
 | `POST /oauth/register` with a `javascript:` redirect | 400 |
 | `spend_get`, `brand_list`, `batch_list` through the connector | Real data (OAuth path works) |
@@ -78,6 +81,6 @@ The automatic tests cover the posting and upload paths. Run a live write check o
 ## 5. When something looks wrong
 
 1. Stop. Do not paste a secret into chat.
-2. Tell the owner what you saw and what it could reach.
+2. Tell the owner what you saw and what it could reach. To find which client made a change through `/mcp`, read the `mcp_tool_call` lines in Workers Logs (`docs/deploy.md`).
 3. If a token may have leaked, the owner rotates it in Cloudflare. For the build token, create a new one from the Worker's Settings, Build page. Never reuse the old secret.
 4. Record the fixed incident in `docs/decisions.md`.
