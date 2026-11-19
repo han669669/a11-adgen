@@ -19,7 +19,8 @@ Connected on 2026-11-08 (recorded in `docs/decisions.md`). The live Worker `a11a
 Rules:
 
 - `main` needs a pull request. No force push, no deleting `main`. A push to `main` is a production deploy. The review bot runs on every pull request, but the `protect-main` ruleset does not require it (owner, 2026-11-09). The review bot is Devin Review 2.0, for all code and security review (the owner's standing rule, recorded 19-11-2026). It replaces Macroscope (17-11-2026) and cubic. It reviews each pull request and writes its findings as comments. Before a merge, check that its review of the newest commit is done and that each finding is fixed or answered.
-- This path deploys the Worker only. The web app files in R2 `app/` (step 5 below) and D1 migrations (step 3 below) are still manual.
+- This path deploys the Worker only. After a merge that changes the web app, an agent publishes the web app files to R2 `app/` with the MCP tool `app_publish` ("Web app publish" below). D1 migrations (step 3 below) are still manual.
+- Each deploy builds the web app first (`build.command` in `wrangler.jsonc`), because the Worker bundle holds the SHA-256 of each file of that build (`dist/app-manifest.json`). A web app that does not build stops the deploy.
 - After each automatic deploy, check `/api/me` (401), the test portal link (200) and `spend_get` through `/mcp`. Workers Logs keep no invocation logs (`wrangler.jsonc`: they would keep the pack-link token from the URL). To see one request, use `wrangler tail`, which is not stored. Also read `GET /accounts/{id}/workers/scripts/a11adgen/subdomain`: `previews_enabled` must be `false`.
 - The dashboard may say "Update your Wrangler configuration with these changes" after a variable edit. Ignore it. Do not put `MCP_TOKEN_SHA256` or `SIGNUP_CODE_SHA256` in `wrangler.jsonc` vars: the repo is public. Both are Worker secrets since 2026-11-12, so a deploy keeps them, and a deploy stops when `MCP_TOKEN_SHA256` is missing (`secrets.required`).
 - A secret cannot be read back. When the owner sets `MCP_TOKEN_SHA256` or `SIGNUP_CODE_SHA256`, he keeps a copy of the value (or of the token or code it comes from) in a private note, never in git. If `MCP_TOKEN_SHA256` is lost, the owner makes a new admin token and sets its hash as the secret ("The admin token" in `AGENTS.md`). If `SIGNUP_CODE_SHA256` is lost, sign-up stays closed until the owner sets the hash of a new set-up code. Neither is in git.
@@ -40,12 +41,51 @@ The steps below are for the live Worker `a11adgen` (D1 `a11adgen-db`, R2 `a11adg
    - the bindings in `wrangler.jsonc` (including `{ "type": "images", "name": "IMAGES" }` and the KV namespace `OAUTH_KV` = live `a11adgen-oauth` `e29131310aa446489fa715d74e1c35ff`, for `a11adgen` only; a preview deploy uses its own, see the Preview deploy table), and `observability` `{ "enabled": true, "logs": { "enabled": true, "invocation_logs": false } }` (no invocation logs, as in `wrangler.jsonc`);
    - `keep_bindings: ["secret_text"]`, so the Worker's secrets stay: `FAL_KEY`, `EXA_API_KEY`, `ALLOWED_EMAILS`, `APIFY_TOKEN`, `MCP_TOKEN_SHA256` and `SIGNUP_CODE_SHA256`. Never send the two hashes as `plain_text`.
    - After the upload, turn per-version URLs off: `POST /accounts/{id}/workers/scripts/<worker>/subdomain` with `{"enabled": true, "previews_enabled": false}`. A connector upload does not read `preview_urls` from `wrangler.jsonc`.
-5. Web app: `npm run build:app`, then `PUT /admin/app/<path>` on the target Worker (same bearer token) for each file in `dist/app`, `index.html` last. It saves to `app/` in that Worker's bucket, and the Worker serves the app from there. Old hashed files in `app/assets/` can stay; `index.html` points to the new ones. `scripts/upload_app.sh` does this step. The owner runs it: see "Web app upload" below.
+5. Web app: an agent publishes the build with the MCP tool `app_publish` of the target Worker ("Web app publish" below). The files go to `app/` in that Worker's bucket, and the Worker serves the app from there. Old hashed files in `app/assets/` can stay; `index.html` points to the new ones. The fallback is `PUT /admin/app/<path>` with the admin token (`scripts/upload_app.sh`), which only the owner can run.
 6. Smoke test: `spend_get` through `/mcp`, `/api/me` (401 without a session), one call of each changed tool, and `previews_enabled` is `false` on the Worker's subdomain setting.
 
-## Web app upload (step 5)
+## Web app publish (step 5)
 
-A merge does not put a web app change on the live site. The owner runs this upload on his own computer, because only he holds the admin token (`AGENTS.md`, section 7). An agent prepares the merge and does the checks that need no token. It needs bash, git, Node 22 and curl 7.55 or later.
+A merge does not put a web app change on the live site: Workers Builds deploys the Worker only. An agent then publishes the web app build of `main` with the MCP tool `app_publish`. It needs no admin token, and the owner runs nothing (owner, 19-11-2026). Claude Code and Devin use the same steps. They need git, Node 22 and curl.
+
+What the tool can do, and no more:
+
+| Question | Answer |
+|---|---|
+| Who can call it | A caller of `/mcp`: an OAuth client that the owner signed in and approved, or the admin token. |
+| What can go live | Only the web app build of the commit that the Worker runs. Each deploy builds the web app and puts the SHA-256 of each built file into the Worker bundle. The Worker saves a file to R2 `app/` only when its name and its SHA-256 are in that list. Other JavaScript is refused (HTTP 422), also with a valid link. |
+| How code gets into the list | Only by a merge to `main` (the owner's merge, or the merge rule in `AGENTS.md` section 9) and its deploy. |
+| The upload link | 24 random bytes, for the files of one publish. Only its SHA-256 is kept (R2 `app-publish/`, which no route serves). It works for 15 minutes, and a new `app_publish` call replaces it. Never write it in a PR, a log or a chat. |
+| Order | The Worker refuses `index.html` until each file it needs is in R2 with the right SHA-256. A publish that stops early changes nothing for a user. |
+| Rollback | `rollback: true` puts back the page that the last publish replaced. It cannot put any other page live. |
+| Record | Workers Logs keep one line for each step (`"event":"app_publish"`: `link`, `file`, `refused`, `rollback`), never the link. They do not name the caller. |
+
+Steps, after the deploy of the merge:
+
+1. `git switch main && git pull --ff-only && git status --porcelain` (it prints nothing when the checkout is clean), then `npm ci && npm run build:app`.
+2. Call `app_publish` with no arguments. The answer lists each file of the build with `live` true or false, and has one `curl` line for each file that is not live. If the answer names a file that is not in your `dist/app`, the Worker does not run your commit: wait for the deploy, or pull `main`.
+3. Run the `curl` lines from the repo root, in the order given. `index.html` is last and makes the build live. A 422 answer means the same as in step 2.
+4. Call `app_publish` again: `live` must be true. Then run the proof below, and reload any open tab (an open tab keeps the old app until a reload).
+
+Anyone can make the same proof with no token and no tool, from a build of the same commit:
+
+```bash
+B=https://a11adgen.gamingcomputing.workers.dev
+curl -fsS $B/ | sha256sum; sha256sum dist/app/index.html
+for a in $(grep -oE 'assets/[A-Za-z0-9._-]+' dist/app/index.html | sort -u); do curl -fsS $B/$a | sha256sum; sha256sum dist/app/$a; done
+```
+
+Rollback:
+
+- The new build is broken: call `app_publish` with `rollback: true`. The page that the publish replaced is live again at once. Tell the owner, then revert the change on `main`.
+- To stay on an older build: revert the change on `main`. After that deploy the Worker takes only the older build. Publish it with `app_publish`.
+- The owner's fallback, with the admin token: `scripts/rollback_app.sh` (below).
+
+`tests/app-publish.test.ts` covers the tool and the route: other bytes, a name that is not in the build, `index.html` too early, a file in R2 without its SHA-256, a wrong, expired or replaced link, the size limits and the rollback. For a preview, call `app_publish` on the preview Worker: it takes the build of the branch it was deployed from.
+
+### Fallback: upload with the admin token (owner only)
+
+Use this only when the MCP is down. The owner runs it on his own computer, because only he holds the admin token (`AGENTS.md`, section 7). It needs bash, git, Node 22 and curl 7.55 or later.
 
 ```bash
 git switch main && git pull --ff-only && git status --porcelain   # prints nothing when the checkout is clean
@@ -63,14 +103,6 @@ What `scripts/upload_app.sh` does, in this order. It stops at the first check th
 3. It checks the token with `PUT /admin/stage/BAD%20NAME`: 400 with a valid token, 401 without. This request writes nothing. `DRY_RUN=1` stops here.
 4. It uploads each file, `index.html` last. After each upload it reads the file back from the site and compares the SHA-256.
 5. Proof: live `/` has the same SHA-256 as `dist/app/index.html`, and the script prints the file names in the live page. They must be the names that `npm run build:app` printed.
-
-Anyone can make the same proof later with no token, from a build of the same commit:
-
-```bash
-B=https://a11adgen.gamingcomputing.workers.dev
-curl -fsS $B/ | sha256sum; sha256sum dist/app/index.html
-for a in $(grep -oE 'assets/[A-Za-z0-9._-]+' dist/app/index.html | sort -u); do curl -fsS $B/$a | sha256sum; sha256sum dist/app/$a; done
-```
 
 An upload that stops before `index.html` changes nothing for a user: the live page still names the old files. Run the script again. After the upload, an open browser tab keeps the old app until a reload.
 
