@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Start point for every AI agent on `a11-adgen`. Read this file first, then `docs/blueprint.md`.
+Start point for every AI agent on `a11-adgen`. Read this file first, then [project progress and direction](docs/progress.md).
 This document uses ASD-STE100 Simplified Technical English with British spelling. Code, commands, paths and UI labels are not changed.
 
 ---
@@ -8,14 +8,15 @@ This document uses ASD-STE100 Simplified Technical English with British spelling
 ## 1. Read these files in this order
 
 1. `AGENTS.md` (this file): goals, owner decisions, rules.
-2. `docs/blueprint.md`: the design and the build plan.
-3. `docs/decisions.md`: every owner decision, with the date.
-4. `docs/v1-lessons.md`: what the old tool (`han669669/ai-ad-generator`) taught us.
-5. `docs/taste-seed.md`: the owner's taste, from his marks on v1. This seeds the taste canon.
-6. `docs/creative-playbook.md`: the bar for every ad (the option B test), the funnel stages and the batch process. Read it, and `docs/backlog.md`, before you write ideas.
-7. `docs/render-checklist.md`: the owner's picture notes from v1 (writing on props, scale, props, physics, hands, copy). Read it before you write a prompt, pick a draft or send a final.
-8. `docs/security-checklist.md`: the standing security gate. Run it on every change. The owner must not need to ask.
-9. `docs/backlog.md`: ideas the owner parked, and ideas the owner declined. Do not start a parked item without the owner's say. Do not suggest a declined item again.
+2. [Project progress and direction](docs/progress.md): current work, blockers, decisions needed and next actions.
+3. `docs/blueprint.md`: the design and the build plan.
+4. `docs/decisions.md`: every owner decision, with the date.
+5. `docs/v1-lessons.md`: what the old tool (`han669669/ai-ad-generator`) taught us.
+6. `docs/taste-seed.md`: the owner's taste, from his marks on v1. This seeds the taste canon.
+7. `docs/creative-playbook.md`: the bar for every ad (the option B test), the funnel stages and the batch process. Read it, and `docs/backlog.md`, before you write ideas.
+8. `docs/render-checklist.md`: the owner's picture notes from v1 (writing on props, scale, props, physics, hands, copy). Read it before you write a prompt, pick a draft or send a final.
+9. `docs/security-checklist.md`: the standing security gate. Run it on every change. The owner must not need to ask.
+10. `docs/backlog.md`: ideas the owner parked, and ideas the owner declined. Do not start a parked item without the owner's say. Do not suggest a declined item again.
 
 For work on a11-engine v3, also read these files in this order. The owner wrote the specification on 15-11-2026.
 
@@ -131,6 +132,7 @@ The connector and the agents use OAuth for `/mcp`. That is separate from this to
 4. Merge only with the owner's yes, or under the standing rule of 09-11-2026: a thread may squash-merge its own pull request when it is confident and the review bot, CI (`npm run check`) and the code review are all clean. The review bot is Macroscope from 17-11-2026 (its Correctness check runs on every push; its Approvability check is manual): cubic's free monthly limit ran out, and the owner switched cubic off until its limit resets on 1-12-2026. Macroscope is paid from a small credit: keep pull requests small, and tell the owner when the credit is low. When the credit runs out, CI and the thread's own code review are enough, until the owner names the next review tool (owner, 17-11-2026). A merge to `main` deploys the Worker (section 7). A live D1 migration, a manual deploy and anything in section 10 still need the owner's explicit yes.
 5. Commits and PR bodies in STE.
 6. **Security gate (owner rule, 2026-11-08).** Run `docs/security-checklist.md` on every change, without being asked. Put a "Security check" line in each PR body. After each deploy, run its live probes and check that the client and the owner can still do their jobs (its section 3). Treat the repository as public: report open weaknesses to the owner in chat, never in a file.
+7. **Project handoff.** Keep [project progress and direction](docs/progress.md) current in the same PR as your change. Report progress, resolved issues, blockers and next actions to the Coordinator. The Coordinator brings decisions to the owner and relays the answers. Automate checks where practical. Use manual checks for what automation cannot verify.
 
 ---
 
