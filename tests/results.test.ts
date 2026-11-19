@@ -4,7 +4,6 @@ import * as batch from "../worker/batch";
 import { brandSave } from "../worker/brand";
 import type { Env } from "../worker/env";
 import { TOOLS } from "../worker/mcp";
-import { adName } from "../worker/pack";
 import { PROMPTS } from "../worker/prompts";
 import { validate } from "../worker/schema";
 import { fakeD1 } from "./helpers/d1";
@@ -36,20 +35,6 @@ const run = async (env: Env, name: string, args: unknown) => {
 const save = (env: Env, rows: unknown[], reportDate = "2026-11-06") => run(env, "results_save", { brand: "won-gi", reportDate, source: "client screenshot", rows });
 
 describe("results ledger", () => {
-  it("takes the ad name of a brand's batch 100 and of idea 100, as pack_publish writes them", async () => {
-    // adName pads to 2 digits and does not cut: batch 100 is _b100. The pattern took 2 digits only and refused the name.
-    const { env, raw } = await makeEnv();
-    const names = [adName(47, "won-gi", 100, "tof", 3, 1), adName(47, "won-gi", 2, "bof", 100, 2)];
-    expect(names).toEqual(["a11_W47_wongi_b100_tof_c03_v1", "a11_W47_wongi_b02_bof_c100_v2"]);
-    const batchId = (raw.prepare("SELECT id FROM batches LIMIT 1").get() as { id: string }).id;
-    raw.prepare("INSERT INTO packs (id, batch_id, version, token_hash, title, content, created_at) VALUES ('p2', ?, 2, 'h2', 't', ?, 'n')")
-      .run(batchId, JSON.stringify({ brand: "WonGi", ads: names.map((name) => ({ name })) }));
-    await save(env, names.map((n) => ({ adName: n, impressions: 2000, clicks: 40 })));
-    const got = await run(env, "results_get", { brand: "won-gi" });
-    expect(got.ads.map((a: { adName: string; stage: string; idea: number; version: number }) => [a.adName, a.stage, a.idea, a.version]))
-      .toEqual([[names[1], "bof", 100, 2], [names[0], "tof", 3, 1]]);
-  });
-
   it("judges each ad against the baseline, and lists the winners", async () => {
     const { env } = await makeEnv();
     await run(env, "baseline_save", { brand: "won-gi", ctrPct: 1.2, source: "client screenshot, 30 days" });

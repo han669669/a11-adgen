@@ -268,6 +268,40 @@ describe("pack_publish", () => {
     expect(y.adNames[0]).toMatch(new RegExp(`_v${y.version}$`));
   });
 
+  it("names an ad of a brand's batch 100 and idea 100 so that results_save takes the name", async () => {
+    // adName pads to 2 digits and does not cut: batch 100 is _b100. The results pattern took 2 digits only, so
+    // results_save refused the name that pack_publish wrote.
+    const { env, raw, files } = makeEnv();
+    const first = await seed(env, raw, files);
+    const subjectId = (raw.prepare("SELECT subject_id AS s FROM batches WHERE id = ?").get(first.b.id) as { s: string }).s;
+    for (let i = 2; i <= 99; i++) await batch.batchCreate(env, { brandSlug: "won-gi", subjectId, label: `W45-${i}` });
+    const b = await batch.batchCreate(env, { brandSlug: "won-gi", subjectId, label: "W45-100" });
+    raw.prepare("UPDATE batches SET created_at = ? WHERE id = ?").run("2999-01-01T00:00:00.000Z", b.id); // fixed time: the newest batch of the brand
+    let idea: { id: string; n: number } | undefined;
+    for (let i = 0; i < 4; i++)
+      idea = (await batch.ideasSave(env, b.id, Array.from({ length: 25 }, (_, j) => ({ format: "bof" as const, insight: "bundle", visual: "four jars", headline: "One shot buy four.", picked: i === 3 && j === 24 })))).at(-1);
+    expect(idea!.n).toBe(100);
+    const id = "cccccccc-cccc-cccc-cccc-000000000000";
+    raw
+      .prepare(
+        `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, image_keys, composed_key, usd_est, created_at, updated_at)
+         VALUES (?, ?, ?, 'final', 'done', 'p', '[]', 1536, 1920, 'high', 1, ?, ?, 0.06, 'now', 'now')`,
+      )
+      .run(id, b.id, idea!.id, JSON.stringify([`renders/${id}/1.jpg`]), `renders/${id}/1-c1.jpg`);
+    files.set(`renders/${id}/1-c1.jpg`, "jpeg-c");
+    const published = await pack.packPublish(env, { batchId: b.id, ads: [{ renderId: id, ...copy() }], at: new Date("2026-11-07T04:00:00Z") });
+    expect(published.adNames).toEqual(["a11_W45_wongi_b100_bof_c100_v1"]);
+    const run = async (name: string, args: unknown) => {
+      const t = TOOLS.find((x) => x.name === name)!;
+      const c = (await t.run(env, validate(t.inputSchema, args))).content[0]!;
+      return JSON.parse(c.type === "text" ? c.text : "{}");
+    };
+    await run("results_save", { brand: "won-gi", reportDate: "2026-11-10", source: "client screenshot", rows: [{ adName: published.adNames[0], impressions: 2000, clicks: 40 }] });
+    const got = await run("results_get", { brand: "won-gi" });
+    expect(got.ads.map((a: { adName: string; stage: string; idea: number; version: number }) => [a.adName, a.stage, a.idea, a.version]))
+      .toEqual([["a11_W45_wongi_b100_bof_c100_v1", "bof", 100, 1]]);
+  });
+
   it("keeps two batches of one brand in one week apart, with the batch number in the ad name", async () => {
     const { env, raw, files } = makeEnv();
     const first = await seed(env, raw, files);
