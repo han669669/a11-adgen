@@ -1,4 +1,4 @@
-import { AuthError, currentUser, login, logout, signup } from "./auth";
+import { AuthError, callerAddress, currentUser, login, logout, signup } from "./auth";
 import * as batch from "./batch";
 import type { Env } from "./env";
 import * as fal from "./fal";
@@ -33,8 +33,12 @@ export async function handleApi(request: Request, env: Env, url: URL): Promise<R
   }
   try {
     if (path === "/api/signup" && method === "POST") return json({ ok: true }, 200, { "set-cookie": await signup(env, await body(request)) });
-    if (path === "/api/login" && method === "POST") return json({ ok: true }, 200, { "set-cookie": await login(env, await body(request)) });
-    if (path === "/api/logout" && method === "POST") return json({ ok: true }, 200, { "set-cookie": await logout(env, request) });
+    if (path === "/api/login" && method === "POST") return json({ ok: true }, 200, { "set-cookie": await login(env, await body(request), callerAddress(request)) });
+    if (path === "/api/logout" && method === "POST") {
+      const res = json({ ok: true });
+      for (const cookie of await logout(env, request)) res.headers.append("set-cookie", cookie);
+      return res;
+    }
 
     const email = await currentUser(env, request);
     if (!email) return fail(401, "Sign in first.");

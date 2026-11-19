@@ -145,11 +145,30 @@ describe("MCP OAuth login", () => {
     expect((await bad()).status).toBe(429);
   });
 
+  it("does not lock the owner out of the sign-in form for the wrong passwords of another address", async () => {
+    const env = await makeEnv();
+    const post = (password: string, ip: string) =>
+      go(env, "/authorize/signin", { method: "POST", headers: { ...FORM, "cf-connecting-ip": ip }, body: form({ email: EMAIL, password, next: "/authorize" }) });
+    for (let i = 0; i < 5; i++) await post("wrong wrong wrong", "203.0.113.7");
+    expect((await post(PASSWORD, "203.0.113.7")).status).toBe(429);
+    expect((await post(PASSWORD, "198.51.100.20")).status).toBe(303);
+  });
+
   it("does not sign in an email that is not on the allow-list", async () => {
     const env = await makeEnv();
     env.ALLOWED_EMAILS = "someone-else@a11.example";
     const r = await go(env, "/authorize/signin", { method: "POST", headers: FORM, body: form({ email: EMAIL, password: PASSWORD, next: "/authorize" }) });
     expect(r.status).toBe(401);
+  });
+
+  it("shows the consent page to a session signed in under the old cookie name (a11s)", async () => {
+    const env = await makeEnv();
+    const { challenge } = pkce();
+    const url = authorizeUrl(await register(env), challenge);
+    const session = await signIn(env, url);
+    expect(session).toMatch(/^__Host-a11s=/);
+    const html = await (await go(env, url, { headers: { cookie: `a11s=${session.split("=")[1]}` } })).text();
+    expect(html).toContain('value="approve"');
   });
 
   it("escapes the app's name on the consent page", async () => {

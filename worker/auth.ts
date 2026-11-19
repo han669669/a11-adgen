@@ -8,8 +8,14 @@ export const PBKDF2_ITERATIONS = 100_000; // the Workers maximum for PBKDF2
 export const MIN_PASSWORD = 12;
 export const MAX_PASSWORD = 200;
 const SESSION_DAYS = 30;
-const COOKIE = "a11s";
+// `__Host-`: a browser takes this cookie only over HTTPS, for this host alone (no Domain) and with Path=/, so another site on a parent domain cannot set it.
+const COOKIE = "__Host-a11s";
+// The name before the prefix. A session lasts SESSION_DAYS, so no session from before the rename is left after this date: then remove both constants.
+const LEGACY_COOKIE = "a11s";
+const LEGACY_COOKIE_UNTIL = Date.parse("2026-12-31T00:00:00+08:00");
+const COOKIE_ATTRS = "Path=/; HttpOnly; Secure; SameSite=Lax";
 const MAX_FAILURES = 5;
+const MAX_EMAIL_FAILURES = 20; // sign-in tries for one email from all addresses together
 const FAILURE_WINDOW = "-15 minutes";
 
 export class AuthError extends Error {
@@ -70,7 +76,7 @@ async function newSession(env: Env, email: string): Promise<string> {
   await env.DB.prepare("INSERT INTO sessions (token_hash, email, expires_at, created_at) VALUES (?, ?, ?, ?)")
     .bind(await sha256(token), email, expires.toISOString(), now.toISOString())
     .run();
-  return `${COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DAYS * 86_400}`;
+  return `${COOKIE}=${token}; ${COOKIE_ATTRS}; Max-Age=${SESSION_DAYS * 86_400}`;
 }
 
 /**
@@ -107,17 +113,40 @@ export async function signup(env: Env, body: { email?: unknown; password?: unkno
   return newSession(env, email);
 }
 
-export async function login(env: Env, body: { email?: unknown; password?: unknown }): Promise<string> {
+/**
+ * The caller's address for the sign-in lock, from Cloudflare's `cf-connecting-ip` (a caller cannot set it).
+ * An IPv6 caller holds a whole /64, so its key is the /64. Callers with no address share one key.
+ */
+export function callerAddress(request: Request): string {
+  const ip = (request.headers.get("cf-connecting-ip") ?? "").trim().toLowerCase();
+  if (!ip.includes(":")) return ip || "unknown";
+  const [head = "", tail] = ip.split("::");
+  const groups = head ? head.split(":") : [];
+  if (tail !== undefined) {
+    const rest = tail ? tail.split(":") : [];
+    groups.push(...Array<string>(Math.max(0, 8 - groups.length - rest.length)).fill("0"), ...rest);
+  }
+  return `${groups
+    .slice(0, 4)
+    .map((g) => g.replace(/^0+(?=.)/, ""))
+    .join(":")}::/64`;
+}
+
+/**
+ * `address` is callerAddress(request). Wrong tries lock one email for one address (MAX_FAILURES), so a stranger cannot lock the owner out.
+ * A higher limit for the email from all addresses together (MAX_EMAIL_FAILURES) still stops a guess from many addresses.
+ */
+export async function login(env: Env, body: { email?: unknown; password?: unknown }, address: string): Promise<string> {
   const email = cleanEmail(body.email);
   const bad = new AuthError("Wrong email or password.");
   if (!allowed(env, email)) throw bad;
   if (typeof body.password !== "string" || body.password.length > MAX_PASSWORD) throw bad;
-  const attemptId = await reserveAttempt(env, email);
+  const attemptIds = await reserveLoginAttempt(env, email, address);
   const user = await env.DB.prepare("SELECT pw_hash FROM users WHERE email = ?").bind(email).first<{ pw_hash: string }>();
   if (!user || !(await verifyPassword(body.password, user.pw_hash))) throw bad;
   // Success: drop this attempt, old failures and expired sessions (keeps both tables small).
   await env.DB.batch([
-    env.DB.prepare("DELETE FROM login_failures WHERE id = ? OR at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day')").bind(attemptId),
+    env.DB.prepare("DELETE FROM login_failures WHERE id IN (?, ?) OR at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day')").bind(...attemptIds),
     env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(new Date().toISOString()),
   ]);
   return newSession(env, email);
@@ -143,6 +172,23 @@ async function reserveAttempt(env: Env, key: string, max = MAX_FAILURES, window 
   return Number(res.meta.last_row_id);
 }
 
+/**
+ * Reserve one sign-in try, with the same rules as reserveAttempt and two limits in one statement.
+ * One try writes two rows: key `<email> <address>` (an email has no space) for the limit of one address, and key `<email>` for the limit of
+ * the email from all addresses. Each count is thus an indexed lookup of the rows in the window only.
+ */
+async function reserveLoginAttempt(env: Env, email: string, address: string): Promise<number[]> {
+  const free = `(SELECT COUNT(*) FROM login_failures WHERE email = ? AND at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '${FAILURE_WINDOW}')) < ?`;
+  const addressKey = `${email} ${address}`;
+  const res = await env.DB.prepare(
+    `INSERT INTO login_failures (email, at) SELECT column1, ? FROM (VALUES (?), (?)) WHERE ${free} AND ${free} RETURNING id`,
+  )
+    .bind(new Date().toISOString(), addressKey, email, addressKey, MAX_FAILURES, email, MAX_EMAIL_FAILURES)
+    .all<{ id: number }>();
+  if (res.results.length !== 2) throw new AuthError("Too many tries. Wait 15 minutes.", 429);
+  return res.results.map((r) => r.id);
+}
+
 /** login_failures key for client registrations at /oauth/register (not an email). */
 const REGISTER_KEY = "~register";
 export const REGISTER_MAX_PER_HOUR = 20;
@@ -157,14 +203,16 @@ export async function reserveRegistration(env: Env): Promise<void> {
   await reserveAttempt(env, REGISTER_KEY, REGISTER_MAX_PER_HOUR, "-1 hour", "Too many registrations. Try again later.");
 }
 
-function tokenFrom(request: Request): string | null {
-  const m = (request.headers.get("cookie") ?? "").match(new RegExp(`(?:^|;\\s*)${COOKIE}=([A-Za-z0-9_-]{20,})`));
-  return m?.[1] ?? null;
+/** The session tokens in the request: the `__Host-` cookie first, then the old name while it is still accepted. */
+function tokensFrom(request: Request): string[] {
+  const header = request.headers.get("cookie") ?? "";
+  const names = Date.now() < LEGACY_COOKIE_UNTIL ? [COOKIE, LEGACY_COOKIE] : [COOKIE];
+  return names.flatMap((name) => header.match(new RegExp(`(?:^|;\\s*)${name}=([A-Za-z0-9_-]{20,})`))?.[1] ?? []);
 }
 
 /** The signed-in email, or null. An email removed from the allow-list loses access at once. */
 export async function currentUser(env: Env, request: Request): Promise<string | null> {
-  const token = tokenFrom(request);
+  const [token] = tokensFrom(request);
   if (!token) return null;
   const row = await env.DB.prepare("SELECT email FROM sessions WHERE token_hash = ? AND expires_at > ?")
     .bind(await sha256(token), new Date().toISOString())
@@ -172,8 +220,8 @@ export async function currentUser(env: Env, request: Request): Promise<string | 
   return row && allowed(env, row.email) ? row.email : null;
 }
 
-export async function logout(env: Env, request: Request): Promise<string> {
-  const token = tokenFrom(request);
-  if (token) await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256(token)).run();
-  return `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+/** Ends every session the request carries. Returns one Set-Cookie value for each cookie name, to clear both. */
+export async function logout(env: Env, request: Request): Promise<string[]> {
+  for (const token of tokensFrom(request)) await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256(token)).run();
+  return [COOKIE, LEGACY_COOKIE].map((name) => `${name}=; ${COOKIE_ATTRS}; Max-Age=0`);
 }

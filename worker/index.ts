@@ -51,7 +51,10 @@ async function stage(request: Request, env: Env, name: string, pattern: RegExp, 
   return Response.json({ key: `${prefix}${name}`, bytes: body.byteLength });
 }
 
-/** The web app (a single-page app): a file from R2 app/, else index.html for client routes. */
+/**
+ * The web app (a single-page app): a file from R2 app/, else index.html for client routes.
+ * Every file gets the CSP, not only the page: a file opened directly (an SVG can hold a script) is a document too.
+ */
 async function serveApp(env: Env, pathname: string): Promise<Response> {
   const path = pathname.replace(/^\/+/, "");
   const isFile = APP_PATH.test(path) && /\.[a-z0-9]+$/.test(path);
@@ -63,7 +66,9 @@ async function serveApp(env: Env, pathname: string): Promise<Response> {
       "content-type": obj.httpMetadata?.contentType ?? typeOf(isFile ? path : "index.html"),
       "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
       "x-content-type-options": "nosniff",
-      ...(isFile && !path.endsWith(".html") ? {} : { "content-security-policy": CSP }),
+      "content-security-policy": CSP,
+      "referrer-policy": "no-referrer",
+      "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
     },
   });
 }
