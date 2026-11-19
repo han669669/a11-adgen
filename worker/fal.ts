@@ -1,4 +1,5 @@
 import type { Env } from "./env";
+import { MAX_IMAGE_BYTES, readCapped, TooLargeError } from "./images";
 import { pasteBack } from "./paste";
 import { NotBilledError, PRICE, reserve, settle } from "./spend";
 
@@ -144,14 +145,50 @@ function read(env: Env, id: string) {
   ).bind(id).first<RenderRow>();
 }
 
+/** A URL from a fal answer that the Worker does not fetch. */
+class FalUrlError extends Error {}
+
+/** The queue gets FAL_KEY, so only its exact host passes. */
+const isQueueHost = (host: string) => host === "queue.fal.run";
+/** fal serves result images from fal.media and its subdomains (v3.fal.media, v3b.fal.media). */
+const isImageHost = (host: string) => host === "fal.media" || host.endsWith(".fal.media");
+const FAL_REDIRECTS = 3;
+
+/**
+ * Fetch a URL that came in a fal answer. The answer is not trusted: each URL must be https on the fal host for its purpose.
+ * Redirects are followed by hand, so each hop is checked before the request (and FAL_KEY, when given) goes out.
+ */
+async function falFetch(url: string, what: string, allowed: (host: string) => boolean, headers?: Record<string, string>): Promise<Response> {
+  const signal = AbortSignal.timeout(15_000); // one bound for the whole chain
+  let at = url;
+  for (let hop = 0; hop <= FAL_REDIRECTS; hop++) {
+    const u = URL.canParse(at) ? new URL(at) : null;
+    if (u?.protocol !== "https:" || !allowed(u.hostname)) throw new FalUrlError(`${what} URL is not an https fal address${u ? ` (${u.hostname})` : ""}.`);
+    const res = await fetch(at, { headers, redirect: "manual", signal });
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+    if (!location) return res;
+    await res.body?.cancel();
+    at = new URL(location, u).href;
+  }
+  throw new FalUrlError(`${what} URL redirected too many times.`);
+}
+
 /** Check a render. When fal is done, copy the images to R2 once and return their keys. */
 export async function check(env: Env, id: string) {
   const row = await read(env, id);
   if (!row) throw new Error(`No render with id ${id}.`);
   if (row.status !== "queued") return view(env, row);
+  return poll(env, row).catch((e) => {
+    // A queue URL that is not fal's never becomes good: the render fails now, it does not stay queued.
+    if (e instanceof FalUrlError) return fail(env, row, e.message);
+    throw e;
+  });
+}
 
+async function poll(env: Env, row: RenderRow) {
+  const id = row.id;
   // Network errors and HTTP 5xx/429 are transient: the row stays queued and the next poll tries again.
-  const st = await fetch(row.status_url, { headers: auth(env), signal: AbortSignal.timeout(15_000) });
+  const st = await falFetch(row.status_url, "fal status", isQueueHost, auth(env));
   if (!st.ok && st.status !== 202) {
     if (transient(st.status)) return { id, status: "queued", note: `fal status HTTP ${st.status}; poll again.` };
     return fail(env, row, `fal status failed: HTTP ${st.status} ${(await st.text()).slice(0, 300)}`);
@@ -159,7 +196,7 @@ export async function check(env: Env, id: string) {
   const s = (await st.json()) as { status: string };
   if (s.status !== "COMPLETED") return { id, status: "queued", falStatus: s.status };
 
-  const out = await fetch(row.response_url, { headers: auth(env), signal: AbortSignal.timeout(15_000) });
+  const out = await falFetch(row.response_url, "fal result", isQueueHost, auth(env));
   if (!out.ok) {
     if (transient(out.status)) return { id, status: "queued", note: `fal result HTTP ${out.status}; poll again.` };
     return fail(env, row, `fal result failed: HTTP ${out.status} ${(await out.text()).slice(0, 300)}`);
@@ -167,15 +204,29 @@ export async function check(env: Env, id: string) {
   const data = (await out.json()) as { images?: { url: string; content_type?: string }[] };
   const images = data.images ?? [];
   const keys: string[] = [];
+  const refused: string[] = [];
   for (const [i, img] of images.entries()) {
-    const file = await fetch(img.url, { signal: AbortSignal.timeout(15_000) });
-    if (!file.ok) {
-      // A temporary error from the image host: stay queued, the next poll downloads again (R2 puts repeat safely).
-      if (transient(file.status)) return { id, status: "queued", note: `image download HTTP ${file.status}; poll again.` };
+    let raw: Uint8Array;
+    try {
+      const file = await falFetch(img.url, `fal image ${i + 1}`, isImageHost);
+      if (!file.ok) {
+        // A temporary error from the image host: stay queued, the next poll downloads again (R2 puts repeat safely).
+        if (transient(file.status)) return { id, status: "queued", note: `image download HTTP ${file.status}; poll again.` };
+        continue;
+      }
+      // A declared size past the limit is refused before the body is read; readCapped holds the limit when no size is declared.
+      if (Number(file.headers.get("content-length") ?? 0) > MAX_IMAGE_BYTES) {
+        await file.body?.cancel();
+        throw new TooLargeError(`fal image ${i + 1} is larger than ${MAX_IMAGE_BYTES} bytes.`);
+      }
+      raw = await readCapped(file, `fal image ${i + 1}`);
+    } catch (e) {
+      // An image on a host that is not fal's, or one past the size limit, is not saved. The other images still are.
+      if (!(e instanceof FalUrlError || e instanceof TooLargeError)) throw e;
+      refused.push(e.message);
       continue;
     }
     const key = `renders/${id}/${i + 1}.jpg`;
-    const raw = await file.arrayBuffer();
     // A food_fix result keeps the original outside its boxes (paste.ts). When the paste fails, the render fails:
     // the raw fal image is never saved in its place.
     let merged: ArrayBuffer | null = null;
@@ -194,7 +245,9 @@ export async function check(env: Env, id: string) {
   // A short download is a failure (cubic, PR #1); the saved keys stay listed, so the images remain usable.
   const status = keys.length > 0 && keys.length === images.length ? "done" : "failed";
   const error =
-    images.length === 0 ? "fal returned no images" : keys.length === images.length ? null : `saved ${keys.length} of ${images.length} images`;
+    images.length === 0 ? "fal returned no images"
+    : keys.length === images.length ? null
+    : `saved ${keys.length} of ${images.length} images${refused.length ? `: ${refused.join(" ")}` : ""}`;
   // Only a queued row takes the result: a late poll must not overwrite what another poll finished.
   const res = await env.DB.prepare("UPDATE renders SET status = ?, image_keys = ?, error = ?, updated_at = ? WHERE id = ? AND status = 'queued'")
     .bind(status, JSON.stringify(keys), error, new Date().toISOString(), id)

@@ -117,7 +117,7 @@ function stubFal() {
   const sent: Record<string, any>[] = [];
   vi.stubGlobal("fetch", async (_u: string, init: RequestInit) => {
     sent.push(JSON.parse(String(init.body)));
-    return new Response(JSON.stringify({ request_id: "r", status_url: "https://q/s", response_url: "https://q/r" }));
+    return new Response(JSON.stringify({ request_id: "r", status_url: "https://queue.fal.run/q/s", response_url: "https://queue.fal.run/q/r" }));
   });
   return sent;
 }
@@ -184,7 +184,7 @@ describe("paste-back", () => {
     let planAtSubmit = false;
     vi.stubGlobal("fetch", async () => {
       planAtSubmit = [...saved.keys()].some((k) => k.endsWith("/paste.json"));
-      return new Response(JSON.stringify({ request_id: "r", status_url: "https://q/s", response_url: "https://q/r" }));
+      return new Response(JSON.stringify({ request_id: "r", status_url: "https://queue.fal.run/q/s", response_url: "https://queue.fal.run/q/r" }));
     });
     const out = await foodFix(env, input);
     expect(planAtSubmit).toBe(true);
@@ -219,8 +219,8 @@ describe("paste-back", () => {
     const out = await foodFix(env, input);
     size.width = 1024;
     vi.stubGlobal("fetch", async (u: string) =>
-      u === "https://q/s" ? new Response(JSON.stringify({ status: "COMPLETED" }))
-      : u === "https://q/r" ? new Response(JSON.stringify({ images: [{ url: "https://fal/img.jpg" }] }))
+      u === "https://queue.fal.run/q/s" ? new Response(JSON.stringify({ status: "COMPLETED" }))
+      : u === "https://queue.fal.run/q/r" ? new Response(JSON.stringify({ images: [{ url: "https://v3b.fal.media/img.jpg" }] }))
       : new Response("raw-fal-image"));
     const r = await check(env, out.id);
     expect(r.status).toBe("failed");

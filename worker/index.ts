@@ -82,7 +82,7 @@ export default {
 
     if (url.pathname === "/mcp") {
       if (!(await tokenOk(request, env.MCP_TOKEN_SHA256))) return new Response("Unauthorized", { status: 401 });
-      return handleMcp(request, env);
+      return handleMcp(request, env, { client: "admin-token" });
     }
 
     // Deploy staging: put a built bundle into R2 (deploy/<name>), so the Cloudflare connector can deploy it from there.
