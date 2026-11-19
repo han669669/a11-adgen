@@ -1,4 +1,7 @@
 # CLAUDE.md
 
-Read `AGENTS.md` first. It has the goals, the owner's decisions, the rules and the build plan.
+Claude Code and Devin use the same project rules and handoff.
 This document uses ASD-STE100 Simplified Technical English with British spelling.
+
+@AGENTS.md
+@docs/progress.md
