@@ -35,6 +35,7 @@ Run these on the live address for a production deploy. For a preview deploy, run
 | `PUT /up/000000000000000000000000000000000000000000000000` (a wrong 48-character key) | 404 |
 | `GET /m/deploy/x.js` | 404 |
 | `GET /` and a pack page | CSP present, no `unsafe-inline` in `script-src` |
+| `GET /` and one file under `/assets/` | CSP, `referrer-policy: no-referrer` and `permissions-policy` present on both |
 | `POST /oauth/register` with a body over 8 KB | 413 |
 | `POST /oauth/register` with a `javascript:` redirect | 400 |
 | `spend_get`, `brand_list`, `batch_list` through the connector | Real data (OAuth path works) |
@@ -53,7 +54,7 @@ A change is not done when it is safe but broken. After every deploy, check that 
 | Client | Send a comment | The comment form posts. The text shows under "Comments we received". |
 | Client | Send files | The upload form takes an allowed file and refuses a wrong type or a file over the limit. The file shows under "Files we received". |
 | Client | Be kept out of other packs | A wrong or revoked link returns 404. |
-| Owner | Sign in to the web app | The sign-in page loads. A wrong password is refused. The owner's email gets in. |
+| Owner | Sign in to the web app | The sign-in page loads. A wrong password is refused. The owner's email gets in. The session cookie is `__Host-a11s`. Sign-out removes it. |
 | Owner | Pick drafts and read the spend | The board loads. `spend_get` shows the month total and the cap. |
 | Owner and agents | Use the MCP | The connector signs in with OAuth. `spend_get`, `brand_list` and `batch_list` return real data. Each tool changed in the PR is called once. |
 | Studio | Run a batch | The batch tools answer from brand to pack. Paid tools show an estimate and stop at the cap. |
