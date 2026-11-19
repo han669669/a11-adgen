@@ -7,6 +7,8 @@ export interface Env {
   /** Set by the OAuth provider on the requests it passes to the app. */
   OAUTH_PROVIDER: OAuthHelpers;
   MEDIA: R2Bucket;
+  /** Rate limit for the public upload route of app_publish (PUT /up/app/<link>/<path>), for each caller address. */
+  PUBLISH_LIMIT: RateLimit;
   IMAGES: ImagesBinding;
   /**
    * SHA-256 (hex) of the Phase 0 bearer token for /mcp. Only the hash is stored on the Worker.

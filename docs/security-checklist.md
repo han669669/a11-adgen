@@ -36,6 +36,7 @@ Run these on the live address for a production deploy. For a preview deploy, run
 | `PUT /up/000000000000000000000000000000000000000000000000` (a wrong 48-character key) | 404 |
 | `PUT /up/app/000000000000000000000000000000000000000000000000/index.html` (a wrong 48-character key) | 404 |
 | `GET /app-publish/link.json` | 404 |
+| The wrong-key `PUT` above, 25 times in one minute from one address | 429 with `retry-after: 60` after about 20 (it writes nothing) |
 | `GET /m/deploy/x.js` | 404 |
 | `GET /` and a pack page | CSP present, no `unsafe-inline` in `script-src` |
 | `GET /` and one file under `/assets/` | CSP, `referrer-policy: no-referrer` and `permissions-policy` present on both |

@@ -19,7 +19,42 @@ const LINK_TTL_SECONDS = 900;
 const INDEX = "index.html";
 // app-publish/ is private: no route serves it.
 const LINK_KEY = "app-publish/link.json";
-const PREVIOUS_KEY = "app-publish/previous-index.html";
+/**
+ * Where the page that a publish replaced is kept. Each publish makes a key of its own (`id` is random), and the live page
+ * names it (customMetadata.previous) in the same write that puts the page live. So the way back belongs to one publish:
+ * no other publish or rollback has that key, and a live page that names no kept page has no way back.
+ * The request that replaces the live page deletes the kept page that the live page named.
+ * A page that a rollback put back says so (NO_WAY_BACK): no kept page is its way back, also not the one of the first version.
+ */
+const keptKey = (id: string) => `app-publish/previous/${id}.html`;
+const KEPT_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+const NO_WAY_BACK = { previous: "none" };
+/**
+ * The one kept page of the first version of this tool, which had one key for all publishes. That version made one
+ * publish (19-11-2026), so this page is the way back of that publish only. Never written.
+ */
+const LEGACY_KEPT_KEY = "app-publish/previous-index.html";
+/** The page that the publish of the first version made live (tests/fixtures/first-publish-index.html). */
+const LEGACY_PUBLISHED_PAGE = `<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>a11 adgen</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet" />
+    <script type="module" crossorigin src="/assets/index-CzN-NH7R.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CvgHpLh_.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
+`;
+/** R2 writes the page only when the live page still has the bytes that the request read (the etag of R2 is of the bytes). */
+const unchanged = (live: R2Object) => ({ etagMatches: live.etag });
+const PAGE_CHANGED = "The live page changed during this request, so nothing was written over it.";
 
 const TYPES: Record<string, string> = {
   html: "text/html; charset=utf-8",
@@ -72,15 +107,22 @@ export async function appPublish(env: Env, a: { rollback?: boolean } = {}) {
 
 /** Put back the page that the last publish replaced. The files it names must still be in R2. */
 async function rollback(env: Env) {
-  const previous = await env.MEDIA.get(PREVIOUS_KEY);
-  if (!previous) throw new InputError("No earlier page is kept: app_publish has not replaced a page yet.");
+  // The way back is that of the live page, not of the build this Worker runs: a deploy does not change the live page.
+  const live = await env.MEDIA.get(`app/${INDEX}`);
+  const id = live?.customMetadata?.previous;
+  const key = id === undefined ? (live && new TextDecoder().decode(await live.arrayBuffer()) === LEGACY_PUBLISHED_PAGE ? LEGACY_KEPT_KEY : null) : KEPT_ID.test(id) ? keptKey(id) : null;
+  const previous = key && (await env.MEDIA.get(key));
+  if (!live || !key || !previous) throw new InputError("No earlier page is kept: no publish made the live page, or it was rolled back already.");
   const page = await previous.arrayBuffer();
   const assets = [...new TextDecoder().decode(page).matchAll(/(?:src|href)="\/(assets\/[A-Za-z0-9._-]+)"/g)].map((m) => m[1]!);
   const gone = (await Promise.all(assets.map(async (path) => ((await env.MEDIA.head(`app/${path}`)) ? null : path)))).filter((path) => path !== null);
   if (gone.length) throw new InputError(`The earlier page names files that are not in R2: ${gone.join(", ")}. Nothing was changed.`);
   // The link of the publish that is rolled back must not put that build live again.
   await env.MEDIA.delete(LINK_KEY);
-  await env.MEDIA.put(`app/${INDEX}`, page, { httpMetadata: { contentType: typeOf(INDEX) } });
+  // One step back only: the page that goes live again has no way back. A publish that went live in between keeps its page.
+  if (!(await env.MEDIA.put(`app/${INDEX}`, page, { httpMetadata: { contentType: typeOf(INDEX) }, customMetadata: NO_WAY_BACK, onlyIf: unchanged(live) }))) throw new InputError(`${PAGE_CHANGED} Call app_publish again.`);
+  // The kept page is used, and only the page that this request replaced named it. The kept page of the first version is old.
+  await env.MEDIA.delete([key, LEGACY_KEPT_KEY]);
   log("rollback", { assets });
   return {
     rolledBack: true,
@@ -91,10 +133,38 @@ async function rollback(env: Env) {
 
 const refuse = (status: number, error: string) => Response.json({ error }, { status });
 
+/** Put the page of the build live, and keep the page that it replaces for app_publish rollback (R2 keeps no old versions). */
+async function putPage(env: Env, body: ArrayBuffer, digest: ArrayBuffer): Promise<Response | undefined> {
+  const live = await env.MEDIA.get(`app/${INDEX}`);
+  const previous = await live?.arrayBuffer();
+  const same = previous !== undefined && sri(await sha256(previous)) === APP_MANIFEST[INDEX];
+  // The page is live already, saved with its SHA-256: nothing to write, and its way back stays.
+  if (live && same && live.checksums.sha256) return;
+  let id: string | undefined;
+  if (previous && !same) {
+    id = crypto.randomUUID();
+    await env.MEDIA.put(keptKey(id), previous);
+  }
+  // The same page again keeps what the live page says of its way back (a page with no saved SHA-256 names no kept page).
+  const customMetadata = id ? { previous: id } : live?.customMetadata;
+  const saved = await env.MEDIA.put(`app/${INDEX}`, body, { httpMetadata: { contentType: typeOf(INDEX) }, sha256: digest, customMetadata, onlyIf: live ? unchanged(live) : undefined });
+  if (!saved) {
+    // No page names the page that this request kept.
+    if (id) await env.MEDIA.delete(keptKey(id));
+    return refuse(409, `${PAGE_CHANGED} Send index.html again.`);
+  }
+  // The new page is live: the way back of the page that it replaced is old.
+  const old = live?.customMetadata?.previous;
+  if (id) await env.MEDIA.delete([...(old && KEPT_ID.test(old) ? [keptKey(old)] : []), LEGACY_KEPT_KEY]);
+}
+
 /** PUT /up/app/<token>/<path>: save one file of the build this Worker runs. */
 export async function handleAppPublish(request: Request, env: Env, token: string, path: string): Promise<Response> {
   if (request.method !== "PUT") return new Response("Method not allowed", { status: 405, headers: { allow: "PUT" } });
   if (!Object.hasOwn(APP_MANIFEST, path)) return refuse(404, `${path} is not a file of the build this Worker runs. Pull main, or wait for the deploy, and build again.`);
+  // The route is public: limit each address before the first read of R2 (docs/security-checklist.md).
+  if (!(await env.PUBLISH_LIMIT.limit({ key: request.headers.get("cf-connecting-ip") ?? "unknown" })).success)
+    return Response.json({ error: "Too many requests. Try again in a minute." }, { status: 429, headers: { "retry-after": "60" } });
   const link = await (await env.MEDIA.get(LINK_KEY))?.json<{ hash: string; expiresAt: number; build: string }>();
   // Only hashes are compared, so the timing shows nothing about the link.
   if (!link || link.expiresAt <= Date.now() || link.build !== APP_MANIFEST[INDEX] || link.hash !== (await tokenHash(token))) return refuse(404, "This publish link is not valid or has expired. Ask app_publish for a new one.");
@@ -113,11 +183,11 @@ export async function handleAppPublish(request: Request, env: Env, token: string
   if (path === INDEX) {
     const missing = (await Promise.all(buildFiles().map(async (p) => (p === INDEX || (await isLive(env, p)) ? null : p)))).filter((p) => p !== null);
     if (missing.length) return refuse(409, `Upload these files first, then index.html: ${missing.join(", ")}.`);
-    // R2 keeps no old versions: keep the page that this one replaces, for app_publish rollback.
-    const previous = await (await env.MEDIA.get(`app/${INDEX}`))?.arrayBuffer();
-    if (previous && sri(await sha256(previous)) !== APP_MANIFEST[INDEX]) await env.MEDIA.put(PREVIOUS_KEY, previous);
+    const failed = await putPage(env, body, digest);
+    if (failed) return failed;
+  } else {
+    await env.MEDIA.put(`app/${path}`, body, { httpMetadata: { contentType: typeOf(path) }, sha256: digest });
   }
-  await env.MEDIA.put(`app/${path}`, body, { httpMetadata: { contentType: typeOf(path) }, sha256: digest });
   log("file", { path, bytes: body.byteLength });
   return Response.json({ key: `app/${path}`, bytes: body.byteLength, sha256: APP_MANIFEST[path], live: path === INDEX });
 }
