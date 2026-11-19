@@ -29,19 +29,22 @@ function setup(live: Record<string, string> = { "app/index.html": OLD_PAGE, "app
     body: f.bytes,
     httpMetadata: { contentType: f.type },
   });
+  const state = { reads: 0, failPut: "", limited: false, limitKeys: [] as string[] };
   const MEDIA = {
-    head: async (k: string) => (files.has(k) ? view(files.get(k)!) : null),
-    get: async (k: string) => (files.has(k) ? view(files.get(k)!) : null),
+    head: async (k: string) => (state.reads++, files.has(k) ? view(files.get(k)!) : null),
+    get: async (k: string) => (state.reads++, files.has(k) ? view(files.get(k)!) : null),
     delete: async (k: string) => void files.delete(k),
     put: async (k: string, v: ArrayBuffer | string, o?: { sha256?: ArrayBuffer; httpMetadata?: { contentType?: string } }) => {
+      if (k === state.failPut) throw new Error("R2: the write failed");
       const bytes = typeof v === "string" ? enc(v) : new Uint8Array(v);
       if (o?.sha256 && !createHash("sha256").update(bytes).digest().equals(Buffer.from(o.sha256))) throw new Error("R2: the body does not have the given SHA-256");
       files.set(k, { bytes, sha256: o?.sha256, type: o?.httpMetadata?.contentType });
     },
   };
-  const env = { MEDIA, PUBLIC_BASE_URL: "https://w.example/" } as unknown as Env;
+  const PUBLISH_LIMIT = { limit: async ({ key }: { key: string }) => (state.limitKeys.push(key), { success: !state.limited }) };
+  const env = { MEDIA, PUBLISH_LIMIT, PUBLIC_BASE_URL: "https://w.example/" } as unknown as Env;
   const text = (key: string) => new TextDecoder().decode(files.get(key)!.bytes);
-  return { env, files, text };
+  return { env, files, text, state };
 }
 
 type Answer = { live: boolean; files: { path: string; sha256: string; live: boolean }[]; curl?: string[]; expiresInSeconds?: number };
@@ -189,6 +192,50 @@ describe("app_publish", () => {
     files.delete("app/assets/index-OLD.js");
     await expect(publish(env, { rollback: true })).rejects.toThrow("assets/index-OLD.js");
     expect(text("app/index.html")).toBe(PAGE);
+  });
+
+  it("limits the upload route by the caller's address, before it reads R2", async () => {
+    const { env, state } = setup();
+    const link = linkOf(await publish(env));
+    const js = "assets/index-TEST.js";
+    // A name that is not in the build costs nothing: no limiter call and no read.
+    state.reads = 0;
+    expect((await put(env, `${link}/assets/evil.js`, "x")).status).toBe(404);
+    expect([state.reads, state.limitKeys]).toEqual([0, []]);
+    // Over the limit: 429, and R2 is not read, also for a wrong link.
+    state.limited = true;
+    const refused = await put(env, `https://w.example/up/app/${"0".repeat(48)}/${js}`, BUILD[js]!, { "cf-connecting-ip": "203.0.113.7" });
+    expect(refused.status).toBe(429);
+    expect(refused.headers.get("retry-after")).toBe("60");
+    expect((await put(env, `${link}/${js}`, BUILD[js]!, { "cf-connecting-ip": "203.0.113.7" })).status).toBe(429);
+    expect(state.reads).toBe(0);
+    expect(state.limitKeys).toEqual(["203.0.113.7", "203.0.113.7"]);
+    // Under the limit again, the same upload passes.
+    state.limited = false;
+    expect((await put(env, `${link}/${js}`, BUILD[js]!, { "cf-connecting-ip": "203.0.113.7" })).status).toBe(200);
+  });
+
+  it("a failed write of the new page keeps the way back right", async () => {
+    const { env, files, text, state } = setup();
+    const link = linkOf(await publish(env));
+    for (const path of ["assets/index-TEST.css", "assets/index-TEST.js"]) await put(env, `${link}/${path}`, BUILD[path]!);
+    // The kept page of another build (an earlier publish) is in R2.
+    const other = "app-publish/previous/" + "ab".repeat(32) + ".html";
+    files.set(other, { bytes: new TextEncoder().encode("the page before an earlier build") });
+    state.failPut = "app/index.html";
+    await expect(put(env, `${link}/index.html`, PAGE)).rejects.toThrow("R2: the write failed");
+    state.failPut = "";
+    // The live page did not change, so there is no publish to roll back: the tool must not say that it rolled back.
+    expect(text("app/index.html")).toBe(OLD_PAGE);
+    await expect(publish(env, { rollback: true })).rejects.toThrow("not the live page");
+    expect(text(other)).toBe("the page before an earlier build");
+    // The same upload again works, and then the rollback restores the page it replaced.
+    expect((await put(env, `${link}/index.html`, PAGE)).status).toBe(200);
+    expect(await run(env, "app_publish", { rollback: true })).toMatchObject({ rolledBack: true });
+    expect(text("app/index.html")).toBe(OLD_PAGE);
+    // One step only: the build is no longer the live page, so a second rollback is refused.
+    await expect(publish(env, { rollback: true })).rejects.toThrow("not the live page");
+    expect(text(other)).toBe("the page before an earlier build");
   });
 
   it("answers through /mcp, and the schema refuses other fields", async () => {
