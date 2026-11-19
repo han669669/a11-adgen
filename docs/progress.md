@@ -1,6 +1,6 @@
 # Project progress and direction
 
-This is the shared handoff for `a11-adgen`. It records what changed, what is still open and what to do next. The old `ai-ad-generator` is a reference only. Use the [v1 lessons](v1-lessons.md) to inform work in this repo, not as a separate workstream.
+This is the shared handoff for Claude Code and Devin on `a11-adgen`. It records what changed, what is still open and what to do next. The old `ai-ad-generator` is a reference only. Use the [v1 lessons](v1-lessons.md) to inform work in this repo, not as a separate workstream.
 
 Use the [blueprint](blueprint.md) for the system design, the [decisions log](decisions.md) for owner decisions and the [backlog](backlog.md) for work that is parked or declined.
 
@@ -18,7 +18,8 @@ Keep Engine 3 opt-in: start it only when the owner asks for it, as recorded in t
 
 ## Keep this handoff current
 
-1. At each milestone or handoff, update the relevant row or add one for new work, and set the review date. Record the status (planned, in progress, blocked, merged or verified live), a public evidence link and the next action. For a blocker, name what must change and who can resolve it. Fold resolved issues into the current status; use linked PRs and decisions for the history.
-2. Put the update in the same PR as the change. For a milestone without a code change, use a docs-only PR. State what was checked and what was not verified. Use automated checks first; use manual review where needed, such as for ad quality or owner taste.
-3. Send each milestone, resolved issue, blocker and next action to the Coordinator (Ava). For each decision only the owner can make, give the Coordinator the recommendation and the exact action needed. Continue work that does not depend on the answer. The Coordinator keeps the threads aligned and brings decisions to the owner in the main chat, then relays the answers.
-4. Keep private details in the Coordinator chat, not in this public repo. Do not add credentials, private links, client data or open security findings.
+1. Before starting, check this page and the open PRs. If another agent owns the work, coordinate with that agent instead of opening a second PR for the same change. Work on a separate branch for each change.
+2. At each milestone or handoff, update your work's row or add one, and set the review date. Keep other agents' updates. Record the status (planned, in progress, blocked, merged or verified live), a public evidence link and the next action. For a blocker, name what must change and who can resolve it. Fold resolved issues into the current status; use linked PRs and decisions for the history.
+3. Put the update in the same PR as the change. For a milestone without a code change, use a docs-only PR. State what was checked and what was not verified. Use automated checks first; use manual review where needed, such as for ad quality or owner taste.
+4. Send the Coordinator (Ava) what changed, what was resolved, what is blocked and what to do next. For a decision only the owner can make, include your recommendation and the exact action needed. If you cannot message Ava directly, summarise the public part in the PR and return the link in your normal handoff for relay to Ava. If there is no PR, return a short handoff through the person or session that assigned the work. Ava brings decisions to the owner in the main chat and relays answers. Continue work that does not depend on the answer.
+5. Share private details only in a private handoff for Ava. Do not add credentials, private links, client data or open security findings to the repo or PRs.
