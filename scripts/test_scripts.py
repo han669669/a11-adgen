@@ -798,6 +798,23 @@ class CapCheck(Tmp):
         self.assertEqual(code, 1, log)
         self.assertIn("right of the body centre", log)
 
+    def test_a_wide_contact_shadow_is_not_the_body(self):
+        # Devin Review, PR 141: a shadow wider than the bottle at its base was taken as the body.
+        img = np.asarray(Image.open(self.bottle(0))).astype(float)
+        img[650:670, 83:380] = (60, 70, 120)  # a contact shadow to the right, 20 rows
+        code, log = self.check("--render", self.save("s.png", img), "--box", "40,60,395,690")
+        self.assertEqual(code, 0, log)
+
+    def test_a_centred_neck_does_not_hide_a_shifted_cap(self):
+        # Devin Review, PR 141: a long centred neck and a short shifted cap of the same width gave one median.
+        img = np.full((700, 400, 3), (160, 175, 244), dtype=float)
+        img[100:120, 136:276] = (20, 30, 120)  # the cap, 140 px, 6 px right of the body centre
+        img[120:160, 130:270] = (20, 30, 120)  # the neck, 140 px, centred
+        img[160:650, 100:300] = (25, 35, 130)  # the body, 200 px
+        code, log = self.check("--render", self.save("n.png", img), "--box", "40,60,360,680")
+        self.assertEqual(code, 1, log)
+        self.assertIn("6.0 px right", log)
+
     def test_a_box_without_a_cap_is_refused(self):
         self.assertIn("no cap found", exit_message(self.check, "--render", self.bottle(0), "--box", "40,340,360,680"))
 

@@ -9,9 +9,10 @@ again.
 The script reads each row of a box round the bottle. The bottle must stand on a plain stage that is lighter than the
 bottle on both sides of the box. In each row it finds the left and the right edge of the bottle from the outside in:
 the first pixel darker than the middle between the stage and the bottle, so print, glare and highlights inside the
-bottle do not count. Rows at least 90% as wide as the widest row are the body; rows from 50% to 85% of it are the cap
-(a clip or a shadow line is narrower and does not count). It prints the cap centre against the body centre and fails
-when the difference is over --tolerance of the body width (default 1%). A prop that touches the bottle inside the box
+bottle do not count. The most common row width is the body, so a wider contact shadow is not. Rows from 50% to 90%
+of the body width are cut into parts (a cap, a neck) wherever the width or the centre jumps; parts shorter than 8 rows
+(a clip, a shadow line) do not count. It prints the worst part's centre against the body centre and fails when the
+difference is over --tolerance of the body width (default 1%). A prop that touches the bottle inside the box
 moves an edge: make the box miss it, or judge by eye.
 
   python3 scripts/cap_check.py --render <picture> --box X0,Y0,X1,Y1 [--tolerance 0.01]
@@ -38,17 +39,42 @@ def edges(lum):
 
 
 def offset(left, right):
-    """The cap centre minus the body centre, in pixels, and the body width; None without a narrower top part."""
+    """The worst narrower part (a cap, a lid, a neck) against the body centre: (offset in px, body width, first row,
+    last row), or None without a narrower part.
+
+    The body is the most common row width, so a wider contact shadow at the base is not taken as the body. The narrow
+    rows (50% to 90% of the body width) are cut into parts wherever the width or the centre jumps, so a centred neck
+    and an off-centre cap above it are judged one by one: a long centred neck cannot hide a short shifted cap."""
     width = np.where(left >= 0, right - left + 1, 0)
-    wmax = width.max()
-    if wmax == 0:
+    if width.max() == 0:
         sys.exit("no bottle found in the box: the stage must be lighter than the bottle on both sides")
+    counts = np.bincount(width[width > 0])
+    counts[0] = 0
+    smooth = np.convolve(counts, np.ones(5), "same")
+    bw = int(np.argmax(smooth))
     centre = (left + right) / 2
-    body = width >= 0.9 * wmax
-    cap = (width >= 0.5 * wmax) & (width < 0.85 * wmax)
-    if cap.sum() < 10 or body.sum() < 10:
+    body = np.abs(width - bw) <= 0.03 * bw
+    if body.sum() < 10:
         return None
-    return float(np.median(centre[cap]) - np.median(centre[body])), float(np.median(width[body]))
+    body_c = float(np.median(centre[body]))
+    narrow = (width >= 0.5 * bw) & (width <= 0.9 * bw)
+    parts, start = [], None
+    for y in range(len(width) + 1):
+        cut = y == len(width) or not narrow[y] or (start is not None and (
+            abs(width[y] - width[y - 1]) > 0.03 * bw or abs(centre[y] - centre[y - 1]) > 2.5))
+        if cut and start is not None:
+            parts.append((start, y - 1))
+            start = None
+        if y < len(width) and narrow[y] and start is None:
+            start = y
+    worst = None
+    for a, b in parts:
+        if b - a + 1 < 8:
+            continue  # a clip, an edge or a shadow line
+        off = float(np.median(centre[a:b + 1])) - body_c
+        if worst is None or abs(off) > abs(worst[0]):
+            worst = (off, float(bw), a, b)
+    return worst
 
 
 def main(argv=None):
@@ -70,11 +96,11 @@ def main(argv=None):
     lum = np.asarray(im.crop((x0, y0, x1, y1))).astype(np.float32)
     r = offset(*edges(lum))
     if r is None:
-        sys.exit("no cap found: the box needs the cap and the body (a cap 50% to 85% of the body width)")
-    off, bw = r
+        sys.exit("no cap found: the box needs the cap and the body (a cap 50% to 90% of the body width)")
+    off, bw, r0, r1 = r
     ok = abs(off) <= a.tolerance * bw
     side = "right" if off > 0 else "left"
-    print(f"cap centre {abs(off):.1f} px {side} of the body centre ({abs(off) / bw:.1%} of the {bw:.0f} px body); {'PASS' if ok else 'FAIL'} at {a.tolerance:.0%}")
+    print(f"cap centre {abs(off):.1f} px {side} of the body centre ({abs(off) / bw:.1%} of the {bw:.0f} px body; the part in rows {y0 + r0} to {y0 + r1}); {'PASS' if ok else 'FAIL'} at {a.tolerance:.0%}")
     return 0 if ok else 1
 
 
