@@ -9,9 +9,10 @@ again.
 The script reads each row of a box round the bottle. The bottle must stand on a plain stage that is lighter than the
 bottle on both sides of the box. In each row it finds the left and the right edge of the bottle from the outside in:
 the first pixel darker than the middle between the stage and the bottle, so print, glare and highlights inside the
-bottle do not count. You give the first row of the body (--split, read off the picture): no rule guesses where a cap
-ends, because a tall cap, a taper or a smooth shoulder fools every guess. The body is the rows from --split to the
-bottom of the box; its width and its centre are the medians of those rows, so a taper or a rounded base does not move
+bottle do not count. You give the first row below the cap and the neck (--split, read off the picture): no rule
+guesses where a cap ends, because a tall cap, a taper or a smooth shoulder fools every guess. A shoulder belongs to
+the body, so --split is the top of the shoulder, not its foot. The body is the rows from --split to the bottom of the
+box; its width and its centre are the medians of those rows, so a taper, a shoulder or a rounded base does not move
 them. End the box at the base of the bottle, above any contact shadow. The rows above --split are cut into parts
 wherever the width jumps by more than 3% or the centre by more than 2.5 px (a cap, a neck, a collar), and each part of
 8 rows or more is judged on its own, so a long centred neck cannot hide a short shifted cap. It prints the worst part's
@@ -83,7 +84,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--render", required=True)
     ap.add_argument("--box", required=True, help="X0,Y0,X1,Y1 in pixels: the bottle with some plain stage on both sides")
-    ap.add_argument("--split", required=True, type=int, help="Y in pixels: the first row of the body, below the cap and the neck")
+    ap.add_argument("--split", required=True, type=int, help="Y in pixels: the first row below the cap and the neck (the top of any shoulder)")
     ap.add_argument("--tolerance", type=float, default=0.01, help="the share of the body width the cap may sit off centre")
     a = ap.parse_args(argv)
     try:

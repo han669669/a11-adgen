@@ -822,7 +822,8 @@ class CapCheck(Tmp):
 
     def test_the_body_is_below_split_whatever_its_shape(self):
         # Devin Review, PR 141: guessed bodies failed on a tapered body, a tall cap, a tall cap with a collar, a
-        # smooth shoulder and a short taper. The body is now the rows below --split, so each shape is measured.
+        # smooth shoulder, a short taper and a short cap over a long shoulder. The body is now the rows below --split,
+        # so each shape is measured.
         def taper(img, y0, y1, w0, w1, c=200):
             for i, y in enumerate(range(y0, y1)):
                 w = w0 + 2 * round((w1 - w0) / 2 * i / (y1 - y0 - 1))
@@ -853,9 +854,17 @@ class CapCheck(Tmp):
                 w, c = 142 + 2 * i, 200 + s * (29 - i) / 30
                 img[y, round(c - w / 2):round(c - w / 2) + w] = (20, 30, 120)
             img[110:350, 100:300] = (25, 35, 130)  # the body, 200 px
-            return 110, 350
+            return 80, 350  # --split at the top of the shoulder: the shoulder belongs to the body
 
-        for shape in (tall_cap, tapered_body, short_taper, shoulder):
+        def short_cap_long_shoulder(img, s):
+            img[20:40, 130 + s:270 + s] = (20, 30, 120)  # the cap, 20 rows, 140 px
+            for i, y in enumerate(range(40, 100)):  # the shoulder, 60 rows, from 141 px to 200 px, back to the centre
+                w, c = 141 + i, 200 + s * (59 - i) / 60
+                img[y, round(c - w / 2):round(c - w / 2) + w] = (25, 35, 130)
+            img[100:400, 100:300] = (25, 35, 130)  # the body, 200 px
+            return 40, 400
+
+        for shape in (tall_cap, tapered_body, short_taper, shoulder, short_cap_long_shoulder):
             for s, want in ((0, 0), (6, 1)):
                 img = np.full((560, 400, 3), self.STAGE, dtype=float)
                 split, bottom = shape(img, s)
