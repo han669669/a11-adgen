@@ -63,13 +63,21 @@ export const DIRECTION_SCHEMA: ObjectSchema = {
           plan: {
             ...line(20000),
             description:
-              "The layout plan JSON as scripts/product_lock.py layout reads it (the text of the plan file): reprint needs the same plan. Give a plan, fromRough, or both.",
+              "The layout plan JSON as scripts/product_lock.py layout reads it (the text of the plan file): reprint needs the same plan. Give a plan, fromRough or productRef.",
           },
           fromRough: {
             type: "string",
             pattern: ID,
             description:
-              "The render id of this idea's rough that the draft edits (owner, 19-11-2026: drafts start from the rough he picked; the id is in the rough's key, renders/<id>/1.jpg). Give a plan, fromRough, or both.",
+              "The render id of this idea's rough that the draft edits (owner, 19-11-2026: drafts start from the rough he picked; the id is in the rough's key, renders/<id>/1.jpg). Give a plan, fromRough or productRef.",
+          },
+          productRef: {
+            type: "string",
+            format: "uri",
+            pattern: "^https://",
+            maxLength: 500,
+            description:
+              "The https URL of the brand's real product photo that the draft takes as a reference only, with no skeleton, swap or reprint: a glossy or rounded product photographed in the scene light (owner, 20-11-2026; creative-playbook §7.11). Give a plan, fromRough or productRef.",
           },
           prompt: { ...line(6000), description: "The draft prompt before the server adds its suffix." },
           renderId: { type: "string", pattern: ID, description: "A later version, after render_submit: the draft render made from this plan and prompt." },
@@ -85,7 +93,7 @@ export const DIRECTION_SCHEMA: ObjectSchema = {
   additionalProperties: false,
 };
 
-type Draft = { n: number; question: string; axes: Record<string, string>; plan?: string; fromRough?: string; prompt: string; renderId?: string };
+type Draft = { n: number; question: string; axes: Record<string, string>; plan?: string; fromRough?: string; productRef?: string; prompt: string; renderId?: string };
 export type Direction = {
   why: string;
   mechanism: { type: string; productionRisk: string; riskReason?: string };
@@ -169,8 +177,10 @@ export async function directionSave(env: Env, batchId: string, ideaId: string, d
     if (bad.length) throw new InputError(`Not a draft render of idea ${idea.n}: ${bad.join(", ")}.`);
   }
   for (const d of direction.drafts)
-    if (!d.plan && !d.fromRough)
-      throw new InputError(`drafts n ${d.n}: give a layout plan or fromRough (the rough of this idea that the draft edits).`);
+    if (!d.plan && !d.fromRough && !d.productRef)
+      throw new InputError(
+        `drafts n ${d.n}: give a layout plan, fromRough (the rough of this idea that the draft edits) or productRef (the brand's product photo, a reference only, for a glossy product: creative-playbook §7.11).`,
+      );
   const roughIds = [...new Set(direction.drafts.flatMap((d) => (d.fromRough ? [d.fromRough] : [])))];
   if (roughIds.length) {
     const found = await env.DB.prepare(

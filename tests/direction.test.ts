@@ -48,7 +48,7 @@ describe("direction_save", () => {
     const { question: _q, ...noQuestion } = draft(2);
     expect(() => validate(schema, args(direction({ drafts: [draft(1), noQuestion, draft(3)] })))).toThrow("question is required");
     const { plan: _p, ...noPlan } = draft(3);
-    await expect(save(env, ideas[0]!.id, direction({ drafts: [draft(1), draft(2), noPlan] }))).rejects.toThrow("give a layout plan or fromRough");
+    await expect(save(env, ideas[0]!.id, direction({ drafts: [draft(1), draft(2), noPlan] }))).rejects.toThrow("give a layout plan, fromRough");
     expect(() => validate(schema, args(direction({ drafts: [draft(1), draft(2), draft(3, { question: "   " })] })))).toThrow("wrong format");
     await expect(save(env, ideas[0]!.id, direction({ drafts: [draft(1), draft(2), draft(2)] }))).rejects.toThrow("n 1, 2 and 3, once each");
     await expect(save(env, ideas[0]!.id, direction({ drafts: [draft(1), draft(2), draft(3, { plan: "products: []" })] }))).rejects.toThrow("plan is not JSON");
@@ -162,6 +162,23 @@ describe("direction_save", () => {
     const b = await run(env, "batch_get", { id: E3, withPlans: true });
     const d = ideaOf(b, ideas[0]!).direction.drafts;
     expect(d.map((x: { fromRough?: string; plan?: string }) => [x.fromRough, x.plan])).toEqual([[R, undefined], [R, undefined], [R, undefined]]);
+  });
+
+  it("a draft may take the brand's product photo as a reference only (productRef), for a glossy product (Allies engine 3 test, 20-11-2026)", async () => {
+    const { env, ideas } = await approved();
+    const schema = TOOLS.find((t) => t.name === "direction_save")!.inputSchema;
+    const REF = "https://a11adgen.gamingcomputing.workers.dev/m/brands/e22dfef5-bc42-4ed8-ab75-8e5643e3e2ab/ref2.jpg";
+    const fromRef = (n: number, ref = REF) => {
+      const { plan: _p, ...d } = draft(n);
+      return { ...d, productRef: ref };
+    };
+    expect(() => validate(schema, { batchId: E3, ideaId: ideas[0]!.id, direction: direction({ drafts: [fromRef(1, "http://example.com/a.jpg"), draft(2), draft(3)] }) })).toThrow("wrong format");
+    const all = direction({ drafts: [fromRef(1), fromRef(2), fromRef(3)] });
+    expect(() => validate(schema, { batchId: E3, ideaId: ideas[0]!.id, direction: all })).not.toThrow();
+    expect(await save(env, ideas[0]!.id, all)).toMatchObject({ version: 1 });
+    const b = await run(env, "batch_get", { id: E3, withPlans: true });
+    const d = ideaOf(b, ideas[0]!).direction.drafts;
+    expect(d.map((x: { productRef?: string; plan?: string }) => [x.productRef, x.plan])).toEqual([[REF, undefined], [REF, undefined], [REF, undefined]]);
   });
 
   it("a new concept review after the direction makes it stale: current false and nextStep direction again", async () => {
