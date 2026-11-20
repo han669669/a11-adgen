@@ -32,6 +32,7 @@ food_grade = load("food_grade")
 headline = load("headline")
 photo_finish = load("photo_finish")
 pack_check = load("pack_check")
+cap_check = load("cap_check")
 
 
 def exit_message(fn, *args):
@@ -768,6 +769,125 @@ class PackCheck(Tmp):
         self.assertIn("cut-out packshot", exit_message(pack_check.main, ["--render", r, "--at", "150,200", "--bg", "FFD419", "--packshot", flat]))
         self.assertIn("RRGGBB", exit_message(pack_check.main, ["--render", r, "--at", "150,200", "--bg", "yellow", "--packshot", flat]))
 
+
+
+class CapCheck(Tmp):
+    """Owner, 20-11-2026 (Allies): the high-quality final put the cap 5.5 px right of the body centre (body 234 px,
+    cap 183 px, at 1536 px wide); the draft had it centred."""
+
+    STAGE = (160, 175, 244)  # a periwinkle stage, lighter than the bottle
+
+    def bottle(self, shift):
+        img = np.full((700, 400, 3), self.STAGE, dtype=float)
+        img[100:330, 108 + shift:292 + shift] = (20, 30, 120)  # the cap, 184 px wide
+        img[330:650, 83:317] = (25, 35, 130)  # the body, 234 px wide
+        img[380:640, 100:118] = (120, 140, 230)  # a soft highlight inside the left edge
+        img[400:560, 110:300:12] = 250  # white print: thin lines that reach near both edges
+        return self.save("b.png", img)
+
+    def check(self, *args):
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            code = cap_check.main(list(args))
+        return code, log.getvalue()
+
+    def test_a_centred_cap_passes_with_print_and_highlights_inside(self):
+        code, log = self.check("--render", self.bottle(0), "--box", "40,60,360,650", "--split", "330")
+        self.assertEqual(code, 0, log)
+        self.assertIn("0.0 px", log)
+
+    def test_the_allies_offset_fails(self):
+        code, log = self.check("--render", self.bottle(6), "--box", "40,60,360,650", "--split", "330")
+        self.assertEqual(code, 1, log)
+        self.assertIn("right of the body centre", log)
+
+    def test_a_centred_neck_does_not_hide_a_shifted_cap(self):
+        # Devin Review, PR 141: a long centred neck and a short shifted cap of the same width gave one median.
+        img = np.full((700, 400, 3), self.STAGE, dtype=float)
+        img[100:120, 136:276] = (20, 30, 120)  # the cap, 140 px, 6 px right of the body centre
+        img[120:160, 130:270] = (20, 30, 120)  # the neck, 140 px, centred
+        img[160:650, 100:300] = (25, 35, 130)  # the body, 200 px
+        code, log = self.check("--render", self.save("n.png", img), "--box", "40,60,360,650", "--split", "160")
+        self.assertEqual(code, 1, log)
+        self.assertIn("6.0 px right", log)
+
+    def test_a_small_width_step_still_parts_the_cap_from_the_neck(self):
+        # Devin Review, PR 141: a 4 px step from a 130 px cap to a centred neck must still cut the two apart.
+        img = np.full((460, 400, 3), self.STAGE, dtype=float)
+        img[20:40, 137:267] = (20, 30, 120)  # the cap, 130 px, 2 px right of the body centre
+        img[40:120, 137:263] = (20, 30, 120)  # the neck, 126 px, centred
+        img[120:420, 110:290] = (25, 35, 130)  # the body, 180 px
+        code, log = self.check("--render", self.save("ws.png", img), "--box", "40,0,360,420", "--split", "120")
+        self.assertEqual(code, 1, log)
+        self.assertIn("2.0 px right", log)
+
+    def test_the_body_is_below_split_whatever_its_shape(self):
+        # Devin Review, PR 141: guessed bodies failed on a tapered body, a tall cap, a tall cap with a collar, a
+        # smooth shoulder, a short taper and a short cap over a long shoulder. The body is now the rows below --split,
+        # so each shape is measured.
+        def taper(img, y0, y1, w0, w1, c=200):
+            for i, y in enumerate(range(y0, y1)):
+                w = w0 + 2 * round((w1 - w0) / 2 * i / (y1 - y0 - 1))
+                img[y, c - w // 2:c + w // 2] = (25, 35, 130)
+
+        def tall_cap(img, s):
+            img[20:60, 135 + s:265 + s] = (20, 30, 120)  # a collar, 130 px
+            img[60:310, 120 + s:280 + s] = (20, 30, 120)  # the cap, 250 rows, 160 px
+            img[310:340, 150 + s:250 + s] = (20, 30, 120)  # the neck, 100 px
+            img[340:520, 100:300] = (25, 35, 130)  # the body, 180 rows, 200 px
+            return 340, 520
+
+        def tapered_body(img, s):
+            img[20:120, 130 + s:270 + s] = (20, 30, 120)  # the cap, 140 px
+            img[120:150, 150 + s:250 + s] = (20, 30, 120)  # the neck, 100 px
+            taper(img, 150, 360, 180, 220)  # the body, from 180 px to 220 px
+            return 150, 360
+
+        def short_taper(img, s):
+            img[20:40, 145 + s:255 + s] = (20, 30, 120)  # the cap, 110 px
+            img[40:50, 155:245] = (20, 30, 120)  # the neck, 90 px
+            taper(img, 50, 130, 100, 200)  # the body, 80 rows, from 100 px to 200 px
+            return 50, 130
+
+        def shoulder(img, s):
+            img[20:80, 130 + s:270 + s] = (20, 30, 120)  # the top, 140 px
+            for i, y in enumerate(range(80, 110)):  # the shoulder, 2 px wider each row, back to the body centre
+                w, c = 142 + 2 * i, 200 + s * (29 - i) / 30
+                img[y, round(c - w / 2):round(c - w / 2) + w] = (20, 30, 120)
+            img[110:350, 100:300] = (25, 35, 130)  # the body, 200 px
+            return 80, 350  # --split at the top of the shoulder: the shoulder belongs to the body
+
+        def short_cap_long_shoulder(img, s):
+            img[20:40, 130 + s:270 + s] = (20, 30, 120)  # the cap, 20 rows, 140 px
+            for i, y in enumerate(range(40, 100)):  # the shoulder, 60 rows, from 141 px to 200 px, back to the centre
+                w, c = 141 + i, 200 + s * (59 - i) / 60
+                img[y, round(c - w / 2):round(c - w / 2) + w] = (25, 35, 130)
+            img[100:400, 100:300] = (25, 35, 130)  # the body, 200 px
+            return 40, 400
+
+        for shape in (tall_cap, tapered_body, short_taper, shoulder, short_cap_long_shoulder):
+            for s, want in ((0, 0), (6, 1)):
+                img = np.full((560, 400, 3), self.STAGE, dtype=float)
+                split, bottom = shape(img, s)
+                path = self.save(f"{shape.__name__}{s}.png", img)
+                code, log = self.check("--render", path, "--box", f"40,0,360,{bottom}", "--split", str(split))
+                self.assertEqual(code, want, f"{shape.__name__} {s}: {log}")
+                if s:
+                    self.assertIn("6.0 px right", log, shape.__name__)
+
+    def test_an_offset_of_exactly_1_percent_passes(self):
+        # Devin Review, PR 141: a smoothed width count read a 200 px body as 198 px, so a 2 px offset failed.
+        img = np.full((460, 400, 3), self.STAGE, dtype=float)
+        img[40:80, 132:272] = (20, 30, 120)  # the cap, 140 px, 2 px right of the body centre
+        img[80:380, 100:300] = (25, 35, 130)  # the body, 200 px
+        code, log = self.check("--render", self.save("e.png", img), "--box", "40,20,360,380", "--split", "80")
+        self.assertEqual(code, 0, log)
+        self.assertIn("2.0 px right of the body centre (1.0% of the 200 px body", log)
+
+    def test_a_box_without_a_cap_or_a_split_outside_it_is_refused(self):
+        self.assertIn("no cap found", exit_message(
+            self.check, "--render", self.bottle(0), "--box", "40,340,360,650", "--split", "345"))
+        self.assertIn("not inside the box", exit_message(
+            self.check, "--render", self.bottle(0), "--box", "40,60,360,650", "--split", "700"))
 
 if __name__ == "__main__":
     sys.exit(unittest.main())
