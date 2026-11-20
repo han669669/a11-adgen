@@ -46,8 +46,10 @@ def offset(left, right):
     The rows are cut into parts wherever the width or the centre jumps, so a tapered body stays one part, and a cap,
     a neck and a contact shadow each become parts of their own. The body is the widest part of at least a quarter of the
     rows of the longest part, so a short, wide contact shadow is not the body and a tall cap is not either. Its width
-    is the median of its row widths. Each narrower part (50% to 90% of the body width) above the body is judged on its
-    own, so a long centred neck cannot hide a short shifted cap."""
+    is the median of its row widths, and its centre is the median centre of its rows at that width. The rows above the
+    first full-width row and from 50% to 90% of the body width are then cut again at each jump, so a smooth shoulder
+    still leaves the cap as a part of its own, and each part is judged on its own: a long centred neck cannot hide a
+    short shifted cap."""
     width = np.where(left >= 0, right - left + 1, 0)
     if width.max() == 0:
         sys.exit("no bottle found in the box: the stage must be lighter than the bottle on both sides")
@@ -69,15 +71,25 @@ def offset(left, right):
         return None
     body = max(tall, key=lambda p: np.median(width[p[0]:p[1] + 1]))
     bw = float(np.median(width[body[0]:body[1] + 1]))
-    body_c = float(np.median(centre[body[0]:body[1] + 1]))
-    worst = None
-    for a, b in parts:
-        w = float(np.median(width[a:b + 1]))
-        if b - a + 1 < 8 or b >= body[0] or not 0.5 * bw <= w <= 0.9 * bw:
-            continue  # a clip, an edge, a shadow line, a part below the body, or not a narrower part
-        off = float(np.median(centre[a:b + 1])) - body_c
-        if worst is None or abs(off) > abs(worst[0]):
-            worst = (off, bw, a, b)
+    full = np.zeros(len(width), bool)
+    full[body[0]:body[1] + 1] = np.abs(width[body[0]:body[1] + 1] - bw) <= 0.03 * bw
+    if full.sum() < 10:
+        return None
+    body_c = float(np.median(centre[full]))
+    top = int(np.argmax(full))  # the first row at the full body width
+    narrow = (width >= 0.5 * bw) & (width <= 0.9 * bw) & (np.arange(len(width)) < top)
+    worst, start = None, None
+    for y in range(top + 1):
+        cut = y == top or not narrow[y] or (start is not None and (
+            abs(width[y] - width[y - 1]) > 0.03 * bw or abs(centre[y] - centre[y - 1]) > 2.5))
+        if cut and start is not None:
+            if y - start >= 8:  # shorter: a clip, an edge or a shadow line
+                off = float(np.median(centre[start:y])) - body_c
+                if worst is None or abs(off) > abs(worst[0]):
+                    worst = (off, bw, start, y - 1)
+            start = None
+        if y < top and narrow[y] and start is None:
+            start = y
     return worst
 
 

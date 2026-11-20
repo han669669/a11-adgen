@@ -839,6 +839,23 @@ class CapCheck(Tmp):
         self.assertEqual(code, 1, log)
         self.assertIn("6.0 px right", log)
 
+    def smooth_shoulder(self, shift):
+        img = np.full((460, 400, 3), (160, 175, 244), dtype=float)
+        img[20:80, 130 + shift:270 + shift] = (20, 30, 120)  # the top, 140 px
+        for i, y in enumerate(range(80, 110)):  # the shoulder, 2 px wider each row, back to the body centre
+            w, c = 142 + 2 * i, 200 + shift * (29 - i) / 30
+            img[y, round(c - w / 2):round(c - w / 2) + w] = (20, 30, 120)
+        img[110:350, 100:300] = (25, 35, 130)  # the body, 200 px
+        return self.save(f"sh{shift}.png", img)
+
+    def test_a_smooth_shoulder_still_leaves_the_cap(self):
+        # Devin Review, PR 141: a shoulder below both jump limits made the bottle one part, so no cap was found.
+        code, log = self.check("--render", self.smooth_shoulder(0), "--box", "40,0,360,400")
+        self.assertEqual(code, 0, log)
+        code, log = self.check("--render", self.smooth_shoulder(6), "--box", "40,0,360,400")
+        self.assertEqual(code, 1, log)
+        self.assertIn("6.0 px right", log)
+
     def test_an_offset_of_exactly_1_percent_passes(self):
         # Devin Review, PR 141: a smoothed width count read a 200 px body as 198 px, so a 2 px offset failed.
         img = np.full((460, 400, 3), (160, 175, 244), dtype=float)
