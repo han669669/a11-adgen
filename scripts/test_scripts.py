@@ -32,6 +32,7 @@ food_grade = load("food_grade")
 headline = load("headline")
 photo_finish = load("photo_finish")
 pack_check = load("pack_check")
+cap_check = load("cap_check")
 
 
 def exit_message(fn, *args):
@@ -768,6 +769,37 @@ class PackCheck(Tmp):
         self.assertIn("cut-out packshot", exit_message(pack_check.main, ["--render", r, "--at", "150,200", "--bg", "FFD419", "--packshot", flat]))
         self.assertIn("RRGGBB", exit_message(pack_check.main, ["--render", r, "--at", "150,200", "--bg", "yellow", "--packshot", flat]))
 
+
+
+class CapCheck(Tmp):
+    """Owner, 20-11-2026 (Allies): the high-quality final put the cap 5.5 px right of the body centre (body 234 px,
+    cap 183 px, at 1536 px wide); the draft had it centred."""
+
+    def bottle(self, shift):
+        img = np.full((700, 400, 3), (160, 175, 244), dtype=float)  # a periwinkle stage, lighter than the bottle
+        img[100:330, 108 + shift:292 + shift] = (20, 30, 120)  # the cap, 184 px wide
+        img[330:650, 83:317] = (25, 35, 130)  # the body, 234 px wide
+        img[380:640, 100:118] = (120, 140, 230)  # a soft highlight inside the left edge
+        img[400:560, 110:300:12] = 250  # white print: thin lines that reach near both edges
+        return self.save("b.png", img)
+
+    def check(self, *args):
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            code = cap_check.main(list(args))
+        return code, log.getvalue()
+
+    def test_a_centred_cap_passes_with_print_and_highlights_inside(self):
+        code, log = self.check("--render", self.bottle(0), "--box", "40,60,360,680")
+        self.assertEqual(code, 0, log)
+        self.assertIn("0.0 px", log)
+
+    def test_the_allies_offset_fails(self):
+        code, log = self.check("--render", self.bottle(6), "--box", "40,60,360,680")
+        self.assertEqual(code, 1, log)
+        self.assertIn("right of the body centre", log)
+
+    def test_a_box_without_a_cap_is_refused(self):
+        self.assertIn("no cap found", exit_message(self.check, "--render", self.bottle(0), "--box", "40,340,360,680"))
 
 if __name__ == "__main__":
     sys.exit(unittest.main())
