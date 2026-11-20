@@ -59,7 +59,22 @@ describe("checks_save", () => {
     await expect(saveCheck(env, idea, noAttempt)).rejects.toThrow("draft_check needs attempt");
     await expect(saveCheck(env, idea, draftCheck(renderId(1, 1), { items: [{ code: "D3", found: false }, { code: "D3", found: false }] }))).rejects.toThrow("names a code twice");
     const schema = TOOLS.find((t) => t.name === "checks_save")!.inputSchema;
-    expect(() => validate(schema, { batchId: E3, ideaId: idea, kind: "draft_check", check: draftCheck(renderId(1, 1), { items: [{ code: "D10", found: false }] }) })).toThrow("wrong format");
+    expect(() => validate(schema, { batchId: E3, ideaId: idea, kind: "draft_check", check: draftCheck(renderId(1, 1), { items: [{ code: "D11", found: false }] }) })).toThrow("wrong format");
+    expect(() => validate(schema, { batchId: E3, ideaId: idea, kind: "draft_check", check: draftCheck(renderId(1, 1), { items: [{ code: "D0", found: false }] }) })).toThrow("wrong format");
+  });
+
+  it("takes D10, pasted product light, and a draft with it found is not eligible (Allies engine 3 test, 20-11-2026)", async () => {
+    const { env, raw, ideas } = await approved();
+    const idea = ideas[0]!.id;
+    addRender(raw, renderId(1, 1), idea);
+    const schema = TOOLS.find((t) => t.name === "checks_save")!.inputSchema;
+    const pasted = { code: "D10", found: true, note: "The bottle keeps the packshot's studio highlight band; the scene light comes from the left." };
+    expect(() => validate(schema, { batchId: E3, ideaId: idea, kind: "draft_check", check: draftCheck(renderId(1, 1), { items: [pasted] }) })).not.toThrow();
+    await expect(saveCheck(env, idea, draftCheck(renderId(1, 1), { items: [pasted] }))).rejects.toThrow("A draft with D10 is not eligible");
+    expect(await saveCheck(env, idea, draftCheck(renderId(1, 1), { eligible: false, items: [pasted], reason: "Pasted product light (D10)." }))).toMatchObject({ eligible: false });
+    // All 10 D items and 8 F items fit in one check.
+    const all = [...Array.from({ length: 10 }, (_, i) => `D${i + 1}`), ...Array.from({ length: 8 }, (_, i) => `F${i + 1}`)].map((code) => ({ code, found: false }));
+    expect(await saveCheck(env, idea, draftCheck(renderId(1, 1), { items: all }))).toMatchObject({ eligible: true });
   });
 
   it("(3.7) refuses a render of another idea, a final for a draft check, a render with no image yet, and an idea that is not picked", async () => {
