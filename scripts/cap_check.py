@@ -9,9 +9,10 @@ again.
 The script reads each row of a box round the bottle. The bottle must stand on a plain stage that is lighter than the
 bottle on both sides of the box. In each row it finds the left and the right edge of the bottle from the outside in:
 the first pixel darker than the middle between the stage and the bottle, so print, glare and highlights inside the
-bottle do not count. The rows are cut into parts wherever the width or the centre jumps. The part with the most rows
-is the body (a tapered body stays one part), so a wider contact shadow is not. Each part from 50% to 90% of the body
-width (a cap, a neck) is judged on its own; parts shorter than 8 rows (a clip, a shadow line) do not count. It prints the worst part's centre against the body centre and fails when the
+bottle do not count. The rows are cut into parts wherever the width or the centre jumps. The body is the widest
+part of at least a quarter of the rows of the longest part (a tapered body stays one part), so a short, wide contact
+shadow is not the body and a tall cap is not either. Each part above the body from 50% to 90% of the body width (a
+cap, a neck) is judged on its own; parts shorter than 8 rows (a clip, a shadow line) do not count. It prints the worst part's centre against the body centre and fails when the
 difference is over --tolerance of the body width (default 1%). A prop that touches the bottle inside the box
 moves an edge: make the box miss it, or judge by eye.
 
@@ -43,9 +44,10 @@ def offset(left, right):
     last row), or None without a narrower part.
 
     The rows are cut into parts wherever the width or the centre jumps, so a tapered body stays one part, and a cap,
-    a neck and a contact shadow each become parts of their own. The body is the part with the most rows, and its width
-    is the median of its row widths. A narrower part (50% to 90% of the body width) is judged on its own, so a long
-    centred neck cannot hide a short shifted cap, and a wider part (a contact shadow) is not judged."""
+    a neck and a contact shadow each become parts of their own. The body is the widest part of at least a quarter of the
+    rows of the longest part, so a short, wide contact shadow is not the body and a tall cap is not either. Its width
+    is the median of its row widths. Each narrower part (50% to 90% of the body width) above the body is judged on its
+    own, so a long centred neck cannot hide a short shifted cap."""
     width = np.where(left >= 0, right - left + 1, 0)
     if width.max() == 0:
         sys.exit("no bottle found in the box: the stage must be lighter than the bottle on both sides")
@@ -60,16 +62,19 @@ def offset(left, right):
             start = None
         if y < len(width) and width[y] > 0 and start is None:
             start = y
-    body = max(parts, key=lambda p: p[1] - p[0])
-    if body[1] - body[0] + 1 < 10:
+    rows = lambda p: p[1] - p[0] + 1
+    longest = max(rows(p) for p in parts)
+    tall = [p for p in parts if rows(p) >= max(10, 0.25 * longest)]
+    if not tall:
         return None
+    body = max(tall, key=lambda p: np.median(width[p[0]:p[1] + 1]))
     bw = float(np.median(width[body[0]:body[1] + 1]))
     body_c = float(np.median(centre[body[0]:body[1] + 1]))
     worst = None
     for a, b in parts:
         w = float(np.median(width[a:b + 1]))
-        if b - a + 1 < 8 or not 0.5 * bw <= w <= 0.9 * bw:
-            continue  # a clip, an edge, a shadow line, or not a narrower part
+        if b - a + 1 < 8 or b >= body[0] or not 0.5 * bw <= w <= 0.9 * bw:
+            continue  # a clip, an edge, a shadow line, a part below the body, or not a narrower part
         off = float(np.median(centre[a:b + 1])) - body_c
         if worst is None or abs(off) > abs(worst[0]):
             worst = (off, bw, a, b)

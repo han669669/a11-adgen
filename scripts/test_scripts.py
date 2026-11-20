@@ -827,6 +827,18 @@ class CapCheck(Tmp):
         self.assertEqual(code, 1, log)
         self.assertIn("6.0 px right", log)
 
+    def test_a_tall_cap_is_not_the_body(self):
+        # Devin Review, PR 141: a tapered cap taller than the body became the body, so a shifted cap passed.
+        img = np.full((460, 400, 3), (160, 175, 244), dtype=float)
+        for i, y in enumerate(range(20, 220)):  # the cap, 200 rows, from 140 px to 160 px, 6 px right of the body
+            w = 140 + 2 * round(10 * i / 199)
+            img[y, 206 - w // 2:206 + w // 2] = (20, 30, 120)
+        img[220:250, 156:256] = (20, 30, 120)  # the neck, 100 px, in line with the cap
+        img[250:430, 100:300] = (25, 35, 130)  # the body, 180 rows, 200 px
+        code, log = self.check("--render", self.save("c.png", img), "--box", "40,0,360,450")
+        self.assertEqual(code, 1, log)
+        self.assertIn("6.0 px right", log)
+
     def test_an_offset_of_exactly_1_percent_passes(self):
         # Devin Review, PR 141: a smoothed width count read a 200 px body as 198 px, so a 2 px offset failed.
         img = np.full((460, 400, 3), (160, 175, 244), dtype=float)
