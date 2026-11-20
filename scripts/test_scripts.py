@@ -815,6 +815,27 @@ class CapCheck(Tmp):
         self.assertEqual(code, 1, log)
         self.assertIn("6.0 px right", log)
 
+    def test_a_tapered_body_is_still_the_body(self):
+        # Devin Review, PR 141: on a tapered body the straight cap was the most common width and became the body.
+        img = np.full((460, 400, 3), (160, 175, 244), dtype=float)
+        img[20:120, 136:276] = (20, 30, 120)  # the cap, 140 px, 6 px right of the body centre
+        img[120:150, 156:256] = (20, 30, 120)  # the neck, 100 px, in line with the cap
+        for i, y in enumerate(range(150, 360)):  # the body, from 180 px to 220 px, centred
+            w = 180 + 2 * round(20 * i / 209)
+            img[y, 200 - w // 2:200 + w // 2] = (25, 35, 130)
+        code, log = self.check("--render", self.save("t.png", img), "--box", "40,0,360,400")
+        self.assertEqual(code, 1, log)
+        self.assertIn("6.0 px right", log)
+
+    def test_an_offset_of_exactly_1_percent_passes(self):
+        # Devin Review, PR 141: a smoothed width count read a 200 px body as 198 px, so a 2 px offset failed.
+        img = np.full((460, 400, 3), (160, 175, 244), dtype=float)
+        img[40:80, 132:272] = (20, 30, 120)  # the cap, 140 px, 2 px right of the body centre
+        img[80:380, 100:300] = (25, 35, 130)  # the body, 200 px
+        code, log = self.check("--render", self.save("e.png", img), "--box", "40,20,360,420")
+        self.assertEqual(code, 0, log)
+        self.assertIn("2.0 px right of the body centre (1.0% of the 200 px body", log)
+
     def test_a_box_without_a_cap_is_refused(self):
         self.assertIn("no cap found", exit_message(self.check, "--render", self.bottle(0), "--box", "40,340,360,680"))
 

@@ -9,9 +9,9 @@ again.
 The script reads each row of a box round the bottle. The bottle must stand on a plain stage that is lighter than the
 bottle on both sides of the box. In each row it finds the left and the right edge of the bottle from the outside in:
 the first pixel darker than the middle between the stage and the bottle, so print, glare and highlights inside the
-bottle do not count. The most common row width is the body, so a wider contact shadow is not. Rows from 50% to 90%
-of the body width are cut into parts (a cap, a neck) wherever the width or the centre jumps; parts shorter than 8 rows
-(a clip, a shadow line) do not count. It prints the worst part's centre against the body centre and fails when the
+bottle do not count. The rows are cut into parts wherever the width or the centre jumps. The part with the most rows
+is the body (a tapered body stays one part), so a wider contact shadow is not. Each part from 50% to 90% of the body
+width (a cap, a neck) is judged on its own; parts shorter than 8 rows (a clip, a shadow line) do not count. It prints the worst part's centre against the body centre and fails when the
 difference is over --tolerance of the body width (default 1%). A prop that touches the bottle inside the box
 moves an edge: make the box miss it, or judge by eye.
 
@@ -42,38 +42,37 @@ def offset(left, right):
     """The worst narrower part (a cap, a lid, a neck) against the body centre: (offset in px, body width, first row,
     last row), or None without a narrower part.
 
-    The body is the most common row width, so a wider contact shadow at the base is not taken as the body. The narrow
-    rows (50% to 90% of the body width) are cut into parts wherever the width or the centre jumps, so a centred neck
-    and an off-centre cap above it are judged one by one: a long centred neck cannot hide a short shifted cap."""
+    The rows are cut into parts wherever the width or the centre jumps, so a tapered body stays one part, and a cap,
+    a neck and a contact shadow each become parts of their own. The body is the part with the most rows, and its width
+    is the median of its row widths. A narrower part (50% to 90% of the body width) is judged on its own, so a long
+    centred neck cannot hide a short shifted cap, and a wider part (a contact shadow) is not judged."""
     width = np.where(left >= 0, right - left + 1, 0)
     if width.max() == 0:
         sys.exit("no bottle found in the box: the stage must be lighter than the bottle on both sides")
-    counts = np.bincount(width[width > 0])
-    counts[0] = 0
-    smooth = np.convolve(counts, np.ones(5), "same")
-    bw = int(np.argmax(smooth))
     centre = (left + right) / 2
-    body = np.abs(width - bw) <= 0.03 * bw
-    if body.sum() < 10:
-        return None
-    body_c = float(np.median(centre[body]))
-    narrow = (width >= 0.5 * bw) & (width <= 0.9 * bw)
     parts, start = [], None
     for y in range(len(width) + 1):
-        cut = y == len(width) or not narrow[y] or (start is not None and (
-            abs(width[y] - width[y - 1]) > 0.03 * bw or abs(centre[y] - centre[y - 1]) > 2.5))
+        cut = y == len(width) or width[y] == 0 or (start is not None and (
+            abs(width[y] - width[y - 1]) > 0.03 * max(width[y], width[y - 1])
+            or abs(centre[y] - centre[y - 1]) > 2.5))
         if cut and start is not None:
             parts.append((start, y - 1))
             start = None
-        if y < len(width) and narrow[y] and start is None:
+        if y < len(width) and width[y] > 0 and start is None:
             start = y
+    body = max(parts, key=lambda p: p[1] - p[0])
+    if body[1] - body[0] + 1 < 10:
+        return None
+    bw = float(np.median(width[body[0]:body[1] + 1]))
+    body_c = float(np.median(centre[body[0]:body[1] + 1]))
     worst = None
     for a, b in parts:
-        if b - a + 1 < 8:
-            continue  # a clip, an edge or a shadow line
+        w = float(np.median(width[a:b + 1]))
+        if b - a + 1 < 8 or not 0.5 * bw <= w <= 0.9 * bw:
+            continue  # a clip, an edge, a shadow line, or not a narrower part
         off = float(np.median(centre[a:b + 1])) - body_c
         if worst is None or abs(off) > abs(worst[0]):
-            worst = (off, float(bw), a, b)
+            worst = (off, bw, a, b)
     return worst
 
 
