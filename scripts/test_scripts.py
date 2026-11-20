@@ -856,6 +856,38 @@ class CapCheck(Tmp):
         self.assertEqual(code, 1, log)
         self.assertIn("6.0 px right", log)
 
+    def test_a_tall_contact_shadow_is_not_the_body(self):
+        # Devin Review, PR 141: a 50-row shadow wider than the body was taken as the body and widened the tolerance.
+        img = np.full((360, 400, 3), (160, 175, 244), dtype=float)
+        img[20:80, 132:273] = (20, 30, 120)  # the cap, 141 px, 2.5 px right of the body centre
+        img[80:260, 100:300] = (25, 35, 130)  # the body, 200 px
+        img[260:310, 70:330] = (60, 70, 120)  # a contact shadow, 260 px
+        code, log = self.check("--render", self.save("ts.png", img), "--box", "40,0,360,340")
+        self.assertEqual(code, 1, log)
+        self.assertIn("2.5 px right of the body centre (1.2% of the 200 px body", log)
+
+    def test_a_small_width_step_still_parts_the_cap_from_the_neck(self):
+        # Devin Review, PR 141: the second cut used 3% of the body width, so a 4 px step from a 130 px cap was lost.
+        img = np.full((460, 400, 3), (160, 175, 244), dtype=float)
+        img[20:40, 137:267] = (20, 30, 120)  # the cap, 130 px, 2 px right of the body centre
+        img[40:120, 137:263] = (20, 30, 120)  # the neck, 126 px, centred
+        img[120:420, 110:290] = (25, 35, 130)  # the body, 180 px
+        code, log = self.check("--render", self.save("ws.png", img), "--box", "40,0,360,440")
+        self.assertEqual(code, 1, log)
+        self.assertIn("2.0 px right", log)
+
+    def test_a_short_tapered_body_is_measured(self):
+        # Devin Review, PR 141: fewer than 10 rows at the median width of a tapered body gave "no cap found".
+        for shift, want in ((0, 0), (6, 1)):
+            img = np.full((200, 400, 3), (160, 175, 244), dtype=float)
+            img[20:40, 145 + shift:255 + shift] = (20, 30, 120)  # the cap, 110 px
+            img[40:50, 155:245] = (20, 30, 120)  # the neck, 90 px
+            for i, y in enumerate(range(50, 130)):  # the body, 80 rows, from 100 px to 200 px
+                w = 100 + 2 * round(50 * i / 79)
+                img[y, 200 - w // 2:200 + w // 2] = (25, 35, 130)
+            code, log = self.check("--render", self.save(f"st{shift}.png", img), "--box", "40,0,360,160")
+            self.assertEqual(code, want, log)
+
     def test_an_offset_of_exactly_1_percent_passes(self):
         # Devin Review, PR 141: a smoothed width count read a 200 px body as 198 px, so a 2 px offset failed.
         img = np.full((460, 400, 3), (160, 175, 244), dtype=float)
