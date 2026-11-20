@@ -46,6 +46,12 @@ above it:
 
 python3 scripts/headline.py ... --case upper --leading 0.95 --sub-ratio 0.5 --gap 0.35 \
     --min-head 0.07 --product-top 0.52 --headline "THE ONLY | PIE CHART | I LIKE."
+
+Breathing space (owner, 20-11-2026): the script stops when the area or the logo is less than --min-margin
+(default 0.04) from an edge, the logo bottom is less than --min-logo-gap (default 0.03) above the text top, or
+--min-clear is set under 0.03. Take --logo-width and --logo-top from the kit placement on every ad of a brand.
+--footnote sets the claim's source line at the bottom (--footnote-align, --footnote-y) and stops when that line
+would sit on an object or a shadow edge.
 """
 import argparse
 import math
@@ -56,10 +62,11 @@ import unicodedata
 import urllib.parse
 import urllib.request
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 FORMATS = ["JPEG", "PNG", "WEBP"]
 MAX_LINES = 3
+FOOT_MARGIN = 0.025  # the footnote is small: it may sit closer to the bottom edge than --min-margin (owner, 20-11-2026, the mirror ad)
 GOOGLE_CSS = "https://fonts.googleapis.com/css2?family={family}:wght@{wght}"
 FONT_HOST = "fonts.gstatic.com"
 FONT_MAGIC = (b"\x00\x01\x00\x00", b"true", b"OTTO")
@@ -225,6 +232,44 @@ def body_centre(logo):
     return (runs[0][0] + runs[keep - 1][1] + 1) / 2
 
 
+def busy_share(im, box):
+    """The share of pixels in box (x0, y0, x1, y1) with fine detail: an object edge or texture, not a smooth backdrop or light fall-off."""
+    s = im.height / 1280
+    crop = im.convert("L").crop((max(0, box[0] - 60), max(0, box[1] - 60), min(im.width, box[2] + 60), min(im.height, box[3] + 60)))
+    fine, wide = crop.filter(ImageFilter.GaussianBlur(2 * s)), crop.filter(ImageFilter.GaussianBlur(20 * s))
+    ox, oy = box[0] - max(0, box[0] - 60), box[1] - max(0, box[1] - 60)
+    w, h = box[2] - box[0], box[3] - box[1]
+    fp, wp = fine.load(), wide.load()
+    n = sum(1 for y in range(oy, oy + h) for x in range(ox, ox + w) if abs(fp[x, y] - wp[x, y]) > 12)
+    return n / max(1, w * h)
+
+
+def foot(im, a, font_path, color, left, right):
+    """The footnote: small, 80% opacity, at the bottom, and only on plain backdrop (owner, 20-11-2026: a prop's handle covered "analysis")."""
+    if not (0 < a.footnote_size < 0.05 and 0 < a.footnote_y < 1):
+        sys.exit("--footnote-size must be more than 0 and less than 0.05, --footnote-y inside the picture")
+    W, H = im.size
+    f = load_font(font_path, max(8, round(H * a.footnote_size)), None)
+    d = ImageDraw.Draw(im)
+    b = d.textbbox((0, 0), a.footnote, font=f)
+    tw, th = b[2] - b[0], b[3] - b[1]
+    x = left - b[0] if a.footnote_align == "left" else right - tw - b[0]
+    y = round(H * a.footnote_y) - th // 2 - b[1]
+    if x + b[0] < 0 or x + b[2] > W:
+        sys.exit("the footnote is wider than the text area allows: shorten it or widen the area")
+    if (y + b[3]) > H * (1 - FOOT_MARGIN):
+        sys.exit(f"the footnote ends less than {100 * FOOT_MARGIN:.1f}% above the bottom edge: raise --footnote-y")
+    pad = round(0.4 * f.size)
+    box = (int(x + b[0]), int(y + b[1] - pad), int(x + b[2]), int(y + b[3] + pad))
+    share = busy_share(im, box)
+    if share > 0.08:
+        other = "right" if a.footnote_align == "left" else "left"
+        sys.exit(f"the footnote would sit on an object or a shadow edge ({100 * share:.0f}% of its box has detail, more than 8%): try --footnote-align {other} or move --footnote-y")
+    layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    ImageDraw.Draw(layer).text((x, y), a.footnote, font=f, fill=color + (round(255 * 0.8),))
+    im.paste(Image.alpha_composite(im.convert("RGBA"), layer).convert("RGB"))
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--in", dest="src", required=True)
@@ -257,6 +302,12 @@ def main(argv=None):
     p.add_argument("--logo", help="the kit logo (PNG), drawn above the words: a preview on drafts, the real logo on a final built in code (creative-playbook 7.7)")
     p.add_argument("--logo-width", type=float, default=0.25, help="logo width, x the picture width")
     p.add_argument("--logo-top", type=float, default=0.045, help="logo top, x the picture height")
+    p.add_argument("--min-margin", type=float, default=0.04, help="breathing space (owner, 20-11-2026): the text area, the logo and the footnote stay at least this share of the width (sides) or height (top, bottom) from the picture edge")
+    p.add_argument("--min-logo-gap", type=float, default=0.03, help="clear space between the logo bottom and the text top, x the picture height")
+    p.add_argument("--footnote", default="", help="a small source line at the bottom (the claim's study), set in the subline font at --footnote-size, 80%% opacity")
+    p.add_argument("--footnote-size", type=float, default=0.0175, help="footnote size, x the picture height")
+    p.add_argument("--footnote-align", choices=["left", "right"], default="left", help="left: starts at the area's left edge; right: ends at the area's right edge")
+    p.add_argument("--footnote-y", type=float, default=0.945, help="footnote centre, x the picture height")
     p.add_argument("--logo-x", type=float, default=None, help="logo left edge, x the picture width (default: centred); e.g. the text column's left edge, so the logo heads the words")
     a = p.parse_args(argv)
 
@@ -316,6 +367,15 @@ def main(argv=None):
     hf, hl, sf, sl, lh, sh = fit
     if not (0 <= a.min_head < 1 and 0 <= a.min_clear < 1) or (a.product_top is not None and not 0 < a.product_top <= 1):
         sys.exit("--min-head and --min-clear must be from 0 to less than 1, --product-top more than 0 and at most 1")
+    m = a.min_margin
+    if not (0 <= m < 0.25 and 0 <= a.min_logo_gap < 0.25):
+        sys.exit("--min-margin and --min-logo-gap must be from 0 to less than 0.25")
+    if x0 < m or x1 > 1 - m:
+        sys.exit(f"the area {a.area} leaves less than {100 * m:.0f}% of the width at a side: keep x0 >= {m} and x1 <= {1 - m:.2f} (breathing space, --min-margin)")
+    if y0 < m:
+        sys.exit(f"the area starts {100 * y0:.1f}% from the top, less than --min-margin {100 * m:.0f}%")
+    if a.product_top is not None and a.min_clear < 0.03:
+        sys.exit("--min-clear under 0.03 leaves the words too close to the product (owner, 20-11-2026: the words need breathing space)")
     if hf.size < a.min_head * H:
         sys.exit(f"the headline is {hf.size}px, {100 * hf.size / H:.1f}% of the height, under --min-head {100 * a.min_head:.1f}%: make the area larger or break the lines with ' | '")
 
@@ -352,8 +412,12 @@ def main(argv=None):
         lw = max(1, int(W * a.logo_width))
         logo = logo.resize((lw, max(1, round(logo.height * lw / logo.width))), Image.LANCZOS)
         ly = int(H * a.logo_top)
+        if a.logo_top < m or (a.logo_x is not None and a.logo_x < m):
+            sys.exit(f"the logo is less than --min-margin {100 * m:.0f}% from the picture edge: use the kit placement (--logo-top) and the text column's left edge (--logo-x)")
         if ly + logo.height > top:
             sys.exit(f"the logo bottom ({100 * (ly + logo.height) / H:.1f}%) is under the text top ({100 * top / H:.1f}%): move the area down or make the logo smaller")
+        if ly + logo.height + a.min_logo_gap * H > top:
+            sys.exit(f"the gap between the logo bottom ({100 * (ly + logo.height) / H:.1f}%) and the text top ({100 * top / H:.1f}%) is under --min-logo-gap {100 * a.min_logo_gap:.0f}%: move the area down; keep the logo at the kit size")
     if caps:  # baselines: the first one a cap height under the area top
         y = put(hl, hf, lh, top + cap_height(hf, hl[0]), "ls", accent) - lh
     else:
@@ -362,6 +426,8 @@ def main(argv=None):
         y = put(sl, sf, sh, y + int(hf.size * a.gap))
     if a.product_top is not None and ink[0] + a.min_clear * H > a.product_top * H:
         sys.exit(f"the text ends at {100 * ink[0] / H:.1f}% of the height, less than {100 * a.min_clear:.1f}% above the product top ({100 * a.product_top:.1f}%): move the area up or make it shorter")
+    if a.footnote:
+        foot(im, a, sub_path, color, bx0, bx0 + bw)
     if logo:
         im.paste(logo, (round(W / 2 - body_centre(logo)) if a.logo_x is None else round(W * a.logo_x), ly), logo)
     im.save(a.out, quality=95)
