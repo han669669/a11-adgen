@@ -487,6 +487,50 @@ class Headline(Tmp):
         ys, _ = np.where(a < 100)
         self.assertGreaterEqual(ys.min(), 0.3 * 500 - 2)
 
+    def test_breathing_space_margins_and_the_logo_gap(self):
+        # Owner, 20-11-2026 (Allies engine 3 test): the logo size changed from ad to ad, and the words sat too close to
+        # the logo and the product: "all the empty space needing breathing space".
+        words = ["--font", self.FONT, "--headline", "Hi there", "--area"]
+        self.assertIn("leaves less than 4% of the width", exit_message(self.run_, *words, "0.02,0.3,0.9,0.5"))
+        self.assertIn("leaves less than 4% of the width", exit_message(self.run_, *words, "0.1,0.3,0.98,0.5"))
+        self.assertIn("from the top, less than --min-margin", exit_message(self.run_, *words, "0.1,0.02,0.9,0.5"))
+        self.assertIn("--min-clear under 0.03", exit_message(self.run_, *words, "0.1,0.1,0.9,0.4", "--product-top", "0.6", "--min-clear", "0.02"))
+        logo = os.path.join(self.dir.name, "logo.png")
+        Image.new("RGBA", (100, 40), (0, 0, 0, 255)).save(logo)  # 0.25 of 400 px wide: 40 px high, its bottom at 12.5% of 500
+        self.assertIn("less than --min-margin", exit_message(self.run_, *words, "0.1,0.3,0.9,0.5", "--logo", logo, "--logo-top", "0.02"))
+        self.assertIn("gap between the logo bottom", exit_message(self.run_, *words, "0.1,0.14,0.9,0.5", "--logo", logo))
+        out, msg = self.run_(*words, "0.1,0.16,0.9,0.5", "--logo", logo)
+        self.assertIn("text top 16.0%", msg)
+        # Devin Review, PR 140: a logo 1% from the right edge, and words that run to the bottom edge, passed.
+        self.assertIn("less than --min-margin", exit_message(self.run_, *words, "0.1,0.3,0.9,0.5", "--logo", logo, "--logo-x", "0.74"))
+        self.assertIn("above the bottom edge", exit_message(self.run_, *words, "0.1,0.9,0.9,0.995"))
+        self.assertIn("only Latin-script", exit_message(self.run_, *words, "0.1,0.3,0.9,0.5", "--footnote", "专家评分"))
+        # --min-margin 0 turns the margin check off for a picture that needs words to the edge.
+        out, _ = self.run_(*words, "0,0,1,1", "--min-margin", "0")
+        self.assertTrue(os.path.isfile(out))
+
+    def test_the_footnote_sits_on_plain_backdrop_only(self):
+        def run(src, *extra):
+            out = os.path.join(self.dir.name, "out.jpg")
+            with contextlib.redirect_stdout(io.StringIO()):
+                headline.main(["--in", src, "--out", out, "--font", self.FONT, "--headline", "Hi there", "--area", "0.1,0.1,0.9,0.4",
+                               "--footnote", "Expert scored, 35 people.", "--color", "000000", *extra])
+            return out
+        plain = self.save("plain.png", np.full((1000, 800, 3), 220))
+        a = np.asarray(Image.open(run(plain)).convert("L"))
+        ys, xs = np.where(a[800:] < 150)
+        self.assertTrue(len(xs) > 0, "no footnote was drawn")
+        self.assertAlmostEqual((ys.min() + ys.max()) / 2 + 800, 945, delta=8)
+        self.assertGreaterEqual(xs.min(), 0.1 * 800 - 3)
+        # The real failure: the handle of a hand mirror crossed the top of the footnote (Allies, 20-11-2026).
+        handle = np.full((1000, 800, 3), 220)
+        handle[925:940, 60:380] = 120  # a bar across the left footnote place
+        self.assertIn("would sit on an object", exit_message(run, self.save("handle.png", handle)))
+        a = np.asarray(Image.open(run(self.save("handle2.png", handle), "--footnote-align", "right")).convert("L"))
+        ys, xs = np.where(a[940:] < 150)
+        self.assertLessEqual(xs.max(), 0.9 * 800 + 3)
+        self.assertIn("raise --footnote-y", exit_message(run, plain, "--footnote-y", "0.975"))
+
     def test_the_logo_preview_is_drawn_at_the_top_centre(self):
         logo = os.path.join(self.dir.name, "logo.png")
         Image.new("RGBA", (100, 40), (0, 0, 0, 255)).save(logo)
