@@ -104,3 +104,35 @@ export function validate(schema: ObjectSchema, args: unknown): Record<string, un
   }
   return checkObject("", schema, args);
 }
+
+/**
+ * Some MCP clients cannot send a nested object or array: they send it as JSON text, or the nested value arrives as null
+ * (Cursor's dynamic tool wrapper, issue 142). Before validate, parse a string where the schema expects an object or an
+ * array, once at each level, then walk into the parsed value. Everything else stays as it is, so validate still checks
+ * every value. The arguments object itself is not parsed. The input is not changed: changed levels are new objects.
+ * Object.fromEntries defines each key as an own property, so a "__proto__" key stays a key and validate refuses it.
+ */
+export function decodeJsonArgs(schema: ObjectSchema, args: unknown): unknown {
+  return decodeObject("", schema, args);
+}
+
+function decodeObject(name: string, schema: ObjectSchema, v: unknown): unknown {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return v;
+  const prefix = name ? `${name}.` : "";
+  return Object.fromEntries(
+    Object.entries(v).map(([k, x]) => [k, Object.hasOwn(schema.properties, k) ? decodeProp(`${prefix}${k}`, schema.properties[k]!, x) : x]),
+  );
+}
+
+function decodeProp(name: string, p: Prop, v: unknown): unknown {
+  if (p.type !== "object" && p.type !== "array") return v;
+  if (typeof v === "string") {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      throw new InputError(`${name} must be ${p.type === "object" ? "an object" : "an array"}; the text given is not valid JSON.`);
+    }
+  }
+  if (p.type === "object") return decodeObject(name, p, v);
+  return Array.isArray(v) ? v.map((item, i) => decodeProp(`${name}[${i}]`, p.items, item)) : v;
+}
