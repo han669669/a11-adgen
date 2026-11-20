@@ -314,7 +314,7 @@ def main(argv=None):
     a.headline = a.headline.replace("|", " | ")
     if not a.headline.replace("|", "").strip():
         sys.exit("the headline is empty")
-    bad = non_latin(a.headline + a.subline)
+    bad = non_latin(a.headline + a.subline + (a.footnote or ""))  # the footnote too: a missing glyph draws a box
     if bad:
         sys.exit(f"only Latin-script words are supported (found {bad!r}): set non-Latin or right-to-left copy another way and tell the owner")
     if not (math.isfinite(a.gap) and a.gap >= 0 and math.isfinite(a.sub_ratio) and a.sub_ratio > 0):
@@ -412,7 +412,8 @@ def main(argv=None):
         lw = max(1, int(W * a.logo_width))
         logo = logo.resize((lw, max(1, round(logo.height * lw / logo.width))), Image.LANCZOS)
         ly = int(H * a.logo_top)
-        if a.logo_top < m or (a.logo_x is not None and a.logo_x < m):
+        lx = round(W / 2 - body_centre(logo)) if a.logo_x is None else round(W * a.logo_x)
+        if a.logo_top < m or lx < m * W or lx + logo.width > (1 - m) * W:
             sys.exit(f"the logo is less than --min-margin {100 * m:.0f}% from the picture edge: use the kit placement (--logo-top) and the text column's left edge (--logo-x)")
         if ly + logo.height > top:
             sys.exit(f"the logo bottom ({100 * (ly + logo.height) / H:.1f}%) is under the text top ({100 * top / H:.1f}%): move the area down or make the logo smaller")
@@ -426,10 +427,12 @@ def main(argv=None):
         y = put(sl, sf, sh, y + int(hf.size * a.gap))
     if a.product_top is not None and ink[0] + a.min_clear * H > a.product_top * H:
         sys.exit(f"the text ends at {100 * ink[0] / H:.1f}% of the height, less than {100 * a.min_clear:.1f}% above the product top ({100 * a.product_top:.1f}%): move the area up or make it shorter")
+    if ink[0] > (1 - m) * H:
+        sys.exit(f"the text ends at {100 * ink[0] / H:.1f}% of the height, less than --min-margin {100 * m:.0f}% above the bottom edge: move the area up or make it shorter")
     if a.footnote:
         foot(im, a, sub_path, color, bx0, bx0 + bw)
     if logo:
-        im.paste(logo, (round(W / 2 - body_centre(logo)) if a.logo_x is None else round(W * a.logo_x), ly), logo)
+        im.paste(logo, (lx, ly), logo)
     im.save(a.out, quality=95)
     for n in (note, sub_note):
         if n:

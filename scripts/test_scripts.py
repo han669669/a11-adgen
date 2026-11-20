@@ -501,6 +501,10 @@ class Headline(Tmp):
         self.assertIn("gap between the logo bottom", exit_message(self.run_, *words, "0.1,0.14,0.9,0.5", "--logo", logo))
         out, msg = self.run_(*words, "0.1,0.16,0.9,0.5", "--logo", logo)
         self.assertIn("text top 16.0%", msg)
+        # Devin Review, PR 140: a logo 1% from the right edge, and words that run to the bottom edge, passed.
+        self.assertIn("less than --min-margin", exit_message(self.run_, *words, "0.1,0.3,0.9,0.5", "--logo", logo, "--logo-x", "0.74"))
+        self.assertIn("above the bottom edge", exit_message(self.run_, *words, "0.1,0.9,0.9,0.995"))
+        self.assertIn("only Latin-script", exit_message(self.run_, *words, "0.1,0.3,0.9,0.5", "--footnote", "专家评分"))
         # --min-margin 0 turns the margin check off for a picture that needs words to the edge.
         out, _ = self.run_(*words, "0,0,1,1", "--min-margin", "0")
         self.assertTrue(os.path.isfile(out))
