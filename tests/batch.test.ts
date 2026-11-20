@@ -105,6 +105,29 @@ describe("brand kit", () => {
     const v3 = await brandSave(env, { slug: "wongi", name: "WonGi", kit: { ...kit, food: "   " } });
     expect([v1.kit.food, v2.kit.food, v3.kit.food]).toEqual(["Lumpy kernels.", "Lumpy kernels.", "Lumpy kernels."]);
   });
+  it("reads a logo uploaded with upload_link kind ref from R2, not over the network", async () => {
+    // Live 20-11-2026: brand_save got HTTP 404 when it fetched its own /m/refs/ address, though the file answers 200 from outside.
+    const { env, saved } = makeEnv();
+    const key = "refs/00000000-0000-4000-8000-000000000001.png";
+    const bytes = new Uint8Array(16);
+    bytes.set(PNG);
+    (env.MEDIA as unknown as { get: (k: string) => Promise<unknown> }).get = async (k: string) =>
+      k === key ? { body: new Response(bytes).body, size: bytes.length } : null;
+    const fetched: string[] = [];
+    vi.stubGlobal("fetch", async (u: string) => (fetched.push(u), u.startsWith("https://w/") ? { ok: false, status: 404, headers: new Headers({ "content-type": "text/plain" }) } : img(u, "image/jpeg")));
+    const out = await brandSave(env, { slug: "allies", name: "Allies", kit: { ...kit, logoUrl: `https://w/m/${key}` } });
+    expect(fetched).toEqual(["https://brand.example/closeup.jpg"]);
+    expect(out.kit.logo.sourceUrl).toBe(`https://w/m/${key}`);
+    expect(saved.has(out.kit.logo.key)).toBe(true);
+  });
+  it("refuses an own-server logo URL that is not an uploaded reference", async () => {
+    const { env } = makeEnv();
+    vi.stubGlobal("fetch", async (u: string) => img(u));
+    for (const logoUrl of ["https://w/m/renders/00000000-0000-4000-8000-000000000001/1.jpg", "https://w/api/me", "https://w/m/refs/00000000-0000-4000-8000-000000000001.png?x=1"]) {
+      await expect(brandSave(env, { slug: "allies", name: "Allies", kit: { ...kit, logoUrl } })).rejects.toThrow("upload_link kind ref");
+    }
+    await expect(brandSave(env, { slug: "allies", name: "Allies", kit: { ...kit, logoUrl: "https://w/m/refs/00000000-0000-4000-8000-000000000001.png" } })).rejects.toThrow("no file");
+  });
   it("refuses an SVG logo", async () => {
     const { env } = makeEnv();
     vi.stubGlobal("fetch", async (u: string) => img(u, "image/svg+xml"));

@@ -4,6 +4,26 @@ import { contentType, extFor, fetchHttpsImage, IMAGE_TYPES, readCapped } from ".
 
 export const SLUG = "^[a-z0-9][a-z0-9-]{1,40}$";
 
+/** A file that upload_link kind ref saved: refs/<uuid>.png or .jpg. */
+const OWN_REF = /^refs\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg)$/;
+
+/**
+ * Get a logo or reference photo for a kit. A file made in the session (an inline SVG logo drawn to PNG) is uploaded with
+ * upload_link kind ref and has this Worker's own /m/refs/ address. The Worker cannot fetch its own address (the live
+ * brand_save got HTTP 404 for a refs URL that answers 200 from outside), so that file is read from R2. Every other URL is
+ * fetched over HTTPS with the usual checks.
+ */
+async function kitImage(env: Env, url: string, what: string): Promise<Response> {
+  const own = new URL(env.PUBLIC_BASE_URL);
+  const u = new URL(url);
+  if (u.host !== own.host) return fetchHttpsImage(url, what);
+  const key = u.pathname.startsWith("/m/") && !u.search ? u.pathname.slice(3) : "";
+  if (!OWN_REF.test(key)) throw new Error(`${what} URL on this server must be a file from upload_link kind ref (/m/refs/<uuid>.png or .jpg).`);
+  const obj = await env.MEDIA.get(key);
+  if (!obj) throw new Error(`${what} URL did not return an image (no file ${key}).`);
+  return new Response(obj.body, { headers: { "content-type": key.endsWith(".png") ? "image/png" : "image/jpeg", "content-length": String(obj.size) } });
+}
+
 export interface KitRefInput {
   url: string;
   label: string;
@@ -78,13 +98,13 @@ async function previousFood(env: Env, slug: string): Promise<string | undefined>
  * The logo is trimmed (transparent border removed), so placement numbers apply to the visible mark.
  */
 export async function brandSave(env: Env, input: { slug: string; name: string; siteUrl?: string; kit: KitInput; note?: string }) {
-  const logoRes = await fetchHttpsImage(input.kit.logoUrl, "Logo");
+  const logoRes = await kitImage(env, input.kit.logoUrl, "Logo");
   // Cloudflare Images does not draw SVG files into a picture, so the kit needs raster files.
   if (contentType(logoRes).includes("svg")) throw new Error("Logo must be a PNG or WebP file, not SVG.");
   const logoBytes = await readCapped(logoRes, "Logo");
   const refFiles: { bytes: Uint8Array; type: string; ref: KitRefInput }[] = [];
   for (const [i, ref] of (input.kit.refs ?? []).entries()) {
-    const res = await fetchHttpsImage(ref.url, `Reference ${i + 1}`);
+    const res = await kitImage(env, ref.url, `Reference ${i + 1}`);
     const type = contentType(res);
     if (type.includes("svg")) throw new Error(`Reference ${i + 1} must be a PNG, JPEG or WebP file, not SVG.`);
     const bytes = await readCapped(res, `Reference ${i + 1}`);

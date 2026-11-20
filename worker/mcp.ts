@@ -134,7 +134,7 @@ export const TOOLS: Tool[] = [
   {
     name: "brand_save",
     description:
-      "Create a brand (first time) and save a NEW kit version (kits are never changed in place). The logo must be a PNG or WebP over HTTPS: it is trimmed and stored. Reference photos (packshot = the real product, texture = a real close-up of the food, style = a past ad) are copied to storage. Write voice and neverSay from the brand's own site.",
+      "Create a brand (first time) and save a NEW kit version (kits are never changed in place). The logo must be a PNG or WebP over HTTPS: it is trimmed and stored. A site with only an inline SVG logo: draw that SVG to a PNG in the session, upload it with upload_link kind ref and give the url from its answer. Reference photos (packshot = the real product, texture = a real close-up of the food, style = a past ad) are copied to storage. Write voice and neverSay from the brand's own site.",
     inputSchema: {
       type: "object",
       properties: {
