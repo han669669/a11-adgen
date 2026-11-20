@@ -1,7 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { Env } from "../../worker/env";
-import { TOOLS } from "../../worker/mcp";
-import { validate } from "../../worker/schema";
+import { TOOLS, toolInput } from "../../worker/mcp";
 import { exampleBrief, SOURCES } from "../fixtures/brief";
 import { fakeD1 } from "./d1";
 
@@ -11,7 +10,7 @@ export const E3 = "e3000000-0000-4000-8000-000000000003";
 
 export const run = async (env: Env, name: string, args: unknown) => {
   const t = TOOLS.find((x) => x.name === name)!;
-  const c = (await t.run(env, validate(t.inputSchema, t.prepare ? t.prepare(args) : args))).content[0]!;
+  const c = (await t.run(env, toolInput(t, args))).content[0]!;
   return JSON.parse(c.type === "text" ? c.text : "{}");
 };
 

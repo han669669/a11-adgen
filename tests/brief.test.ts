@@ -2,9 +2,8 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as batch from "../worker/batch";
 import type { Env } from "../worker/env";
-import { TOOLS } from "../worker/mcp";
+import { TOOLS, toolInput } from "../worker/mcp";
 import { normalise, quoteIn } from "../worker/research";
-import { validate } from "../worker/schema";
 import { exampleBrief, SOURCES, SRC } from "./fixtures/brief";
 import { fakeD1 } from "./helpers/d1";
 
@@ -21,7 +20,7 @@ function makeEnv() {
 }
 const run = async (env: Env, name: string, args: unknown) => {
   const t = TOOLS.find((x) => x.name === name)!;
-  const c = (await t.run(env, validate(t.inputSchema, t.prepare ? t.prepare(args) : args))).content[0]!;
+  const c = (await t.run(env, toolInput(t, args))).content[0]!;
   return JSON.parse(c.type === "text" ? c.text : "{}");
 };
 
