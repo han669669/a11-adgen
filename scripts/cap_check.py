@@ -9,14 +9,16 @@ again.
 The script reads each row of a box round the bottle. The bottle must stand on a plain stage that is lighter than the
 bottle on both sides of the box. In each row it finds the left and the right edge of the bottle from the outside in:
 the first pixel darker than the middle between the stage and the bottle, so print, glare and highlights inside the
-bottle do not count. The rows are cut into parts wherever the width or the centre jumps. The body is the part
-with the largest area (a tapered body stays one part), so a wide contact shadow is not the body and a tall cap is not
-either. Each part above the body from 50% to 90% of the body width (a
-cap, a neck) is judged on its own; parts shorter than 8 rows (a clip, a shadow line) do not count. It prints the worst part's centre against the body centre and fails when the
-difference is over --tolerance of the body width (default 1%). A prop that touches the bottle inside the box
-moves an edge: make the box miss it, or judge by eye.
+bottle do not count. You give the first row of the body (--split, read off the picture): no rule guesses where a cap
+ends, because a tall cap, a taper or a smooth shoulder fools every guess. The body is the rows from --split to the
+bottom of the box; its width and its centre are the medians of those rows, so a taper or a rounded base does not move
+them. End the box at the base of the bottle, above any contact shadow. The rows above --split are cut into parts
+wherever the width jumps by more than 3% or the centre by more than 2.5 px (a cap, a neck, a collar), and each part of
+8 rows or more is judged on its own, so a long centred neck cannot hide a short shifted cap. It prints the worst part's
+centre against the body centre and fails when the difference is over --tolerance of the body width (default 1%). A
+prop that touches the bottle inside the box moves an edge: make the box miss it, or judge by eye.
 
-  python3 scripts/cap_check.py --render <picture> --box X0,Y0,X1,Y1 [--tolerance 0.01]
+  python3 scripts/cap_check.py --render <picture> --box X0,Y0,X1,Y1 --split Y [--tolerance 0.01]
 
 Needs Python 3 with Pillow and numpy (scripts/requirements.txt).
 """
@@ -39,7 +41,7 @@ def edges(lum):
     return left, right
 
 
-def split(width, centre, keep):
+def split_rows(width, centre, keep):
     """Runs of kept rows, cut wherever the width jumps by more than 3% or the centre by more than 2.5 px."""
     parts, start = [], None
     for y in range(len(width) + 1):
@@ -54,35 +56,21 @@ def split(width, centre, keep):
     return parts
 
 
-def offset(left, right):
-    """The worst narrower part (a cap, a lid, a neck) against the body centre: (offset in px, body width, first row,
-    last row), or None without a narrower part.
-
-    The rows are cut into parts wherever the width or the centre jumps, so a tapered body stays one part, and a cap,
-    a neck and a contact shadow each become parts of their own. The body is the part with the largest area (the sum of
-    its row widths), so neither a wide contact shadow nor a tall cap is the body. Its width is the median of its row
-    widths, and its centre is the median centre of its rows at that width (of all its rows when a taper leaves fewer
-    than 10 at that width). The rows above the first full-width row and from 50% to 90% of the body width are then cut
-    again at each jump, so a smooth shoulder still leaves the cap as a part of its own, and each part is judged on its
-    own: a long centred neck cannot hide a short shifted cap."""
+def offset(left, right, split):
+    """The worst part above the body (a cap, a lid, a neck) against the body centre: (offset in px, body width, first
+    row, last row), or None when the box has no part of 8 rows or more above row `split` or under 10 body rows."""
     width = np.where(left >= 0, right - left + 1, 0)
     if width.max() == 0:
         sys.exit("no bottle found in the box: the stage must be lighter than the bottle on both sides")
     centre = (left + right) / 2
-    body = max(split(width, centre, width > 0), key=lambda p: width[p[0]:p[1] + 1].sum())
-    if body[1] - body[0] + 1 < 10:
-        return None
     rows = np.arange(len(width))
-    inside = (rows >= body[0]) & (rows <= body[1])
-    bw = float(np.median(width[inside]))
-    full = inside & (np.abs(width - bw) <= 0.03 * bw)
-    if full.sum() < 10:
-        full = inside  # a tapered body
-    body_c = float(np.median(centre[full]))
-    top = int(np.argmax(full))  # the first row at the full body width
-    narrow = (width >= 0.5 * bw) & (width <= 0.9 * bw) & (rows < top)
+    body = (rows >= split) & (width > 0)
+    if body.sum() < 10:
+        return None
+    bw = float(np.median(width[body]))
+    body_c = float(np.median(centre[body]))
     worst = None
-    for a, b in split(width, centre, narrow):
+    for a, b in split_rows(width, centre, (rows < split) & (width > 0)):
         if b - a + 1 < 8:
             continue  # a clip, an edge or a shadow line
         off = float(np.median(centre[a:b + 1])) - body_c
@@ -95,6 +83,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--render", required=True)
     ap.add_argument("--box", required=True, help="X0,Y0,X1,Y1 in pixels: the bottle with some plain stage on both sides")
+    ap.add_argument("--split", required=True, type=int, help="Y in pixels: the first row of the body, below the cap and the neck")
     ap.add_argument("--tolerance", type=float, default=0.01, help="the share of the body width the cap may sit off centre")
     a = ap.parse_args(argv)
     try:
@@ -107,10 +96,12 @@ def main(argv=None):
         sys.exit(f"cannot read the picture {a.render}: {e}")
     if not (0 <= x0 < x1 <= im.width and 0 <= y0 < y1 <= im.height) or x1 - x0 < 20 or y1 - y0 < 20:
         sys.exit(f"--box {a.box} is not inside the {im.width} x {im.height} picture, or is too small")
+    if not y0 < a.split < y1:
+        sys.exit(f"--split {a.split} is not inside the box rows {y0} to {y1}")
     lum = np.asarray(im.crop((x0, y0, x1, y1))).astype(np.float32)
-    r = offset(*edges(lum))
+    r = offset(*edges(lum), a.split - y0)
     if r is None:
-        sys.exit("no cap found: the box needs the cap and the body (a cap 50% to 90% of the body width)")
+        sys.exit("no cap found: the box needs a cap of 8 rows or more above --split and 10 body rows or more below it")
     off, bw, r0, r1 = r
     ok = abs(off) <= a.tolerance * bw
     side = "right" if off > 0 else "left"
