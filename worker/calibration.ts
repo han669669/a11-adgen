@@ -553,8 +553,10 @@ export async function replaySummary(env: Env, f: ReportFilter = {}) {
   const counts: Record<string, number> = {};
   for (const { r, res } of rows) if (r.kind === "triplet_replay")
     for (const i of res.items ?? []) if (typeof i.position === "number" && (f.engine === undefined || i.engine === f.engine)) counts[String(i.position)] = (counts[String(i.position)] ?? 0) + 1;
-  const chose = ["1", "2", "3"].reduce((s, p) => s + (counts[p] ?? 0), 0);
-  const share = Object.fromEntries(["1", "2", "3"].map((p) => [p, chose ? round((counts[p] ?? 0) / chose) : null]));
+  // A set can hold more than 3 drafts (he can pick an older draft when newer drafts are there), so each chosen position counts.
+  const places = [...new Set(["1", "2", "3", ...Object.keys(counts)])].sort((a, b) => Number(a) - Number(b));
+  const chose = places.reduce((s, p) => s + (counts[p] ?? 0), 0);
+  const share = Object.fromEntries(places.map((p) => [p, chose ? round((counts[p] ?? 0) / chose) : null]));
   return {
     runs: rows.slice(0, 10).map(({ r, res }) => {
       // With engine, n and the agreement count the items of that engine only.

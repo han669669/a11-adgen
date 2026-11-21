@@ -297,6 +297,14 @@ describe("calibration", () => {
       expect(await picturesOf(idea7)).toEqual([[key(7, 1), key(7, 2)]]);
     });
 
+    it("the position bias counts a choice at each position, also after position 3 (a set can hold more than 3 drafts)", async () => {
+      const { env, raw } = await set();
+      // 30 choices on sets of 4 drafts: 11 at position 1, 5 at 2, 4 at 3, 10 at 4. No position has more than half.
+      const items = [1, 2, 3, 4].flatMap((position) => Array.from({ length: [11, 5, 4, 10][position - 1]! }, () => ({ engine: 2, right: false, position })));
+      raw.prepare("INSERT INTO calibration_runs (id, kind, as_of, split, n, result, created_at) VALUES ('r4', 'triplet_replay', '2026-11-12T00:00:00.000Z', 'all', 30, ?, '2026-11-12T00:00:00.000Z')").run(JSON.stringify({ items }));
+      expect((await run(env, "calibration_report", {})).replays.positionBias).toEqual({ choices: 30, share: { "1": 0.367, "2": 0.167, "3": 0.133, "4": 0.333 }, alarm: false });
+    });
+
     it("(4.11) the critic subagent's tools do not hold the calibration tools", () => {
       const tools = readFileSync(new URL("../plugin/agents/critic.md", import.meta.url), "utf8").match(/^tools: (.*)$/m)![1]!;
       expect(tools).not.toMatch(/calibration_/);
