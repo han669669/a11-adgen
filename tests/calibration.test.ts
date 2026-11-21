@@ -247,14 +247,14 @@ describe("calibration", () => {
     it("a triplet holds only the drafts the owner saw: after his previous pass, and for engine 3 the eligible drafts of the round", async () => {
       const { env, raw, e2 } = await set();
       const idea = (raw.prepare("SELECT id FROM ideas WHERE batch_id = ? AND n = 1").get(e2) as { id: string }).id;
-      // An earlier full pass on idea 1 at 02:00, after its first 2 drafts: only the third draft was in front of him at his pick.
+      // An earlier full pass on idea 1 at 02:00, after 2 of its drafts: only the draft made after it (draft 1, his pick) was in front of him at his pick.
       raw.prepare("INSERT INTO verdicts (id, batch_id, idea_id, stage, mark, owner_said, created_at) VALUES ('vp0', ?, ?, 'draft', 'pass', 'no', '2026-11-10T02:00:00.000Z')").run(e2, idea);
-      raw.prepare("UPDATE renders SET created_at = '2026-11-10T02:30:00.000Z' WHERE idea = ? AND id LIKE '13%'").run(idea);
-      raw.prepare("UPDATE renders SET created_at = '2026-11-10T01:00:00.000Z' WHERE idea = ? AND id NOT LIKE '13%'").run(idea);
+      raw.prepare("UPDATE renders SET created_at = '2026-11-10T02:30:00.000Z' WHERE idea = ? AND id LIKE '11%'").run(idea);
+      raw.prepare("UPDATE renders SET created_at = '2026-11-10T01:00:00.000Z' WHERE idea = ? AND id NOT LIKE '11%'").run(idea);
       const items = (await run(env, "calibration_items", { kind: "triplet", seed: "run-3" })).items as { id: string; pictures: string[] }[];
-      // Two decisions on idea 1: the pass (it saw drafts 1 and 2) and the pick (it saw draft 3 only).
+      // Two decisions on idea 1: the pass (it saw drafts 2 and 3) and the pick (it saw draft 1 only).
       const one = items.filter((i) => i.id.split(":")[2] === idea).sort((a, b) => a.id.localeCompare(b.id));
-      expect(one.map((i) => [...i.pictures].sort())).toEqual([[key(1, 1), key(1, 2)], [key(1, 3)]]);
+      expect(one.map((i) => [...i.pictures].sort())).toEqual([[key(1, 2), key(1, 3)], [key(1, 1)]]);
       // Engine 3: one draft not eligible, one checked in an older round; only the eligible draft of the current round stays.
       // Engine 3 (idea 6 of the engine 3 batch): one draft checked in an older round, one not eligible; only the eligible draft of the current round stays.
       const idea6 = decidedSet(raw, E3, 6, 3);
@@ -267,6 +267,42 @@ describe("calibration", () => {
       rec("draft_check", { renderId: "63000000-0000-4000-8000-000000000000", eligible: true, round: 2 }, T1, 3);
       const e3 = (await run(env, "calibration_items", { kind: "triplet", seed: "run-3" })).items as { id: string; pictures: string[] }[];
       expect(e3.find((i) => i.id.split(":")[2] === idea6)!.pictures).toEqual([key(6, 3)]);
+    });
+
+    it("a pick of a draft from before a full pass, or of an earlier round, holds the picked draft with the drafts he saw", async () => {
+      const { env, raw, e2 } = await set();
+      const picturesOf = async (idea: string) =>
+        ((await run(env, "calibration_items", { kind: "triplet", seed: "run-4" })).items as { id: string; pictures: string[] }[])
+          .filter((i) => i.id.split(":")[2] === idea).sort((a, b) => a.id.localeCompare(b.id)).map((i) => [...i.pictures].sort());
+      // Idea 2: 3 drafts at 01:00, a full pass at 03:00, then he takes draft 2 of that set at 04:00 (picks_save gives the pick that time).
+      const idea2 = (raw.prepare("SELECT id FROM ideas WHERE batch_id = ? AND n = 2").get(e2) as { id: string }).id;
+      raw.prepare("INSERT INTO verdicts (id, batch_id, idea_id, stage, mark, owner_said, created_at) VALUES ('vp2', ?, ?, 'draft', 'pass', 'no', '2026-11-10T03:00:00.000Z')").run(e2, idea2);
+      const all = [key(2, 1), key(2, 2), key(2, 3)];
+      // The pass and the pick are on the same 3 drafts, and no item is lost.
+      expect(await picturesOf(idea2)).toEqual([all, all]);
+      expect((await run(env, "calibration_items", { kind: "triplet", seed: "run-4" })).size).toEqual({ items: 6, decided: 6, lost: 0 });
+      // A new draft after the pass: he saw it too, and took the older one.
+      raw.prepare(`INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, image_keys, usd_est, created_at, updated_at)
+        VALUES ('24000000-0000-4000-8000-000000000000', ?, ?, 'draft', 'done', 'p', '[]', 1024, 1280, 'low', 1, ?, 0.02, '2026-11-10T03:30:00.000Z', '2026-11-10T03:30:00.000Z')`).run(e2, idea2, JSON.stringify([key(2, 4)]));
+      expect(await picturesOf(idea2)).toEqual([all, [...all, key(2, 4)]]);
+      // Engine 3: he takes the eligible draft of round 1 when round 2 is the current round. The set holds it with the eligible draft of round 2.
+      const idea7 = decidedSet(raw, E3, 7, 1);
+      const rec = (kind: string, body: unknown, at: string, v = 1) =>
+        raw.prepare("INSERT INTO batch_records (id, batch_id, kind, idea_id, version, body, author, created_at) VALUES (?, ?, ?, ?, ?, ?, 'art-director', ?)").run(crypto.randomUUID(), E3, kind, idea7, v, JSON.stringify(body), at);
+      rec("direction", { drafts: [] }, "2026-11-09T00:00:00.000Z", 1);
+      rec("draft_check", { renderId: "71000000-0000-4000-8000-000000000000", eligible: true, round: 1 }, T1, 1);
+      rec("direction", { drafts: [] }, "2026-11-09T12:00:00.000Z", 2);
+      rec("draft_check", { renderId: "72000000-0000-4000-8000-000000000000", eligible: true, round: 2 }, T1, 2);
+      rec("draft_check", { renderId: "73000000-0000-4000-8000-000000000000", eligible: false, round: 2 }, T1, 3);
+      expect(await picturesOf(idea7)).toEqual([[key(7, 1), key(7, 2)]]);
+    });
+
+    it("the position bias counts a choice at each position, also after position 3 (a set can hold more than 3 drafts)", async () => {
+      const { env, raw } = await set();
+      // 30 choices on sets of 4 drafts: 11 at position 1, 5 at 2, 4 at 3, 10 at 4. No position has more than half.
+      const items = [1, 2, 3, 4].flatMap((position) => Array.from({ length: [11, 5, 4, 10][position - 1]! }, () => ({ engine: 2, right: false, position })));
+      raw.prepare("INSERT INTO calibration_runs (id, kind, as_of, split, n, result, created_at) VALUES ('r4', 'triplet_replay', '2026-11-12T00:00:00.000Z', 'all', 30, ?, '2026-11-12T00:00:00.000Z')").run(JSON.stringify({ items }));
+      expect((await run(env, "calibration_report", {})).replays.positionBias).toEqual({ choices: 30, share: { "1": 0.367, "2": 0.167, "3": 0.133, "4": 0.333 }, alarm: false });
     });
 
     it("(4.11) the critic subagent's tools do not hold the calibration tools", () => {

@@ -251,6 +251,20 @@ describe("batch flow", () => {
       expect((await ideaOf(env, b.id, ideas[0]!.id)).drafts.every((d) => d.rank === null && d.reason === null)).toBe(true);
     });
 
+    it("an engine 2 pick saved again after a full pass keeps its time (engine 2 has no draft steps to end)", async () => {
+      const { env, raw } = makeEnv();
+      const { b, ideas } = await seed(env);
+      const k = addDraft(raw, b.id, ideas[0]!.id, "e1111111-1111-1111-1111-111111111111");
+      const at = async () => (await env.DB.prepare("SELECT note, created_at FROM picks WHERE render_key = ?").bind(k[0]).first<{ note: string; created_at: string }>())!;
+      await batch.picksSave(env, b.id, [{ key: k[0], note: "this one" }]);
+      const first = (await at()).created_at;
+      await new Promise((r) => setTimeout(r, 5));
+      await batch.batchUpdate(env, { id: b.id, ownerVerdicts: [{ stage: "draft", mark: "pass", ideaId: ideas[0]!.id, ownerSaid: "none of these" }] });
+      await new Promise((r) => setTimeout(r, 5));
+      await batch.picksSave(env, b.id, [{ key: k[0], note: "this one after all" }]);
+      expect(await at()).toEqual({ note: "this one after all", created_at: first });
+    });
+
     it("(d, e2) shows the rank after a full pass, but holds the drafts made after it", async () => {
       const { env, raw } = makeEnv();
       const { b, ideas } = await seed(env);
