@@ -532,6 +532,34 @@ class Headline(Tmp):
         self.assertLessEqual(xs.max(), 0.9 * 800 + 3)
         self.assertIn("raise --footnote-y", exit_message(run, plain, "--footnote-y", "0.975"))
 
+    def test_the_words_sit_on_one_tone(self):
+        # The real failure (Cat & the Fiddle, engine 3, 21-11-2026): a white and brand-yellow (#FFC805) split down the middle
+        # of the backdrop cut "Chocolate" and "so". Grain as the photo finish adds it; the check must ignore that.
+        rng = np.random.default_rng(7)
+        grain = lambda: rng.integers(-10, 11, (1280, 1024, 1))
+        split = np.full((1280, 1024, 3), 255)
+        split[:, 512:] = (255, 200, 5)
+        split = self.save("split.png", np.clip(split + grain(), 0, 255))
+        words = ["--font", self.FONT, "--case", "upper", "--headline", "Chocolate | or fruit?", "--subline", "Why not both, so everyone wins."]
+
+        def run(src, area):
+            out = os.path.join(self.dir.name, "out.jpg")
+            with contextlib.redirect_stdout(io.StringIO()):
+                headline.main(["--in", src, "--out", out, *words, "--area", area])
+            return out
+
+        msg = exit_message(run, split, "0.07,0.08,0.93,0.33")
+        self.assertIn("edge runs down through the words at 50", msg)
+        self.assertTrue(os.path.isfile(run(split, "0.06,0.08,0.46,0.33")))  # every word on the white half
+        self.assertTrue(os.path.isfile(run(split, "0.54,0.08,0.94,0.33")))  # every word on the yellow half
+        # A horizontal split between the lines: the headline on white, the subline on yellow.
+        band = np.full((1280, 1024, 3), 255)
+        band[200:] = (255, 200, 5)
+        self.assertIn("edge runs across the words", exit_message(run, self.save("band.png", band), "0.07,0.08,0.93,0.33"))
+        # A smooth light fall-off of 70 levels across the picture is one tone, not an edge.
+        ramp = np.repeat(np.linspace(200, 130, 1024)[None, :, None], 1280, 0).repeat(3, 2)
+        self.assertTrue(os.path.isfile(run(self.save("ramp.png", np.clip(ramp + grain(), 0, 255)), "0.07,0.08,0.93,0.33")))
+
     def test_the_logo_preview_is_drawn_at_the_top_centre(self):
         logo = os.path.join(self.dir.name, "logo.png")
         Image.new("RGBA", (100, 40), (0, 0, 0, 255)).save(logo)

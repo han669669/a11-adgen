@@ -52,6 +52,11 @@ Breathing space (owner, 20-11-2026): the script stops when the area or the logo 
 --min-clear is set under 0.03. Take --logo-width and --logo-top from the kit placement on every ad of a brand.
 --footnote sets the claim's source line at the bottom (--footnote-align, --footnote-y) and stops when that line
 would sit on an object or a shadow edge.
+
+One tone under the words (owner, 21-11-2026: a white and yellow backdrop split cut "Chocolate" and "so"): the script
+stops when a sharp colour or shadow edge runs straight down through a line of words, or across the words (between the
+lines too). A smooth light fall-off and photo grain are not an edge. Move --area onto one tone, or render the backdrop
+under the words as one tone.
 """
 import argparse
 import math
@@ -62,7 +67,7 @@ import unicodedata
 import urllib.parse
 import urllib.request
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 FORMATS = ["JPEG", "PNG", "WEBP"]
 MAX_LINES = 3
@@ -244,6 +249,37 @@ def busy_share(im, box):
     return n / max(1, w * h)
 
 
+SPLIT_STEP = 40  # the colour step (largest channel difference) across a few pixels that counts as a sharp edge
+SPLIT_SHARE = 0.6  # an edge that runs along this share of a word box cuts the words
+
+
+def split_edge(im, box, vertical):
+    """Where a sharp colour or shadow edge runs straight through box (x0, y0, x1, y1), as a pixel column (vertical) or
+    row, or None (owner, 21-11-2026: a white and yellow backdrop split cut "Chocolate"). A smooth light fall-off is no edge."""
+    s = im.height / 1280
+    k = max(2, round(4 * s))
+    x0, y0, x1, y1 = box
+    if vertical:
+        x0, x1 = max(0, x0 - k), min(im.width, x1 + k)
+    else:
+        y0, y1 = max(0, y0 - k), min(im.height, y1 + k)
+    x0, y0, x1, y1 = max(0, x0), max(0, y0), min(im.width, x1), min(im.height, y1)
+    region = im.crop((x0, y0, x1, y1)).filter(ImageFilter.GaussianBlur(1.5 * s))
+    w, h = region.size
+    if (w if vertical else h) <= k or min(w, h) < 2:
+        return None
+    a = region.crop((k, 0, w, h) if vertical else (0, k, w, h))
+    b = region.crop((0, 0, w - k, h) if vertical else (0, 0, w, h - k))
+    r, g, bl = ImageChops.difference(a, b).split()
+    step = ImageChops.lighter(ImageChops.lighter(r, g), bl).point(lambda v: 1 if v > SPLIT_STEP else 0)
+    data, sw, sh = step.tobytes(), step.width, step.height
+    if vertical:  # a column where most rows step: a vertical edge
+        best, at = max((sum(data[x::sw]) / sh, x) for x in range(sw))
+        return x0 + at + k // 2 if best >= SPLIT_SHARE else None
+    best, at = max((sum(data[y * sw:(y + 1) * sw]) / sw, y) for y in range(sh))
+    return y0 + at + k // 2 if best >= SPLIT_SHARE else None
+
+
 def foot(im, a, font_path, color, left, right):
     """The footnote: small, 80% opacity, at the bottom, and only on plain backdrop (owner, 20-11-2026: a prop's handle covered "analysis")."""
     if not (0 < a.footnote_size < 0.05 and 0 < a.footnote_y < 1):
@@ -380,12 +416,15 @@ def main(argv=None):
         sys.exit(f"the headline is {hf.size}px, {100 * hf.size / H:.1f}% of the height, under --min-head {100 * a.min_head:.1f}%: make the area larger or break the lines with ' | '")
 
     ink = [0]  # the lowest drawn pixel row: descenders and marks such as a cedilla count (the --product-top check)
+    boxes = []  # each drawn line's ink box (the split check)
+    src = im.copy()  # the backdrop under the words, before any drawing
 
     def put(lines, font, step, y, anchor="la", marked=frozenset()):
         for line in lines:
             w = draw.textlength(line, font=font)
             ink[0] = max(ink[0], draw.textbbox((0, y), line, font=font, anchor=anchor)[3])
             x = bx0 if a.align == "left" else bx0 + bw - w if a.align == "right" else bx0 + (bw - w) / 2
+            boxes.append(draw.textbbox((x, y), line, font=font, anchor=anchor))
             if marked:  # word by word, so the accent words take their own colour; the spaces keep the line's own width
                 words = line.split(" ")
                 for i, word in enumerate(words):
@@ -429,6 +468,18 @@ def main(argv=None):
         sys.exit(f"the text ends at {100 * ink[0] / H:.1f}% of the height, less than {100 * a.min_clear:.1f}% above the product top ({100 * a.product_top:.1f}%): move the area up or make it shorter")
     if ink[0] > (1 - m) * H:
         sys.exit(f"the text ends at {100 * ink[0] / H:.1f}% of the height, less than --min-margin {100 * m:.0f}% above the bottom edge: move the area up or make it shorter")
+    # One tone under the words (owner, 21-11-2026): no sharp backdrop edge runs through a line, or between the lines.
+    pad = max(2, round(0.008 * H))
+    for b in boxes:
+        b = (int(b[0]) - pad, int(b[1]) - pad, int(b[2]) + pad, int(b[3]) + pad)
+        at = split_edge(src, b, vertical=True)
+        if at is not None:
+            sys.exit(f"a sharp colour or shadow edge runs down through the words at {100 * at / W:.1f}% of the width: move --area so every word sits on one tone of the backdrop, or render the backdrop under the words as one tone")
+    if boxes:
+        union = (min(int(b[0]) for b in boxes) - pad, min(int(b[1]) for b in boxes) - pad, max(int(b[2]) for b in boxes) + pad, max(int(b[3]) for b in boxes) + pad)
+        at = split_edge(src, union, vertical=False)
+        if at is not None:
+            sys.exit(f"a sharp colour or shadow edge runs across the words at {100 * at / H:.1f}% of the height: move --area so every word sits on one tone of the backdrop, or render the backdrop under the words as one tone")
     if a.footnote:
         foot(im, a, sub_path, color, bx0, bx0 + bw)
     if logo:

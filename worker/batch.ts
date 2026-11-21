@@ -464,10 +464,13 @@ async function draftKeys(env: Env, batchId: string): Promise<Map<string, string>
   return map;
 }
 
-/** Engine 3: the keys of the drafts that count now (current) and whose newest check says eligible: the drafts the critic sees. */
-async function eligibleKeys(env: Env, batchId: string): Promise<Set<string>> {
+/**
+ * Engine 3: the keys of the drafts whose newest check says eligible and that count now (current): the drafts the critic
+ * sees. anyRound: also the eligible drafts of an earlier direction round or from before a full pass (the owner's pick).
+ */
+async function eligibleKeys(env: Env, batchId: string, opts: { anyRound?: boolean } = {}): Promise<Set<string>> {
   const g = (await batchGet(env, batchId)) as { ideas: { drafts: { key: string; eligible?: boolean | null; current?: boolean }[] }[] };
-  return new Set(g.ideas.flatMap((i) => i.drafts.filter((d) => d.eligible === true && d.current === true).map((d) => d.key)));
+  return new Set(g.ideas.flatMap((i) => i.drafts.filter((d) => d.eligible === true && (opts.anyRound || d.current === true)).map((d) => d.key)));
 }
 
 export async function draftsRank(env: Env, batchId: string, ranks: { key: string; rank: number; reason?: string }[], promptVersion = "") {
@@ -518,15 +521,17 @@ export async function picksSave(env: Env, batchId: string, picks: { key: string;
   const keys = await draftKeys(env, batchId);
   const at = now();
   for (const p of picks) if (!keys.has(p.key)) throw new Error(`${p.key} is not a finished draft of batch ${batchId}.`);
-  // Engine 3 (design pack §3.6): the owner picks from the eligible current drafts, the drafts the board shows.
-  // A pick that already has a final stays valid, even after a later round.
+  // Engine 3 (design pack §3.6): the owner picks a draft whose newest check says eligible. The board shows the current
+  // ones; a draft of an earlier direction round, or from before a full pass, is his choice too (owner, 21-11-2026: he kept
+  // a round 1 draft over the later round's final). A draft that failed its check, or has none, is refused.
+  // A pick that already has a final stays valid, even after a later check.
   const eng = await env.DB.prepare("SELECT engine FROM batches WHERE id = ?").bind(batchId).first<{ engine: number }>();
   if (eng?.engine === 3 && picks.length) {
-    const ok = await eligibleKeys(env, batchId);
+    const ok = await eligibleKeys(env, batchId, { anyRound: true });
     const done = await env.DB.prepare("SELECT render_key FROM picks WHERE batch_id = ? AND final_render_id IS NOT NULL").bind(batchId).all<{ render_key: string }>();
     for (const r of done.results) ok.add(r.render_key);
     const bad = picks.find((p) => !ok.has(p.key));
-    if (bad) throw new InputError(`${bad.key} is not an eligible current draft: pick from the drafts the board shows.`);
+    if (bad) throw new InputError(`${bad.key} is not an eligible draft: its newest check must say eligible (batch_get drafts[].eligible).`);
   }
   // One draft per idea in a call: each pick becomes a paid final.
   const ideaIds = picks.map((p) => keys.get(p.key)!);
