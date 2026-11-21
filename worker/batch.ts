@@ -9,6 +9,7 @@ import { conceptPick, conceptReviewGet, type PickInput } from "./review";
 import { InputError } from "./schema";
 import * as fal from "./fal";
 import { storeSubjectImages } from "./subjectimages";
+import { copyWarnings } from "./copycheck";
 
 /** Funnel stages (owner, 2026-11-06). Picks per batch (a database trigger enforces it): 1 per stage for engine 2; 3 in any mix for engine 3, where the stage is the critic's role. */
 export const FORMATS = ["tof", "mof", "bof"] as const;
@@ -319,7 +320,7 @@ export async function ideasSaveFull(env: Env, batchId: string, ideas: IdeaInput[
   return {
     engine: batch.engine,
     ideas: saved.map((s) => ({ id: s.id, n: s.n, format: s.format, headline: s.headline, picked: !!s.picked })),
-    warnings: v3?.warnings ?? [],
+    warnings: [...(v3?.warnings ?? []), ...copyWarnings(ideas)],
   };
 }
 

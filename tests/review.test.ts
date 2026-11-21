@@ -253,7 +253,7 @@ describe("ideas_pick on an engine 2 batch", () => {
         { format: "tof", insight: "Bought for breakfast.", visual: "A pouch.", headline: "Gone again." },
       ],
     });
-    const [a, b] = saved as Idea[];
+    const [a, b] = saved.ideas as Idea[];
     await expect(run(env, "ideas_pick", { batchId: e2, ids: [a!.id], outcome: "select" })).rejects.toThrow("for an engine 3 batch only");
     await expect(run(env, "ideas_pick", { batchId: e2, ids: [] })).rejects.toThrow("Name 1 to 3 ideas to pick.");
     await expect(run(env, "ideas_pick", { batchId: e2 })).rejects.toThrow("Name 1 to 3 ideas to pick.");

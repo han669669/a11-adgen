@@ -134,7 +134,7 @@ describe("ideas_save on an engine 2 batch", () => {
     const { env, e2 } = await seeded();
     const plain = { format: "tof", insight: "Bought for breakfast.", visual: "A pouch.", headline: "Gone." };
     const r = await run(env, "ideas_save", { batchId: e2, ideas: [plain] });
-    expect(r).toEqual([{ id: expect.any(String), n: 1, format: "tof", headline: "Gone.", picked: false }]);
+    expect(r).toEqual({ ideas: [{ id: expect.any(String), n: 1, format: "tof", headline: "Gone.", picked: false }], warnings: [] });
     await expect(run(env, "ideas_save", { batchId: e2, ideas: [{ ...plain, concept: concept("t1") }] })).rejects.toThrow(
       "territories, concept and promptVersion are for an engine 3 batch only.",
     );
