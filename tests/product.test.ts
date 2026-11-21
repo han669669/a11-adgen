@@ -4,6 +4,7 @@ import type { Env } from "../worker/env";
 import { TOOLS } from "../worker/mcp";
 import { validate } from "../worker/schema";
 import { fakeD1 } from "./helpers/d1";
+import { withRules } from "./helpers/engine3";
 
 /** a11-engine v3 Phase 5 (unit 8): a product is a lasting entity, so its facts carry over from batch to batch. */
 
@@ -16,7 +17,7 @@ function makeEnv() {
 }
 const run = async (env: Env, name: string, args: unknown) => {
   const t = TOOLS.find((x) => x.name === name)!;
-  const c = (await t.run(env, validate(t.inputSchema, args))).content[0]!;
+  const c = (await t.run(env, validate(t.inputSchema, withRules(name, args)))).content[0]!;
   return JSON.parse(c.type === "text" ? c.text : "{}");
 };
 const product = (url: string, extra: Record<string, unknown> = {}, brandSlug = "pasar") => ({ brandSlug, kind: "product", title: "Gula Melaka Granola", url, ...extra });

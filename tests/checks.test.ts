@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as batch from "../worker/batch";
 import { TOOLS } from "../worker/mcp";
 import { validate } from "../worker/schema";
-import { addRender, approved, boardReady, direction, draft, draftCheck, E3, rankAll, renderId, run } from "./helpers/engine3";
+import { withRules, addRender, approved, boardReady, direction, draft, draftCheck, E3, rankAll, renderId, run } from "./helpers/engine3";
 
 /** a11-engine v3 Phase 3: draft and final checks, eligible drafts, the rank and the board gate (design pack §3.6, tests 3.6 to 3.9). */
 
@@ -59,8 +59,8 @@ describe("checks_save", () => {
     await expect(saveCheck(env, idea, noAttempt)).rejects.toThrow("draft_check needs attempt");
     await expect(saveCheck(env, idea, draftCheck(renderId(1, 1), { items: [{ code: "D3", found: false }, { code: "D3", found: false }] }))).rejects.toThrow("names a code twice");
     const schema = TOOLS.find((t) => t.name === "checks_save")!.inputSchema;
-    expect(() => validate(schema, { batchId: E3, ideaId: idea, kind: "draft_check", check: draftCheck(renderId(1, 1), { items: [{ code: "D12", found: false }] }) })).toThrow("wrong format");
-    expect(() => validate(schema, { batchId: E3, ideaId: idea, kind: "draft_check", check: draftCheck(renderId(1, 1), { items: [{ code: "D0", found: false }] }) })).toThrow("wrong format");
+    expect(() => validate(schema, withRules("checks_save", { batchId: E3, ideaId: idea, kind: "draft_check", check: draftCheck(renderId(1, 1), { items: [{ code: "D12", found: false }] }) }))).toThrow("wrong format");
+    expect(() => validate(schema, withRules("checks_save", { batchId: E3, ideaId: idea, kind: "draft_check", check: draftCheck(renderId(1, 1), { items: [{ code: "D0", found: false }] }) }))).toThrow("wrong format");
   });
 
   it("takes D10, pasted product light, and a draft with it found is not eligible (Allies engine 3 test, 20-11-2026)", async () => {
@@ -69,7 +69,7 @@ describe("checks_save", () => {
     addRender(raw, renderId(1, 1), idea);
     const schema = TOOLS.find((t) => t.name === "checks_save")!.inputSchema;
     const pasted = { code: "D10", found: true, note: "The bottle keeps the packshot's studio highlight band; the scene light comes from the left." };
-    expect(() => validate(schema, { batchId: E3, ideaId: idea, kind: "draft_check", check: draftCheck(renderId(1, 1), { items: [pasted] }) })).not.toThrow();
+    expect(() => validate(schema, withRules("checks_save", { batchId: E3, ideaId: idea, kind: "draft_check", check: draftCheck(renderId(1, 1), { items: [pasted] }) }))).not.toThrow();
     await expect(saveCheck(env, idea, draftCheck(renderId(1, 1), { items: [pasted] }))).rejects.toThrow("A draft with D10 is not eligible");
     expect(await saveCheck(env, idea, draftCheck(renderId(1, 1), { eligible: false, items: [pasted], reason: "Pasted product light (D10)." }))).toMatchObject({ eligible: false });
   });
@@ -80,11 +80,11 @@ describe("checks_save", () => {
     addRender(raw, renderId(1, 1), idea);
     const schema = TOOLS.find((t) => t.name === "checks_save")!.inputSchema;
     const offCentre = { code: "D11", found: true, note: "cap_check: the cap sits 5.5 px right of the body centre (2.4% of the body width)." };
-    expect(() => validate(schema, { batchId: E3, ideaId: idea, kind: "draft_check", check: draftCheck(renderId(1, 1), { items: [offCentre] }) })).not.toThrow();
+    expect(() => validate(schema, withRules("checks_save", { batchId: E3, ideaId: idea, kind: "draft_check", check: draftCheck(renderId(1, 1), { items: [offCentre] }) }))).not.toThrow();
     await expect(saveCheck(env, idea, draftCheck(renderId(1, 1), { items: [offCentre] }))).rejects.toThrow("A draft with D11 is not eligible");
     // All 11 D items and 8 F items fit in one check.
     const all = [...Array.from({ length: 11 }, (_, i) => `D${i + 1}`), ...Array.from({ length: 8 }, (_, i) => `F${i + 1}`)].map((code) => ({ code, found: false }));
-    expect(() => validate(schema, { batchId: E3, ideaId: idea, kind: "draft_check", check: draftCheck(renderId(1, 1), { items: all }) })).not.toThrow();
+    expect(() => validate(schema, withRules("checks_save", { batchId: E3, ideaId: idea, kind: "draft_check", check: draftCheck(renderId(1, 1), { items: all }) }))).not.toThrow();
     expect(await saveCheck(env, idea, draftCheck(renderId(1, 1), { items: all }))).toMatchObject({ eligible: true });
   });
 

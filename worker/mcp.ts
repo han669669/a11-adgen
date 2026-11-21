@@ -1305,6 +1305,7 @@ export const TOOLS: Tool[] = [
 for (const t of TOOLS) {
   if (!RULES_GATED.has(t.name)) continue;
   t.inputSchema.properties.rulesVersion = { type: "string", maxLength: 16, description: "Required: the rulesVersion from rules_get. Call rules_get first and follow the house rules." };
+  t.inputSchema.required = [...(t.inputSchema.required ?? []), "rulesVersion"];
   t.description += " Send rulesVersion from rules_get (the owner's house rules): a call without the current one is refused.";
 }
 export { RULES_VERSION };

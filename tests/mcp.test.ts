@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Env } from "../worker/env";
+import { RULES_VERSION } from "../worker/houserules";
 import { handleMcp, INSTRUCTIONS, TOOLS } from "../worker/mcp";
 import { validate } from "../worker/schema";
 
@@ -345,7 +346,7 @@ describe("tool call log", () => {
 
 describe("validate", () => {
   const schema = TOOLS.find((t) => t.name === "render_submit")!.inputSchema;
-  const ok = { batch: "b", idea: "i", kind: "draft", prompt: "x".repeat(40), referenceUrls: ["https://a.b/c.png"] };
+  const ok = { rulesVersion: RULES_VERSION, batch: "b", idea: "i", kind: "draft", prompt: "x".repeat(40), referenceUrls: ["https://a.b/c.png"] };
   it("fills defaults", () => expect(validate(schema, ok).numImages).toBe(1));
   it("rejects an unknown kind", () => expect(() => validate(schema, { ...ok, kind: "huge" })).toThrow());
   it("rejects a non-URL reference", () => expect(() => validate(schema, { ...ok, referenceUrls: ["file:///etc/passwd"] })).toThrow());

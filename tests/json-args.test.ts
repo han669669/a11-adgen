@@ -4,7 +4,8 @@ import type { Env } from "../worker/env";
 import { handleMcp, TOOLS, toolInput } from "../worker/mcp";
 import { decodeJsonArgs, InputError, type ObjectSchema } from "../worker/schema";
 import { exampleBrief } from "./fixtures/brief";
-import { addRender, approved, direction, draftCheck, E3, firstRound, type Idea, renderId, run, seeded, select } from "./helpers/engine3";
+import { RULES_VERSION } from "../worker/houserules";
+import { addRender, withRules, approved, direction, draftCheck, E3, firstRound, type Idea, renderId, run, seeded, select } from "./helpers/engine3";
 
 /**
  * Issue 142: an MCP client that cannot send a nested object (Cursor's dynamic tool wrapper sends it as null) can send
@@ -51,9 +52,9 @@ const CASES: [string, Record<string, unknown>][] = [
 
 describe("JSON text for object and array arguments", () => {
   it.each(CASES)("%s: JSON text at the top level and at every level gives the same checked arguments as objects", (name, args) => {
-    const want = toolInput(tool(name), args);
-    expect(toolInput(tool(name), asText(args))).toEqual(want);
-    expect(toolInput(tool(name), deepText(args))).toEqual(want);
+    const want = toolInput(tool(name), withRules(name, args));
+    expect(toolInput(tool(name), withRules(name, asText(args)))).toEqual(want);
+    expect(toolInput(tool(name), withRules(name, deepText(args)))).toEqual(want);
   });
 
   it("parses JSON text for every top-level object and array argument of every tool", () => {
@@ -88,7 +89,7 @@ describe("JSON text for object and array arguments", () => {
     expect(() => toolInput(tool("brief_save"), JSON.stringify(CASES[0]![1]))).toThrow("Arguments must be an object.");
     // direction_save takes each plan as a string: JSON text there stays text.
     const d = direction();
-    const out = toolInput(tool("direction_save"), { batchId: E3, ideaId: ideas[0]!.id, direction: JSON.stringify(d), promptVersion: "0.2.15" });
+    const out = toolInput(tool("direction_save"), { rulesVersion: RULES_VERSION, batchId: E3, ideaId: ideas[0]!.id, direction: JSON.stringify(d), promptVersion: "0.2.15" });
     expect(typeof (out.direction as { drafts: { plan: unknown }[] }).drafts[0]!.plan).toBe("string");
     const input = { batchId: E3, ideaId: ideas[0]!.id, direction: { ...d, mechanism: JSON.stringify(d.mechanism) } };
     const copy = structuredClone(input);

@@ -57,6 +57,7 @@ describe("house rules", () => {
 describe("the rulesVersion gate", () => {
   it("adds rulesVersion to each gated tool and to no other", () => {
     for (const t of TOOLS) expect("rulesVersion" in t.inputSchema.properties).toBe(RULES_GATED.has(t.name));
+    for (const t of TOOLS) expect(t.inputSchema.required?.includes("rulesVersion") ?? false).toBe(RULES_GATED.has(t.name));
     expect([...RULES_GATED].every((n) => TOOLS.some((t) => t.name === n))).toBe(true);
   });
   it("says what to do when the version is missing or old", () => {

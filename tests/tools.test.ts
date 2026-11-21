@@ -5,6 +5,7 @@ import type { Env } from "../worker/env";
 import { TOOLS } from "../worker/mcp";
 import { validate } from "../worker/schema";
 import { fakeD1 } from "./helpers/d1";
+import { withRules } from "./helpers/engine3";
 
 /** Tools that no other test file named (found 09-11-2026), each run through its schema and run(), as tools/call does. */
 
@@ -19,7 +20,7 @@ function makeEnv() {
 }
 const run = async (env: Env, name: string, args: unknown) => {
   const t = TOOLS.find((x) => x.name === name)!;
-  const c = (await t.run(env, validate(t.inputSchema, args))).content[0]!;
+  const c = (await t.run(env, validate(t.inputSchema, withRules(name, args)))).content[0]!;
   return JSON.parse(c.type === "text" ? c.text : "{}");
 };
 

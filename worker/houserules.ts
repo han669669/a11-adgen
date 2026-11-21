@@ -25,10 +25,10 @@ const ALL = RULE_ROLES;
 export const CHECK_CODES: readonly (readonly [string, string])[] = [
   ["D1", "Writing on a prop: no readable text except the product's own label; no note, card, sign or printed paper."],
   ["D2", "Fake food: waxy, glossy, invented, cloned or wrong-colour food; food in a shape it never has; a model-drawn food prop or side food; any crumbs, smear, leftovers, torn cut face or slice pulled or set apart."],
-  ["D3", "AI-rendered prop: a drip, spill or stain, waxy liquid, a fused rim or handle, plastic texture. A side prop is dry and empty unless the owner asked."],
+  ["D3", "AI-rendered prop: a drip, spill or stain, waxy liquid, a fused rim or handle, plastic texture. A side prop is dry and empty, except the one real serving that D6 allows."],
   ["D4", "Physics: something floats or balances for show; no contact shadow; a pack handled as no real pack can be (a pouch folded more than once, branding covered)."],
   ["D5", "Off-putting placement: shoes by food, plates on the floor, a used tea bag, leftovers."],
-  ["D6", "Unneeded serving: a slice or poured glass that does not show what the pack hides or the size of a food sold by weight."],
+  ["D6", "Unneeded serving: a slice or poured glass that does not show what the pack hides or the size of a food sold by weight, or does not fit the headline."],
   ["D7", "Wrong or garbled logo, or a logo in a pill or badge. The real logo is drawn in code."],
   ["D8", "Race, ethnicity or religion named in copy, or made the point of the picture."],
   ["D9", "Box print that does not sit on the box: smeared lines, or stems that turn like a rotated sticker."],
@@ -50,7 +50,7 @@ const SECTIONS: readonly Section[] = [
     title: "The owner and the process",
     roles: ALL,
     rules: [
-      "The owner chooses: the 3 concepts (from ALL concepts, shown with each one's rough and the critic's notes; the critic's picks are advice), the words (the copy review, before any draft), 1 draft per idea, and every verdict on a final. Never pick for him, and never say which draft you prefer.",
+      "The owner chooses: in engine 3 the 3 concepts (from ALL concepts, shown with each one's rough and the critic's notes; the critic's picks are advice; in engine 2 the critic picks the 3 ideas), the words (the copy review, before any draft), 1 draft per idea, and every verdict on a final. Never pick for him, and never say which draft you prefer.",
       "Save his words exactly as he wrote them, with his spelling, case and punctuation (\"favorite\", \"OATSIDE\", a lowercase subline). Never correct them. Words he approved stand over every length guide.",
       "A draft verdict with mark 'pass' means he rejected ALL drafts of that idea. For a usable or liked draft, save the pick or a 'fix' note with his words. Never use 'pass' for usable.",
       "When he leaves a choice to you (\"ur pick\", \"use either pump or cap\"), choose the brand's main option, say which, and keep it in every round. When he chose an option (Allies: the cap, not the pump), never switch without asking him.",
@@ -83,7 +83,7 @@ const SECTIONS: readonly Section[] = [
     title: "Copy",
     roles: ["writer", "critic", "main"],
     rules: [
-      "Headline: up to 6 words most of the time, never more than 8. Subline: up to 8 words. Both together: up to 14. The shorter of two equal lines wins. Every ad has a subline unless the owner asks for a headline only. ideas_save warns when a line goes over.",
+      "Headline: up to 6 words most of the time, never more than 8. Subline: up to 8 words. Both together: up to 14. The shorter of two equal lines wins. Every ad has a subline: render_submit refuses a draft for an idea without one. ideas_save warns when a line goes over.",
       "Voice: the buyer's own plain words, local and conversational, full words and full stops. A direct question the product answers (\"Can't pick a flavour?\", \"Why pick just one flavour?\"), a first-person line (\"The only pie chart I like\"), or a short punch (\"Too slow.\", \"Last one already?\"). Singapore phrasing is welcome (\"So worth it.\").",
       "Do not write clever abstract turns (\"Everyone picks, nobody fights.\", \"The group chat can relax.\"), fragment lists (\"Ten people. Ten slices. S$58.90.\"), an argument against a rival that the picture cannot show, hype words (unlock, elevate, game-changer), invented urgency, a 'you' diagnosis question, or an exclamation mark without a reason.",
       "Only facts from the fact sheet, each with its source. No health claim. A claim from a study keeps a small footnote with its source on the picture (headline.py --footnote). Price math must be true and useful (S$58.90 for 10 slices is under S$6 a slice, against S$8 to S$10 for a cafe slice).",
@@ -156,7 +156,7 @@ const SECTIONS: readonly Section[] = [
       "Calm: one hero, 5 elements or fewer, each one earning its place. No filler prop.",
       "Props match the brand's level. No cheap or stock props.",
       "The stage is a brand-colour family first (a seamless wall and floor with one hard shadow, two colour blocks, a coloured still life). A real room only when the concept needs a place. Busy real rooms (a kopitiam, a provision shop, a delivery box of many packs) read as AI.",
-      "A side cup or glass is dry and empty by default. A subtle real filled cup (a real tulip cup with a flat white and faint steam) only when the owner asks. Never a CG-perfect cup.",
+      "A side cup or glass is dry and empty by default. A real serving only as D6 allows it. A subtle real filled cup as a side prop (a real tulip cup with a flat white and faint steam) only when the owner asks. Never a CG-perfect cup.",
       "Hands only when the idea needs them, never beside food, and only when the hand looks like a real camera photo.",
       "The 3 drafts of an idea differ in how the device is staged (camera, crop, scale), not only in the backdrop colour.",
     ],
@@ -197,7 +197,8 @@ function fnv1a(s: string): string {
 }
 
 export const HOUSE_RULES = render(SECTIONS, true);
-export const RULES_VERSION = fnv1a(HOUSE_RULES);
+/** A hash of every rule and of which roles get each section, so a change to either makes each agent read the rules again. */
+export const RULES_VERSION = fnv1a(JSON.stringify(SECTIONS.map((x) => [x.key, x.roles])) + HOUSE_RULES);
 
 /** The rules for one role (every section that names it, and the defect list), or all of them. */
 export function houseRules(role?: RuleRole): { rulesVersion: string; role: RuleRole | "all"; rules: string } {
