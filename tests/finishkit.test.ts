@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Env } from "../worker/env";
 import worker from "../worker/index";
@@ -67,6 +70,38 @@ describe("finish_kit", () => {
     const t = TOOLS.find((x) => x.name === "finish_kit")!;
     expect(t.description).toContain("Free.");
     expect(t.inputSchema).toEqual({ type: "object", properties: {}, additionalProperties: false });
+  });
+});
+
+describe("the Python choice of the setup script", () => {
+  // Devin Review, PR 148: run the choice line in bash with stand-in interpreters, so the fallback is tested, not only its text.
+  const choose = async (works: string[]) => {
+    const dir = mkdtempSync(path.join(tmpdir(), "a11-kit-"));
+    const bin = path.join(dir, "bin");
+    execFileSync("mkdir", ["-p", bin]);
+    for (const name of ["python3.14", "python3.13", "python3.12", "python3"]) {
+      // A working stand-in passes the version check and makes a .venv whose python answers; a broken one has no venv.
+      const ok = works.includes(name);
+      writeFileSync(
+        path.join(bin, name),
+        `#!/bin/sh\nif [ "$1" = "-c" ]; then exit 0; fi\nif [ "$1" = "-m" ] && [ "$2" = "venv" ]; then ${ok ? 'mkdir -p .venv/bin && printf "#!/bin/sh\\nexit 0\\n" > .venv/bin/python && chmod +x .venv/bin/python && exit 0' : "exit 1"}; fi\nexit 1\n`,
+      );
+      chmodSync(path.join(bin, name), 0o755);
+    }
+    const lines = (await kit()).setup.split("\n");
+    const script = [lines.find((l) => l.startsWith('PY=""'))!, lines.find((l) => l.startsWith('[ -n "$PY" ]'))!, 'echo "$PY"'].join("\n");
+    try {
+      return execFileSync("bash", ["-c", script], { cwd: dir, env: { PATH: `${bin}:/usr/bin:/bin` }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    } catch (e) {
+      return `failed: ${String((e as { stderr?: string }).stderr).trim()}`;
+    }
+  };
+  it("skips a newer Python that cannot make a virtual environment", async () => {
+    expect(await choose(["python3.13", "python3"])).toBe("python3.13");
+    expect(await choose(["python3"])).toBe("python3");
+  });
+  it("stops with a clear message when no Python can", async () => {
+    expect(await choose([])).toBe("failed: The finish kit needs Python 3.12 or newer with venv and pip (tested on 3.13).");
   });
 });
 
