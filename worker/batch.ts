@@ -536,7 +536,11 @@ export async function picksSave(env: Env, batchId: string, picks: { key: string;
   }
   // One draft per idea in a call: each pick becomes a paid final.
   const ideaIds = picks.map((p) => keys.get(p.key)!);
-  if (new Set(ideaIds).size !== ideaIds.length) throw new Error("Pick one draft per idea.");
+  // A full pass is not a pick (issue 147: a pass on all nine drafts was sent here): it is a verdict, with its own tool.
+  if (new Set(ideaIds).size !== ideaIds.length)
+    throw new InputError(
+      "Pick one draft per idea: each pick becomes a paid final. When the owner passed on all the drafts of an idea, make no pick for it: save his exact words with batch_update ownerVerdicts (stage 'draft', mark 'pass', the ideaId). When he keeps one draft, pick only that one; his words on the others go in the pick's note.",
+    );
   // A pick that has a final stays, so another draft of that idea would start a second paid final.
   const finalled = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM picks WHERE batch_id = ? AND final_render_id IS NOT NULL

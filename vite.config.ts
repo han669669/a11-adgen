@@ -4,6 +4,7 @@ import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
+import { finishFiles } from "./finishkit.build";
 
 /**
  * Writes dist/app-manifest.json: the SHA-256 of each file of the build, as "sha256-<base64>".
@@ -24,6 +25,8 @@ function appManifest(): Plugin {
         .sort();
       const manifest = Object.fromEntries(files.map((f) => [f, `sha256-${createHash("sha256").update(readFileSync(path.join(outDir, f))).digest("base64")}`]));
       writeFileSync(path.join(outDir, "../app-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+      // The finish scripts for finish_kit (worker/finishkit.ts): the Worker bundle includes this file too.
+      writeFileSync(path.join(outDir, "../finish-kit.json"), `${JSON.stringify(finishFiles(import.meta.dirname))}\n`);
     },
   };
 }

@@ -1,6 +1,7 @@
 import type { Env } from "./env";
 import { handleApi } from "./api";
 import { APP_PUBLISH_PATH, handleAppPublish, typeOf } from "./apppublish";
+import { FINISH_PATH, serveFinishFile } from "./finishkit";
 import { handleMcp } from "./mcp";
 import { handleComment, handlePortal, handleUpload } from "./portal";
 import { FILES_PER_SEND } from "./uploads";
@@ -114,6 +115,11 @@ export default {
     if (upload) return handleUploadLink(request, env, upload[1]!);
 
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);
+
+    // The finish kit: the public finish scripts of this build, for an MCP client with no checkout (finish_kit).
+    const finish = FINISH_PATH.exec(url.pathname);
+    if (finish) return serveFinishFile(request, finish[1]!);
+    if (url.pathname.startsWith("/finish/")) return new Response("Not found", { status: 404 });
 
     // Client portal: a pack page and its pictures, behind an unguessable token (no login).
     const portal = /^\/c\/([0-9a-f]{48})(?:\/ad\/(\d{1,2})\.(jpg|png))?$/.exec(url.pathname);
