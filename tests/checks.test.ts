@@ -265,6 +265,31 @@ describe("checks_save", () => {
     expect((await run(env, "batch_get", { id: E3 })).nextStep).not.toBe("board");
   });
 
+  it("the same draft picked again after a full pass ends the draft steps of its idea", async () => {
+    const { env, picks } = await boardReady();
+    const idea = picks[0]!.id;
+    const key = `renders/${renderId(1, 1)}/0.jpg`;
+    const step = async () => (await run(env, "batch_get", { id: E3 })).nextStep;
+    const tick = () => new Promise((r) => setTimeout(r, 5));
+    // He picks draft 1, then passes on all the drafts of the idea. No picks_save comes in between, so the pick row stays.
+    await batch.picksSave(env, E3, [{ key, note: "draft 1" }]);
+    expect(await step()).toBe("board");
+    await tick();
+    await batch.batchUpdate(env, { id: E3, ownerVerdicts: [{ stage: "draft", mark: "pass", ideaId: idea, ownerSaid: "none of these" }] });
+    expect(await step()).toBe("drafts");
+    await tick();
+    // On second look he keeps draft 1: his newest words win, as for another draft of the idea.
+    await batch.picksSave(env, E3, [{ key, note: "on second look, draft 1" }]);
+    expect(await step()).toBe("board");
+    expect((await run(env, "picks_get", { batchId: E3 })).picks.map((p: { draftKey: string; ownerNote: string }) => [p.draftKey, p.ownerNote])).toEqual([[key, "on second look, draft 1"]]);
+    // A pick saved again with no pass in between keeps its time: taste_log and the replay cut read it.
+    const at = () => (env.DB.prepare("SELECT created_at FROM picks WHERE render_key = ?").bind(key).first() as Promise<{ created_at: string }>);
+    const before = (await at()).created_at;
+    await tick();
+    await batch.picksSave(env, E3, [{ key, note: "yes, draft 1" }]);
+    expect((await at()).created_at).toBe(before);
+  });
+
   it("an engine 2 batch shows no check fields and keeps its board gate and rank as today", async () => {
     const { env, raw, e2 } = await approved();
     const b = await run(env, "batch_get", { id: e2 });
