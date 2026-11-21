@@ -290,7 +290,7 @@ export const TOOLS: Tool[] = [
       properties: {
         id: { type: "string", pattern: "^[0-9a-f-]{36}$" },
         view: { type: "string", enum: ["critic"] },
-        withPlans: { type: "boolean", description: "Engine 3: include each draft's layout plan in the direction (to run reprint in a new session)." },
+        withPlans: { type: "boolean", description: "Engine 3: include each draft's layout plan in the direction, and on each draft its own plan (drafts[].plan, also a draft of an earlier round), to run reprint in a new session." },
       },
       required: ["id"],
       additionalProperties: false,
@@ -561,7 +561,7 @@ export const TOOLS: Tool[] = [
   {
     name: "picks_save",
     description:
-      "Record the owner's picks: the drafts to render at high, one per idea. THE OWNER PICKS, never you (owner, 2026-11-07: he wants to choose from the 3 drafts of each idea so Claude learns his taste). Show him the drafts first, wait for his answer, then save it: ownerSaid is his own words for each pick, quoted. Do not save a pick he did not make. If he passes on all 3 drafts of an idea, make new drafts (render_submit) instead. The server refuses a second draft of an idea that already has a pick with a final; to render an idea again use render_submit (kind 'final'). Replaces earlier picks that have no final yet. The result says how each pick compares with your blind rank, and the running tally; use it to learn (taste_log).",
+      "Record the owner's picks: the drafts to render at high, one per idea. THE OWNER PICKS, never you (owner, 2026-11-07: he wants to choose from the 3 drafts of each idea so Claude learns his taste). Show him the drafts first, wait for his answer, then save it: ownerSaid is his own words for each pick, quoted. Do not save a pick he did not make. If he passes on all 3 drafts of an idea, make new drafts (render_submit) instead. The server refuses a second draft of an idea that already has a pick with a final; to render an idea again use render_submit (kind 'final'). Replaces earlier picks that have no final yet. Engine 3: a draft whose newest check says eligible (batch_get drafts[].eligible); the board shows the current round, and a draft of an earlier round or from before a full pass is saved too when the owner names it; a draft that failed its check is refused. The result says how each pick compares with your blind rank, and the running tally; use it to learn (taste_log).",
     inputSchema: {
       type: "object",
       properties: {
@@ -1035,7 +1035,7 @@ export const TOOLS: Tool[] = [
   {
     name: "render_submit",
     description:
-      "Start a GPT Image 2.5 Sunburst render on fal (edit endpoint, 4:5). kind 'draft' = quality low, 1024x1280, 1 image by default (numImages up to 3). kind 'rough' (engine 3 only) = a draft-price low render of a concept before the copy review: any concept of the batch, no copy approval needed, 1 image, at most 2 for each concept and 8 for each batch; batch_get shows it under the idea's roughs, never as a draft. kind 'final' = quality high, 1536x1920, 1 image; pass the chosen draft URL as the first reference, or for the house recipe's finish pass (docs/creative-playbook.md §7.1, prompt 3) the final first, then the kit's texture photo. Draft references: for a closed product the product-lock skeleton only (docs/creative-playbook.md §7.4: upload it with upload_link kind ref and the curl command it returns, then use the url in the answer of that upload; one call per skeleton with numImages 1); the real packshot only when the packshot cannot show the product state (§7.1, prompt 1). Returns a render id; then call render_status. Paid: the result shows the estimate.",
+      "Start a GPT Image 2.5 Sunburst render on fal (edit endpoint, 4:5). kind 'draft' = quality low, 1024x1280, 1 image by default (numImages up to 3). kind 'rough' (engine 3 only) = a draft-price low render of a concept before the copy review: any concept of the batch, no copy approval needed, 1 image, at most 2 for each concept and 8 for each batch; batch_get shows it under the idea's roughs, never as a draft. kind 'final' = quality high, 1536x1920, 1 image; pass the chosen draft URL as the first reference, or for the house recipe's finish pass (docs/creative-playbook.md §7.1, prompt 3) the final first, then the kit's texture photo. Draft references: for a closed product the product-lock skeleton only (docs/creative-playbook.md §7.4: upload it with upload_link kind ref and the curl command it returns, then use the url in the answer of that upload; one call per skeleton with numImages 1); the real packshot only when the packshot cannot show the product state (§7.1, prompt 1). Food (owner, 21-11-2026, docs/render-checklist.md D2): the brand's real food photos as references, each cut food at its real proportions (slice height, width, length; docs/creative-playbook.md §7.9), and never ask for crumbs, a smear of frosting or cream, or a slice pulled apart or set apart: say \"clean cut faces, no crumbs anywhere\". Returns a render id; then call render_status. Paid: the result shows the estimate.",
     inputSchema: {
       type: "object",
       properties: {

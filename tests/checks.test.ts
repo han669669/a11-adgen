@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as batch from "../worker/batch";
 import { TOOLS } from "../worker/mcp";
 import { validate } from "../worker/schema";
-import { addRender, approved, boardReady, direction, draftCheck, E3, rankAll, renderId, run } from "./helpers/engine3";
+import { addRender, approved, boardReady, direction, draft, draftCheck, E3, rankAll, renderId, run } from "./helpers/engine3";
 
 /** a11-engine v3 Phase 3: draft and final checks, eligible drafts, the rank and the board gate (design pack §3.6, tests 3.6 to 3.9). */
 
@@ -221,6 +221,50 @@ describe("checks_save", () => {
     expect((await run(env, "batch_get", { id: E3 })).nextStep).toBe("board");
   });
 
+  it("picks_save takes an eligible draft of an earlier round or from before a full pass (owner, 21-11-2026); a failed draft stays refused", async () => {
+    const { env, raw, picks } = await boardReady();
+    const idea = picks[0]!.id;
+    const key = (n: number) => `renders/${renderId(1, n)}/0.jpg`;
+    // Round 1: draft 1 eligible, draft 2 failed. Then a new direction: a new round, and the round 1 drafts no longer count.
+    await saveCheck(env, idea, draftCheck(renderId(1, 2), { eligible: false, items: [{ code: "D2", found: true, note: "Scattered crumbs." }], points: { ...draftCheck("x").points, food: "fail" }, reason: "Scattered crumbs (D2)." }));
+    const withIds = (ids: number[]) => direction({ drafts: ids.map((id, i) => draft(i + 1, { renderId: renderId(1, id) })) });
+    await run(env, "direction_save", { batchId: E3, ideaId: idea, direction: withIds([1, 2, 3]) });
+    await run(env, "direction_save", { batchId: E3, ideaId: idea, direction: direction() });
+    for (const n of [7, 8, 9]) {
+      addRender(raw, renderId(1, n), idea, "draft", "2026-11-17T07:20:00.000Z");
+      await saveCheck(env, idea, draftCheck(renderId(1, n)));
+    }
+    await run(env, "direction_save", { batchId: E3, ideaId: idea, direction: withIds([9, 8, 7]) });
+    // Devin Review, PR 145: each draft keeps its own plan with withPlans, also a draft of the earlier round (for a reprint).
+    const planOf = (n: number) => JSON.stringify(JSON.parse(draft(n).plan));
+    const withPlans = ideaOf(await run(env, "batch_get", { id: E3, withPlans: true }), idea).drafts;
+    expect([1, 7, 9].map((n) => withPlans.find((d: { key: string }) => d.key === key(n)).plan)).toEqual([planOf(1), planOf(3), planOf(1)]);
+    expect(ideaOf(await run(env, "batch_get", { id: E3 }), idea).drafts.some((d: { plan?: string }) => d.plan !== undefined)).toBe(false);
+    const drafts = ideaOf(await batch.batchGet(env, E3), idea).drafts;
+    expect(drafts.find((d: { key: string }) => d.key === key(1))).toMatchObject({ eligible: true, current: false });
+    // The board shows the current round only; the owner names the round 1 draft in his own words, and it is saved.
+    expect(ideaOf(await batch.batchGetOwner(env, E3), idea).drafts.map((d: { key: string }) => d.key)).not.toContain(key(1));
+    await batch.picksSave(env, E3, [{ key: key(1), note: "round 1 draft 1 felt better" }]);
+    expect(ideaOf(await batch.batchGetOwner(env, E3), idea).drafts.map((d: { key: string }) => d.key)).toContain(key(1));
+    expect((await run(env, "picks_get", { batchId: E3 })).picks.map((p: { draftKey: string }) => p.draftKey)).toEqual([key(1)]);
+    await expect(batch.picksSave(env, E3, [{ key: key(2) }])).rejects.toThrow("is not an eligible draft");
+    // The critic still ranks the current eligible drafts only.
+    await expect(run(env, "drafts_rank", { batchId: E3, ranks: [{ key: key(1), rank: 1, reason: "The cake reads first." }] })).rejects.toThrow("is not an eligible current draft");
+    // A full pass on the new round, then the owner takes a draft he passed on: his newest words win.
+    await batch.batchUpdate(env, { id: E3, ownerVerdicts: [{ stage: "draft", mark: "pass", ideaId: idea, ownerSaid: "none of these" }] });
+    expect(ideaOf(await batch.batchGet(env, E3), idea).drafts.find((d: { key: string }) => d.key === key(8))).toMatchObject({ eligible: true, current: false });
+    expect((await run(env, "batch_get", { id: E3 })).nextStep).not.toBe("board");
+    await batch.picksSave(env, E3, [{ key: key(8), note: "on second look, draft 2" }]);
+    expect((await run(env, "picks_get", { batchId: E3 })).picks.map((p: { draftKey: string }) => p.draftKey)).toEqual([key(8)]);
+    // Devin Review, PR 145: his pick ends the draft steps of that idea, so a resumed batch does not go back to drafts.
+    expect((await run(env, "batch_get", { id: E3 })).nextStep).toBe("board");
+    // ranked still means the critic's rank is saved: the round 2 drafts were never ranked.
+    expect(ideaOf(await run(env, "batch_get", { id: E3 }), idea).ranked).toBe(false);
+    // A new full pass after his pick opens the draft steps again.
+    await batch.batchUpdate(env, { id: E3, ownerVerdicts: [{ stage: "draft", mark: "pass", ideaId: idea, ownerSaid: "no, none again" }] });
+    expect((await run(env, "batch_get", { id: E3 })).nextStep).not.toBe("board");
+  });
+
   it("an engine 2 batch shows no check fields and keeps its board gate and rank as today", async () => {
     const { env, raw, e2 } = await approved();
     const b = await run(env, "batch_get", { id: e2 });
@@ -243,8 +287,8 @@ describe("the owner's board for engine 3 (v3 Phase 6)", () => {
     const board = await batch.batchGetOwner(env, E3);
     const shown = ideaOf(board, idea).drafts.map((d: { key: string }) => d.key);
     expect(shown).toEqual([1, 2, 3].map((n) => `renders/${renderId(1, n)}/0.jpg`));
-    await expect(batch.picksSave(env, E3, [{ key: `renders/${renderId(1, 4)}/0.jpg` }])).rejects.toThrow("is not an eligible current draft");
-    await expect(batch.picksSave(env, E3, [{ key: `renders/${renderId(1, 5)}/0.jpg` }])).rejects.toThrow("is not an eligible current draft");
+    await expect(batch.picksSave(env, E3, [{ key: `renders/${renderId(1, 4)}/0.jpg` }])).rejects.toThrow("is not an eligible draft");
+    await expect(batch.picksSave(env, E3, [{ key: `renders/${renderId(1, 5)}/0.jpg` }])).rejects.toThrow("is not an eligible draft");
     await batch.picksSave(env, E3, [{ key: shown[1]!, note: "the second" }]);
     // A pick with a final stays on the board and stays valid after the drafts change.
     raw.prepare("UPDATE picks SET final_render_id = 'f1' WHERE render_key = ?").run(shown[1]);

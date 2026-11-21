@@ -532,6 +532,53 @@ class Headline(Tmp):
         self.assertLessEqual(xs.max(), 0.9 * 800 + 3)
         self.assertIn("raise --footnote-y", exit_message(run, plain, "--footnote-y", "0.975"))
 
+    def test_the_words_sit_on_one_tone(self):
+        # The real failure (Cat & the Fiddle, engine 3, 21-11-2026): a white and brand-yellow (#FFC805) split down the middle
+        # of the backdrop cut "Chocolate" and "so". Grain as the photo finish adds it; the check must ignore that.
+        rng = np.random.default_rng(7)
+        grain = lambda: rng.integers(-10, 11, (1280, 1024, 1))
+        split = np.full((1280, 1024, 3), 255)
+        split[:, 512:] = (255, 200, 5)
+        split = self.save("split.png", np.clip(split + grain(), 0, 255))
+        words = ["--font", self.FONT, "--case", "upper", "--headline", "Chocolate | or fruit?", "--subline", "Why not both, so everyone wins."]
+
+        def run(src, area, sub="Why not both, so everyone wins."):
+            out = os.path.join(self.dir.name, "out.jpg")
+            with contextlib.redirect_stdout(io.StringIO()):
+                headline.main(["--in", src, "--out", out, *words[:-1], sub, "--area", area])
+            return out
+
+        msg = exit_message(run, split, "0.07,0.08,0.93,0.33")
+        self.assertRegex(msg, r"edge runs down through the words at (49\.\d|50\.\d)%")
+        self.assertTrue(os.path.isfile(run(split, "0.06,0.08,0.46,0.33")))  # every word on the white half
+        self.assertTrue(os.path.isfile(run(split, "0.54,0.08,0.94,0.33")))  # every word on the yellow half
+        # A horizontal split between the lines: the headline on white, the subline on yellow.
+        band = np.full((1280, 1024, 3), 255)
+        band[200:] = (255, 200, 5)
+        self.assertIn("edge runs across the words", exit_message(run, self.save("band.png", band), "0.07,0.08,0.93,0.33"))
+        # Devin Review, PR 145: a split just beside the words passes; a split that runs only under a short subline fails.
+        ink = np.asarray(Image.open(run(self.save("white.png", np.full((1280, 1024, 3), 255)), "0.07,0.08,0.93,0.33")).convert("L")) < 128
+        cols, rows = np.where(ink.any(0))[0], np.where(ink.any(1))[0]
+        beside = np.full((1280, 1024, 3), 255)
+        beside[:, cols.max() + 12:] = (255, 200, 5)  # 12 px right of the last ink, past the glyph box
+        self.assertTrue(os.path.isfile(run(self.save("beside.png", beside), "0.07,0.08,0.93,0.33")))
+        # A short subline under a wide headline: the edge spans the subline but under 60% of the whole block.
+        ink = np.asarray(Image.open(run(self.save("white2.png", np.full((1280, 1024, 3), 255)), "0.07,0.08,0.93,0.33", "So.")).convert("L")) < 128
+        rows = np.where(ink.any(1))[0]
+        sub_top = rows[np.where(np.diff(rows) > 1)[0][-1] + 1]  # the first ink row of the last line: the subline
+        sub_right = int(np.where(ink[sub_top:].any(0))[0].max())
+        self.assertLess(sub_right + 40 - 72, 0.6 * (int(np.where(ink.any(0))[0].max()) - 72))  # the whole block check alone misses it
+        short = np.full((1280, 1024, 3), 255)
+        short[sub_top + 6:, : sub_right + 40] = (255, 200, 5)  # the block ends past the line
+        self.assertIn("edge runs across the words", exit_message(run, self.save("short.png", short), "0.07,0.08,0.93,0.33", "So."))
+        # Devin Review, PR 145: a band that starts 2 px under the subline's last ink is beside the words, not through them.
+        under = np.full((1280, 1024, 3), 255)
+        under[rows.max() + 3:, : sub_right + 40] = (255, 200, 5)
+        self.assertTrue(os.path.isfile(run(self.save("under.png", under), "0.07,0.08,0.93,0.33", "So.")))
+        # A smooth light fall-off of 70 levels across the picture is one tone, not an edge.
+        ramp = np.repeat(np.linspace(200, 130, 1024)[None, :, None], 1280, 0).repeat(3, 2)
+        self.assertTrue(os.path.isfile(run(self.save("ramp.png", np.clip(ramp + grain(), 0, 255)), "0.07,0.08,0.93,0.33")))
+
     def test_the_logo_preview_is_drawn_at_the_top_centre(self):
         logo = os.path.join(self.dir.name, "logo.png")
         Image.new("RGBA", (100, 40), (0, 0, 0, 255)).save(logo)

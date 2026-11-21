@@ -261,3 +261,19 @@ export async function directionsGet(env: Env, batchId: string, withPlans = false
   }
   return out;
 }
+
+/**
+ * withPlans: the layout plan of each draft render, from the newest direction version that names its renderId, as the text
+ * of its plan file. A draft of an earlier round keeps its own plan, so the owner's pick of it can be reprinted (owner,
+ * 21-11-2026). Read only with withPlans: the bodies are large.
+ */
+export async function draftPlans(env: Env, batchId: string) {
+  const rows = await env.DB.prepare(
+    "SELECT body FROM batch_records WHERE batch_id = ? AND kind = 'direction' AND idea_id IS NOT NULL ORDER BY version DESC, rowid DESC LIMIT 200",
+  ).bind(batchId).all<{ body: string }>();
+  const out = new Map<string, string>();
+  for (const r of rows.results)
+    for (const d of (JSON.parse(r.body) as { drafts?: { renderId?: string; plan?: unknown }[] }).drafts ?? [])
+      if (d.renderId && d.plan !== undefined && !out.has(d.renderId)) out.set(d.renderId, JSON.stringify(d.plan));
+  return out;
+}
