@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as batch from "../worker/batch";
 import { TOOLS } from "../worker/mcp";
 import { validate } from "../worker/schema";
-import { addRender, approved, boardReady, direction, draftCheck, E3, rankAll, renderId, run } from "./helpers/engine3";
+import { addRender, approved, boardReady, direction, draft, draftCheck, E3, rankAll, renderId, run } from "./helpers/engine3";
 
 /** a11-engine v3 Phase 3: draft and final checks, eligible drafts, the rank and the board gate (design pack §3.6, tests 3.6 to 3.9). */
 
@@ -227,11 +227,19 @@ describe("checks_save", () => {
     const key = (n: number) => `renders/${renderId(1, n)}/0.jpg`;
     // Round 1: draft 1 eligible, draft 2 failed. Then a new direction: a new round, and the round 1 drafts no longer count.
     await saveCheck(env, idea, draftCheck(renderId(1, 2), { eligible: false, items: [{ code: "D2", found: true, note: "Scattered crumbs." }], points: { ...draftCheck("x").points, food: "fail" }, reason: "Scattered crumbs (D2)." }));
+    const withIds = (ids: number[]) => direction({ drafts: ids.map((id, i) => draft(i + 1, { renderId: renderId(1, id) })) });
+    await run(env, "direction_save", { batchId: E3, ideaId: idea, direction: withIds([1, 2, 3]) });
     await run(env, "direction_save", { batchId: E3, ideaId: idea, direction: direction() });
     for (const n of [7, 8, 9]) {
       addRender(raw, renderId(1, n), idea, "draft", "2026-11-17T07:20:00.000Z");
       await saveCheck(env, idea, draftCheck(renderId(1, n)));
     }
+    await run(env, "direction_save", { batchId: E3, ideaId: idea, direction: withIds([9, 8, 7]) });
+    // Devin Review, PR 145: each draft keeps its own plan with withPlans, also a draft of the earlier round (for a reprint).
+    const planOf = (n: number) => JSON.stringify(JSON.parse(draft(n).plan));
+    const withPlans = ideaOf(await run(env, "batch_get", { id: E3, withPlans: true }), idea).drafts;
+    expect([1, 7, 9].map((n) => withPlans.find((d: { key: string }) => d.key === key(n)).plan)).toEqual([planOf(1), planOf(3), planOf(1)]);
+    expect(ideaOf(await run(env, "batch_get", { id: E3 }), idea).drafts.some((d: { plan?: string }) => d.plan !== undefined)).toBe(false);
     const drafts = ideaOf(await batch.batchGet(env, E3), idea).drafts;
     expect(drafts.find((d: { key: string }) => d.key === key(1))).toMatchObject({ eligible: true, current: false });
     // The board shows the current round only; the owner names the round 1 draft in his own words, and it is saved.
@@ -245,8 +253,14 @@ describe("checks_save", () => {
     // A full pass on the new round, then the owner takes a draft he passed on: his newest words win.
     await batch.batchUpdate(env, { id: E3, ownerVerdicts: [{ stage: "draft", mark: "pass", ideaId: idea, ownerSaid: "none of these" }] });
     expect(ideaOf(await batch.batchGet(env, E3), idea).drafts.find((d: { key: string }) => d.key === key(8))).toMatchObject({ eligible: true, current: false });
+    expect((await run(env, "batch_get", { id: E3 })).nextStep).not.toBe("board");
     await batch.picksSave(env, E3, [{ key: key(8), note: "on second look, draft 2" }]);
     expect((await run(env, "picks_get", { batchId: E3 })).picks.map((p: { draftKey: string }) => p.draftKey)).toEqual([key(8)]);
+    // Devin Review, PR 145: his pick ends the draft steps of that idea, so a resumed batch does not go back to drafts.
+    expect((await run(env, "batch_get", { id: E3 })).nextStep).toBe("board");
+    // A new full pass after his pick opens the draft steps again.
+    await batch.batchUpdate(env, { id: E3, ownerVerdicts: [{ stage: "draft", mark: "pass", ideaId: idea, ownerSaid: "no, none again" }] });
+    expect((await run(env, "batch_get", { id: E3 })).nextStep).not.toBe("board");
   });
 
   it("an engine 2 batch shows no check fields and keeps its board gate and rank as today", async () => {
