@@ -316,7 +316,9 @@ async function deriveItems(env: Env, kind: ItemKind, asOf?: string) {
   if (kind === "triplet") {
     // A decision on a draft set: the owner's pick, or his full pass. The drafts he saw are the finished drafts of that idea
     // made after his previous full pass on it and at or before the decision; for engine 3, only the eligible drafts of the
-    // direction round of that time (the board shows him those, design pack §3.6).
+    // direction round of that time (the board shows him those, design pack §3.6). He can also pick a draft from before a
+    // full pass or of an earlier round (picks_save): the set then starts at the pass before, and the round of, that draft,
+    // so the draft he picked is always one of the pictures.
     const decisions = await q<IdeaRow & { batch_id: string; idea_id: string; at: string; label: string; said: string }>(
       `SELECT d.batch_id, d.idea_id, d.at, d.label, d.said, ${ideaCols} FROM (
          SELECT batch_id, idea_id, created_at AS at, render_key AS label, COALESCE(note, '') AS said FROM picks WHERE by_owner = 1 AND created_at <= ?1
@@ -344,15 +346,19 @@ async function deriveItems(env: Env, kind: ItemKind, asOf?: string) {
       cut,
     );
     const seen = (d: (typeof decisions)[number]) => {
-      const prev = passes.filter((p) => p.batch_id === d.batch_id && p.idea_id === d.idea_id && p.created_at < d.at).reduce((m, p) => (p.created_at > m ? p.created_at : m), "");
-      const own = drafts.filter((r) => r.batch === d.batch_id && r.idea === d.idea_id && r.created_at > prev && r.created_at <= d.at);
+      const ofIdea = drafts.filter((r) => r.batch === d.batch_id && r.idea === d.idea_id && r.created_at <= d.at);
+      const picked = d.label === "pass" ? undefined : ofIdea.find((r) => (JSON.parse(r.image_keys) as string[]).includes(d.label));
+      const before = picked && picked.created_at < d.at ? picked.created_at : d.at;
+      const prev = passes.filter((p) => p.batch_id === d.batch_id && p.idea_id === d.idea_id && p.created_at < before).reduce((m, p) => (p.created_at > m ? p.created_at : m), "");
+      const own = ofIdea.filter((r) => r.created_at > prev);
       if (d.engine !== 3) return own;
-      const round = roundStarts.filter((r) => r.batch_id === d.batch_id && r.idea_id === d.idea_id && r.created_at <= d.at).reduce((m, r) => Math.max(m, r.version), 0);
       const newest = new Map<string, { eligible?: boolean; round?: number }>();
       for (const c of checks) if (c.created_at <= d.at) {
         const b = JSON.parse(c.body) as { renderId: string; eligible?: boolean; round?: number };
         newest.set(b.renderId, b);
       }
+      const current = roundStarts.filter((r) => r.batch_id === d.batch_id && r.idea_id === d.idea_id && r.created_at <= d.at).reduce((m, r) => Math.max(m, r.version), 0);
+      const round = picked ? Math.min(current, newest.get(picked.id)?.round ?? 0) : current;
       return own.filter((r) => newest.get(r.id)?.eligible === true && (newest.get(r.id)!.round ?? 0) >= round);
     };
     items = decisions.map((d) => ({
