@@ -522,6 +522,14 @@ export async function picksSave(env: Env, batchId: string, picks: { key: string;
   const keys = await draftKeys(env, batchId);
   const at = now();
   for (const p of picks) if (!keys.has(p.key)) throw new Error(`${p.key} is not a finished draft of batch ${batchId}.`);
+  // One draft per idea in a call: each pick becomes a paid final.
+  const ideaIds = picks.map((p) => keys.get(p.key)!);
+  // A full pass is not a pick (issue 147: a pass on all nine drafts was sent here): it is a verdict, with its own tool. Checked before
+  // the engine 3 eligibility, so a pass that names a draft that is not eligible gets this answer too.
+  if (new Set(ideaIds).size !== ideaIds.length)
+    throw new InputError(
+      "Pick one draft per idea: each pick becomes a paid final. When the owner passed on all the drafts of an idea, make no pick for it: save his exact words with batch_update ownerVerdicts (stage 'draft', mark 'pass', the ideaId). When he keeps one draft, pick only that one; his words on the others go in the pick's note.",
+    );
   // Engine 3 (design pack §3.6): the owner picks a draft whose newest check says eligible. The board shows the current
   // ones; a draft of an earlier direction round, or from before a full pass, is his choice too (owner, 21-11-2026: he kept
   // a round 1 draft over the later round's final). A draft that failed its check, or has none, is refused.
@@ -534,13 +542,6 @@ export async function picksSave(env: Env, batchId: string, picks: { key: string;
     const bad = picks.find((p) => !ok.has(p.key));
     if (bad) throw new InputError(`${bad.key} is not an eligible draft: its newest check must say eligible (batch_get drafts[].eligible).`);
   }
-  // One draft per idea in a call: each pick becomes a paid final.
-  const ideaIds = picks.map((p) => keys.get(p.key)!);
-  // A full pass is not a pick (issue 147: a pass on all nine drafts was sent here): it is a verdict, with its own tool.
-  if (new Set(ideaIds).size !== ideaIds.length)
-    throw new InputError(
-      "Pick one draft per idea: each pick becomes a paid final. When the owner passed on all the drafts of an idea, make no pick for it: save his exact words with batch_update ownerVerdicts (stage 'draft', mark 'pass', the ideaId). When he keeps one draft, pick only that one; his words on the others go in the pick's note.",
-    );
   // A pick that has a final stays, so another draft of that idea would start a second paid final.
   const finalled = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM picks WHERE batch_id = ? AND final_render_id IS NOT NULL

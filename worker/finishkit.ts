@@ -17,7 +17,7 @@ const USES: Record<string, string> = {
   "cap_check.py": "The cap on the body centre of a bottle (1% of its width).",
   "box_print.py": "The real box print on a boxed product, from a box-print config for that product.",
   "food_grade.py": "Moves the food colour of a packshot toward the brand's real close-up photo.",
-  "requirements.txt": "The Python packages: python3 -m pip install -r requirements.txt",
+  "requirements.txt": "The Python packages, for the setup script (Python 3.12 or newer).",
 };
 
 const FILES: Record<string, { text: string; use: string }> = Object.fromEntries(
@@ -37,30 +37,45 @@ function sha256s(): Promise<Record<string, string>> {
   return hashes;
 }
 
-/** The MCP tool finish_kit: each file's address on this Worker, its SHA-256 and its use, and the commands to fetch and check them. */
+/** The kit folder on the client: the scripts go in scripts/, so the commands of the house recipe (scripts/headline.py) run from it. */
+const FOLDER = "a11-finish";
+
+/**
+ * The MCP tool finish_kit: each file's address on this Worker, its SHA-256 and its use, and one shell script that downloads,
+ * checks and installs them. One script, not separate commands, because a client may run each command in a new shell
+ * (Devin Review, PR 148). The packages go into a virtual environment of Python 3.12 or newer (numpy 2.5 needs it).
+ */
 export async function finishKit(baseUrl: string) {
   const sums = await sha256s();
   const base = baseUrl.replace(/\/+$/, "");
   const files = Object.entries(FILES).map(([name, f]) => ({
     name,
+    path: `scripts/${name}`,
     url: `${base}/finish/${name}`,
     sha256: sums[name]!,
     bytes: new TextEncoder().encode(f.text).byteLength,
     use: f.use,
   }));
+  const setup = [
+    "set -eu",
+    `mkdir -p ${FOLDER}/scripts && cd ${FOLDER}`,
+    ...files.map((f) => `curl -fsS --proto =https -o ${f.path} ${f.url}`),
+    'SUM="sha256sum"; command -v sha256sum >/dev/null 2>&1 || SUM="shasum -a 256"',
+    `printf '%s\\n' ${files.map((f) => `'${f.sha256}  ${f.path}'`).join(" ")} | $SUM -c -`,
+    `PY=""; for p in python3.14 python3.13 python3.12 python3; do if command -v "$p" >/dev/null 2>&1 && "$p" -c 'import sys; sys.exit(sys.version_info < (3, 12))'; then PY="$p"; break; fi; done`,
+    '[ -n "$PY" ] || { echo "The finish kit needs Python 3.12 or newer (tested on 3.13)." >&2; exit 1; }',
+    '"$PY" -m venv .venv',
+    ".venv/bin/python -m pip install -r scripts/requirements.txt",
+  ].join("\n");
   return {
+    folder: FOLDER,
     files,
-    setup: [
-      "mkdir -p a11-finish && cd a11-finish",
-      ...files.map((f) => `curl -fsS --proto =https -o ${f.name} ${f.url}`),
-      `printf '%s\\n' ${files.map((f) => `'${f.sha256}  ${f.name}'`).join(" ")} | sha256sum -c -`,
-      "python3 -m venv .venv && . .venv/bin/activate",
-      "python3 -m pip install -r requirements.txt",
-    ],
+    setup,
+    run: `Run every script from the ${FOLDER} folder with its Python: .venv/bin/python scripts/<name> (for example .venv/bin/python scripts/headline.py --help). The recipe's commands name scripts/<name>, as here.`,
     notes: [
-      "Run each script as python3 <name> --help to read its options. The house rules (rules_get) say when each one runs.",
-      "Keep these files and the pictures in their own folder, apart from other code.",
-      "macOS has no sha256sum: use shasum -a 256 -c - instead.",
+      "Run setup as one bash script (save it to a file and run bash on it, or pass it to bash -c). It stops at the first error: a failed download, a wrong SHA-256 or no Python 3.12.",
+      "The house rules (rules_get) say when each script runs.",
+      "Keep the kit folder and the pictures apart from other code.",
       "Never open, fetch or clone a git repository for a creative run. When a step needs a call that no a11 tool gives, stop and tell the owner which call is missing.",
     ],
   };

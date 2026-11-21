@@ -22,8 +22,9 @@ const repoFile = (name: string) => readFileSync(new URL(`../scripts/${name}`, im
 const kit = async () => {
   const c = (await TOOLS.find((t) => t.name === "finish_kit")!.run(env, {})).content[0]!;
   return JSON.parse(c.type === "text" ? c.text : "{}") as {
-    files: { name: string; url: string; sha256: string; bytes: number; use: string }[];
-    setup: string[];
+    files: { name: string; path: string; url: string; sha256: string; bytes: number; use: string }[];
+    setup: string;
+    run: string;
     notes: string[];
   };
 };
@@ -41,13 +42,21 @@ describe("finish_kit", () => {
       expect(f.bytes).toBe(repoFile(f.name).byteLength);
       expect(f.use.length).toBeGreaterThan(10);
     }
-    // The commands download over HTTPS only and check every file before pip runs.
-    for (const f of k.files) expect(k.setup).toContain(`curl -fsS --proto =https -o ${f.name} ${f.url}`);
-    const check = k.setup.find((l) => l.includes("sha256sum -c"))!;
-    for (const f of k.files) expect(check).toContain(`${f.sha256}  ${f.name}`);
-    expect(k.setup.indexOf(check)).toBeLessThan(k.setup.findIndex((l) => l.includes("pip install")));
-    // The packages go into a virtual environment of the kit folder, not into the system Python.
-    expect(k.setup.findIndex((l) => l.includes("python3 -m venv"))).toBeLessThan(k.setup.findIndex((l) => l.includes("pip install")));
+    // One script (a client may run each command in a new shell), downloads over HTTPS only into scripts/, as the recipe names
+    // the files, and checks every file before pip runs, in a virtual environment of Python 3.12 or newer.
+    const lines = k.setup.split("\n");
+    expect(lines[0]).toBe("set -eu");
+    for (const f of k.files) {
+      expect(f.path).toBe(`scripts/${f.name}`);
+      expect(lines).toContain(`curl -fsS --proto =https -o scripts/${f.name} ${f.url}`);
+    }
+    const at = (s: string) => lines.findIndex((l) => l.includes(s));
+    const check = lines[at("-c -")]!;
+    for (const f of k.files) expect(check).toContain(`'${f.sha256}  scripts/${f.name}'`);
+    expect(at("-c -")).toBeLessThan(at("pip install"));
+    expect(at("sys.version_info < (3, 12)")).toBeLessThan(at("-m venv .venv"));
+    expect(at("-m venv .venv")).toBeLessThan(at(".venv/bin/python -m pip install -r scripts/requirements.txt"));
+    expect(k.run).toContain(".venv/bin/python scripts/<name>");
     expect(k.notes.join(" ")).toContain("Never open, fetch or clone a git repository");
   });
   it("is free and takes no arguments", () => {
