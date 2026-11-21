@@ -57,8 +57,10 @@ const SECTIONS: readonly Section[] = [
       "When he likes the words, the logo or the layout of a draft and asks for a redo for another reason, keep that layout (headline area, logo place and size, type size, product place and size) and change only what he asked.",
       "Each round fixes what he named and breaks nothing he liked. Before you show a redo, put it beside the version he liked and compare.",
       "Show drafts numbered 1 to 3 from left to right, with no rank. Name every draft that has a D item. When you try a new finish or option, show both (with and without; cap and pump).",
+      "Show the owner a draft only with the approved words and the kit logo set inside the picture (scripts/headline.py --logo, from finish_kit). Never show a bare photo and ask him to imagine the words (IRVINS, 21-11-2026: that board was of no use to him).",
       "Report in short simple sentences, result first. 'Usable' is not his bar: his bar is an ad he would pay for out of his own pocket and be proud of, beside his 5 reference ads (Moom, Allies of Skin x2, Oatside x2). Never say an ad passed that test unless he said so.",
       "Offer at most one other headline or subline, marked as an option. His own words win.",
+      "For a creative run, use the a11 tools, the files that finish_kit serves and the brand's own public pages and photos. Never open, fetch or clone a git repository for it. When a step needs a call that no tool gives, stop and tell the owner which call is missing.",
     ],
   },
   {
@@ -105,6 +107,7 @@ const SECTIONS: readonly Section[] = [
       "One logo size and place for each brand, from the kit placement, on every ad (Allies of Skin: 28% wide, 4% from the top). The headline starts at the same height on every ad of a batch, and its size stays close from ad to ad.",
       "The logo is optically centred on its wordmark (a TM or R mark is left out of the centre), big enough to read at a glance, and never an afterthought: in a column layout it heads the text column. On a dark backdrop use a light version of the logo (Oatside: cream on brown).",
       "The words sit on one plain tone: no sharp colour or shadow edge runs through them. A footnote never sits over an object or a shadow edge.",
+      "The words and the logo sit inside the photograph, on its plain backdrop. Never a separate panel or colour block that holds the words above, below or beside a smaller inset photo (IRVINS, 21-11-2026: he rejected all nine at one look).",
     ],
   },
   {
@@ -118,6 +121,7 @@ const SECTIONS: readonly Section[] = [
       "A pack is handled as a real one can be: a pouch folds at most once, above its print, and nothing covers the brand name, the logo or the product name. A box reads as a plain box with four sides.",
       "A packshot that is a flat or 3D mock-up is rebuilt as a real object in the final (a carton: light across the front, rounded paperboard edges, creased ears, a matte cap; a pouch: pillowy film, creases, foil in the open mouth, a contact shadow). Do not paste the mock-up print back over it.",
       "Multiples never look cloned: no identical packs at equal gaps. Small turns, uneven gaps, one lying or leaning, as a person would put them down. Back packs recede (shadow, soft focus) and never take the light from the hero.",
+      "Never redraw scrambled print by hand or with a drawn patch: it reads as a shape pasted on the pack (IRVINS, 21-11-2026). When a rough drew scrambled print on a face that must read (a pouch lying down), make that draft from a layout plan that copies the rough's camera, place and size (product_lock.py layout), so reprint puts the real print back.",
     ],
   },
   {
@@ -131,6 +135,7 @@ const SECTIONS: readonly Section[] = [
       "More control gives more AI look. Prefer a simple scene of few large real objects. When the owner picked a concept from its rough, make the drafts from that rough with a short prompt (under about 900 characters).",
       "Run the real-camera finish (scripts/photo_finish.py) on drafts and finals: subtle, tuned by eye; hold a brand colour exact with --keep.",
       "What won his eye: a bright light reflecting on a prop, depth of field, real shadows and legible print, \"scroll stopping but not in your face\".",
+      "A draft check judges an ad, not only defects: check each draft with its words and logo set, beside its rough and the owner's notes. A draft that lost the picked rough's device, put back a fact the owner changed, or no longer says the line at first glance is weak: set composition to fail, so it is not eligible, and say why in reason (IRVINS, 21-11-2026: nine eligible packshots that he rejected at one look).",
     ],
   },
   {
@@ -170,6 +175,7 @@ const SECTIONS: readonly Section[] = [
       "Every prompt asks for a real photograph, honest and unposed, with no glossy CG finish, and states the product's real state. Every final prompt also says \"no glare, streak or reflection across any letter\", and \"clean cut faces, no crumbs anywhere\" when food shows.",
       "Short prompts beat long lists of rules (2,100-character prompts made the IRVINS drafts look like AI).",
       "An edit pass on a liked render (\"keep this photograph exactly; remove X\") keeps everything but X.",
+      "When the owner changes a fact of a picked rough (a sealed pouch, a small portion), each draft that edits that rough starts its prompt with the change (\"Keep this photograph. Change only: the pouch is sealed; four pieces.\"). Check each draft for the change.",
       "A final that needs more than one repair is drafted again with a simpler scene.",
     ],
   },
@@ -179,7 +185,7 @@ const defects = () =>
   `## CH. Defects (the codes of checks_save)\nOne D item, or two F items, rejects a draft or a final. Kill an idea that needs one to work.\n${CHECK_CODES.map(([c, t]) => `- ${c}: ${t}`).join("\n")}`;
 
 const HEAD =
-  "# The owner's house rules\nThe owner (Han, a11 Studio) settled these in his batch reviews. Every agent follows them, with or without the a11 plugin. canon_get (his learned taste) and taste_log (his picks and words) add to them; what he says in this session wins. The evidence and the how-to are in docs/creative-playbook.md and docs/render-checklist.md of the a11-adgen repo. Send the rulesVersion with ideas_save, direction_save, render_submit, final_render and checks_save.";
+  "# The owner's house rules\nThe owner (Han, a11 Studio) settled these in his batch reviews. Every agent follows them, with or without the a11 plugin. canon_get (his learned taste) and taste_log (his picks and words) add to them; what he says in this session wins. The evidence and the how-to are in docs/creative-playbook.md and docs/render-checklist.md of the public GitHub repo han669669/a11-adgen (background only: you need no checkout, and finish_kit gives the scripts). Send the rulesVersion with ideas_save, direction_save, render_submit, final_render and checks_save.";
 
 function render(sections: readonly Section[], withDefects: boolean): string {
   const body = sections.map((s) => `## ${s.key}. ${s.title}\n${s.rules.map((r, i) => `- ${s.key}${i + 1}: ${r}`).join("\n")}`);

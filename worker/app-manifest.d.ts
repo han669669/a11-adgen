@@ -3,3 +3,9 @@ declare module "*/dist/app-manifest.json" {
   const manifest: Record<string, string>;
   export default manifest;
 }
+
+/** Written by the web app build (vite.config.ts, finishkit.build.ts): the finish scripts by file name, as text. */
+declare module "*/dist/finish-kit.json" {
+  const files: Record<string, string>;
+  export default files;
+}

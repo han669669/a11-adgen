@@ -1,10 +1,24 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { finishFiles } from "./finishkit.build";
 
 // Worker tests are in tests/. Web app tests are next to their code in app/src, so `tsc -p app` checks them with the DOM types.
 // The web app build has its own Vite config (vite.config.ts).
 // "cloudflare:workers" exists only inside workerd: the OAuth library imports it, so tests use a small stand-in.
 export default defineConfig({
+  // The Worker imports the finish scripts that the web app build writes (dist/finish-kit.json): tests read the same scripts.
+  plugins: [
+    {
+      name: "a11-finish-kit",
+      enforce: "pre",
+      resolveId(id) {
+        if (id.endsWith("/dist/finish-kit.json")) return "\0a11-finish-kit";
+      },
+      load(id) {
+        if (id === "\0a11-finish-kit") return `export default ${JSON.stringify(finishFiles(fileURLToPath(new URL(".", import.meta.url))))};`;
+      },
+    },
+  ],
   test: {
     root: ".",
     include: ["tests/**/*.test.ts", "app/src/**/*.test.ts"],

@@ -457,6 +457,8 @@ describe("batch flow", () => {
     const { b, ideas } = await seed(env);
     const keys = addDraft(raw, b.id, ideas[0]!.id, "33333333-3333-3333-3333-333333333333");
     await expect(batch.picksSave(env, b.id, [{ key: keys[0] }, { key: keys[1] }])).rejects.toThrow("one draft per idea");
+    // Issue 147: a full pass sent as picks gets the way to save it, a pass verdict.
+    await expect(batch.picksSave(env, b.id, keys.map((key) => ({ key })))).rejects.toThrow("batch_update ownerVerdicts (stage 'draft', mark 'pass'");
     await batch.picksSave(env, b.id, [{ key: keys[0] }]);
     raw.prepare("UPDATE picks SET final_render_id = 'f1' WHERE render_key = ?").run(keys[0]);
     await expect(batch.picksSave(env, b.id, [{ key: keys[2] }])).rejects.toThrow("already has a final");

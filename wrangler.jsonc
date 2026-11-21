@@ -5,7 +5,8 @@
   "compatibility_date": "2026-10-20",
   "compatibility_flags": ["nodejs_compat"],
   // Each deploy builds the web app first. The build writes dist/app-manifest.json (the SHA-256 of each file), which the Worker imports:
-  // the MCP tool app_publish takes only these files into R2 app/ (worker/apppublish.ts).
+  // the MCP tool app_publish takes only these files into R2 app/ (worker/apppublish.ts). It also writes dist/finish-kit.json (the finish
+  // scripts as text, in the one entry.js, so the manual fallback still uploads one module): finish_kit serves them (worker/finishkit.ts).
   "build": { "command": "npm run build:app", "watch_dir": "app" },
   "workers_dev": true,
   // No public per-version URLs. Set on purpose: when this field is missing, Wrangler sends no value and Cloudflare's default (on) can apply. The app is served from the main address only.

@@ -38,6 +38,7 @@ Run these on the live address for a production deploy. For a preview deploy, run
 | `GET /app-publish/link.json` | 404 |
 | The wrong-key `PUT` above, 25 times in one minute from one address | 429 with `retry-after: 60` after about 20 (it writes nothing) |
 | `GET /m/deploy/x.js` | 404 |
+| `GET /finish/headline.py`; `GET /finish/test_scripts.py` and `POST /finish/headline.py` | 200 `text/plain` with `x-content-type-options: nosniff` and `content-security-policy: default-src 'none'; sandbox`, and the SHA-256 that `finish_kit` gives; 404 each |
 | `GET /` and a pack page | CSP present, no `unsafe-inline` in `script-src` |
 | `GET /` and one file under `/assets/` | CSP, `referrer-policy: no-referrer` and `permissions-policy` present on both |
 | `GET http://` the live address, any path | 301 to the same path on `https://` |

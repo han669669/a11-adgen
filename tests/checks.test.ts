@@ -289,6 +289,8 @@ describe("the owner's board for engine 3 (v3 Phase 6)", () => {
     expect(shown).toEqual([1, 2, 3].map((n) => `renders/${renderId(1, n)}/0.jpg`));
     await expect(batch.picksSave(env, E3, [{ key: `renders/${renderId(1, 4)}/0.jpg` }])).rejects.toThrow("is not an eligible draft");
     await expect(batch.picksSave(env, E3, [{ key: `renders/${renderId(1, 5)}/0.jpg` }])).rejects.toThrow("is not an eligible draft");
+    // Devin Review, PR 148: a full pass that names a draft that is not eligible gets the pass answer, not the eligibility one.
+    await expect(batch.picksSave(env, E3, [4, 5].map((n) => ({ key: `renders/${renderId(1, n)}/0.jpg` })))).rejects.toThrow("mark 'pass'");
     await batch.picksSave(env, E3, [{ key: shown[1]!, note: "the second" }]);
     // A pick with a final stays on the board and stays valid after the drafts change.
     raw.prepare("UPDATE picks SET final_render_id = 'f1' WHERE render_key = ?").run(shown[1]);
