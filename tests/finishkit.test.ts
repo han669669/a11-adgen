@@ -75,16 +75,21 @@ describe("finish_kit", () => {
 
 describe("the Python choice of the setup script", () => {
   // Devin Review, PR 148: run the choice line in bash with stand-in interpreters, so the fallback is tested, not only its text.
-  const choose = async (works: string[]) => {
+  // Each stand-in has one mode: ok (3.12 or newer, venv and pip work), old (older than 3.12, with venv and pip, so only the version check stops it), novenv (venv fails) or nopip
+  // (venv works, its python has no pip). A name not in the map is a broken interpreter that fails every call.
+  type Mode = "ok" | "old" | "novenv" | "nopip";
+  const choose = async (modes: Partial<Record<string, Mode>>) => {
     const dir = mkdtempSync(path.join(tmpdir(), "a11-kit-"));
     const bin = path.join(dir, "bin");
     execFileSync("mkdir", ["-p", bin]);
     for (const name of ["python3.14", "python3.13", "python3.12", "python3"]) {
-      // A working stand-in passes the version check and makes a .venv whose python answers; a broken one has no venv.
-      const ok = works.includes(name);
+      const mode = modes[name];
+      const version = mode && mode !== "old" ? "exit 0" : "exit 1";
+      const venvPy = mode === "nopip" ? "exit 1" : "exit 0";
+      const venv = mode === "ok" || mode === "nopip" || mode === "old" ? `mkdir -p .venv/bin && printf '#!/bin/sh\\n${venvPy}\\n' > .venv/bin/python && chmod +x .venv/bin/python && exit 0` : "exit 1";
       writeFileSync(
         path.join(bin, name),
-        `#!/bin/sh\nif [ "$1" = "-c" ]; then exit 0; fi\nif [ "$1" = "-m" ] && [ "$2" = "venv" ]; then ${ok ? 'mkdir -p .venv/bin && printf "#!/bin/sh\\nexit 0\\n" > .venv/bin/python && chmod +x .venv/bin/python && exit 0' : "exit 1"}; fi\nexit 1\n`,
+        `#!/bin/sh\nif [ "$1" = "-c" ]; then ${version}; fi\nif [ "$1" = "-m" ] && [ "$2" = "venv" ]; then ${venv}; fi\nexit 1\n`,
       );
       chmodSync(path.join(bin, name), 0o755);
     }
@@ -96,12 +101,20 @@ describe("the Python choice of the setup script", () => {
       return `failed: ${String((e as { stderr?: string }).stderr).trim()}`;
     }
   };
-  it("skips a newer Python that cannot make a virtual environment", async () => {
-    expect(await choose(["python3.13", "python3"])).toBe("python3.13");
-    expect(await choose(["python3"])).toBe("python3");
+  it("takes the newest Python that passes every check", async () => {
+    expect(await choose({ "python3.14": "ok", "python3.13": "ok", python3: "ok" })).toBe("python3.14");
+    expect(await choose({ "python3.14": "novenv", "python3.13": "ok", python3: "ok" })).toBe("python3.13");
+    expect(await choose({ "python3.14": "nopip", "python3.12": "ok" })).toBe("python3.12");
+    expect(await choose({ python3: "ok" })).toBe("python3");
+  });
+  it("skips a Python older than 3.12 and one whose environment has no pip", async () => {
+    expect(await choose({ "python3.13": "nopip", python3: "old" })).toMatch(/^failed: /);
+    expect(await choose({ "python3.12": "nopip", python3: "ok" })).toBe("python3");
   });
   it("stops with a clear message when no Python can", async () => {
-    expect(await choose([])).toBe("failed: The finish kit needs Python 3.12 or newer with venv and pip (tested on 3.13).");
+    const msg = "failed: The finish kit needs Python 3.12 or newer with venv and pip (tested on 3.13).";
+    expect(await choose({})).toBe(msg);
+    expect(await choose({ "python3.14": "novenv", "python3.13": "nopip", python3: "old" })).toBe(msg);
   });
 });
 
