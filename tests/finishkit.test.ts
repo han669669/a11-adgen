@@ -54,8 +54,12 @@ describe("finish_kit", () => {
     const check = lines[at("-c -")]!;
     for (const f of k.files) expect(check).toContain(`'${f.sha256}  scripts/${f.name}'`);
     expect(at("-c -")).toBeLessThan(at("pip install"));
-    expect(at("sys.version_info < (3, 12)")).toBeLessThan(at("-m venv .venv"));
-    expect(at("-m venv .venv")).toBeLessThan(at(".venv/bin/python -m pip install -r scripts/requirements.txt"));
+    expect(lines.slice(1, 3)).toEqual(["mkdir -p a11-finish/scripts", "cd a11-finish"]);
+    // A Python counts only when it is 3.12 or newer and can make a virtual environment with pip.
+    const pick = lines[at("sys.version_info < (3, 12)")]!;
+    expect(pick).toContain('-m venv --clear .venv');
+    expect(pick).toContain(".venv/bin/python -m pip --version");
+    expect(at("sys.version_info < (3, 12)")).toBeLessThan(at(".venv/bin/python -m pip install -r scripts/requirements.txt"));
     expect(k.run).toContain(".venv/bin/python scripts/<name>");
     expect(k.notes.join(" ")).toContain("Never open, fetch or clone a git repository");
   });

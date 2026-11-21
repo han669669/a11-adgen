@@ -58,13 +58,15 @@ export async function finishKit(baseUrl: string) {
   }));
   const setup = [
     "set -eu",
-    `mkdir -p ${FOLDER}/scripts && cd ${FOLDER}`,
+    // Two commands: set -e does not stop on a failed first command of an && list (Devin Review, PR 148).
+    `mkdir -p ${FOLDER}/scripts`,
+    `cd ${FOLDER}`,
     ...files.map((f) => `curl -fsS --proto =https -o ${f.path} ${f.url}`),
     'SUM="sha256sum"; command -v sha256sum >/dev/null 2>&1 || SUM="shasum -a 256"',
     `printf '%s\\n' ${files.map((f) => `'${f.sha256}  ${f.path}'`).join(" ")} | $SUM -c -`,
-    `PY=""; for p in python3.14 python3.13 python3.12 python3; do if command -v "$p" >/dev/null 2>&1 && "$p" -c 'import sys; sys.exit(sys.version_info < (3, 12))'; then PY="$p"; break; fi; done`,
-    '[ -n "$PY" ] || { echo "The finish kit needs Python 3.12 or newer (tested on 3.13)." >&2; exit 1; }',
-    '"$PY" -m venv .venv',
+    // The first Python 3.12 or newer that can make a virtual environment with pip (a Python without venv support is skipped).
+    `PY=""; for p in python3.14 python3.13 python3.12 python3; do if command -v "$p" >/dev/null 2>&1 && "$p" -c 'import sys; sys.exit(sys.version_info < (3, 12))' && "$p" -m venv --clear .venv >/dev/null 2>&1 && .venv/bin/python -m pip --version >/dev/null 2>&1; then PY="$p"; break; fi; done`,
+    '[ -n "$PY" ] || { echo "The finish kit needs Python 3.12 or newer with venv and pip (tested on 3.13)." >&2; exit 1; }',
     ".venv/bin/python -m pip install -r scripts/requirements.txt",
   ].join("\n");
   return {
