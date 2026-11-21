@@ -549,18 +549,21 @@ export async function picksSave(env: Env, batchId: string, picks: { key: string;
   ).bind(batchId, JSON.stringify(ideaIds), JSON.stringify(picks.map((p) => p.key))).first<{ n: number }>();
   if (finalled?.n) throw new Error("An idea in this call already has a final. To render it again, use render_submit (kind 'final').");
   const listed = picks.map((p) => p.key);
+  // A pick saved again keeps its time (taste_log and the replay cut read it). Engine 3 only: after a full pass on its idea,
+  // a pick saved again with new words is his newest decision, and batch_get reads its time against the pass (index
+  // verdicts_batch). The same words are not a new decision: the board and picks_save send every pick again on each save.
+  const renew = eng?.engine === 3
+    ? `, created_at = CASE WHEN picks.note IS NOT excluded.note AND EXISTS (SELECT 1 FROM verdicts v WHERE v.batch_id = picks.batch_id
+         AND v.idea_id = picks.idea_id AND v.stage = 'draft' AND v.mark = 'pass' AND v.created_at >= picks.created_at) THEN excluded.created_at ELSE picks.created_at END`
+    : "";
   const stmts = [
     env.DB.prepare(
       `DELETE FROM picks WHERE batch_id = ? AND final_render_id IS NULL AND render_key NOT IN (SELECT value FROM json_each(?))`,
     ).bind(batchId, JSON.stringify(listed)),
     ...picks.map((p) =>
       env.DB.prepare(
-        // A pick saved again keeps its time (taste_log and the replay cut read it), except after a full pass on its idea:
-        // the pick is then his newest decision, and batch_get reads its time against the pass (index verdicts_batch).
         `INSERT INTO picks (render_key, batch_id, idea_id, note, by_owner, created_at) VALUES (?, ?, ?, ?, 1, ?)
-         ON CONFLICT (render_key) DO UPDATE SET note = excluded.note, by_owner = 1,
-           created_at = CASE WHEN EXISTS (SELECT 1 FROM verdicts v WHERE v.batch_id = picks.batch_id AND v.idea_id = picks.idea_id
-             AND v.stage = 'draft' AND v.mark = 'pass' AND v.created_at >= picks.created_at) THEN excluded.created_at ELSE picks.created_at END`,
+         ON CONFLICT (render_key) DO UPDATE SET note = excluded.note, by_owner = 1${renew}`,
       ).bind(p.key, batchId, keys.get(p.key)!, p.note ?? null, at),
     ),
   ];

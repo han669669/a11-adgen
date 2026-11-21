@@ -278,6 +278,10 @@ describe("checks_save", () => {
     await batch.batchUpdate(env, { id: E3, ownerVerdicts: [{ stage: "draft", mark: "pass", ideaId: idea, ownerSaid: "none of these" }] });
     expect(await step()).toBe("drafts");
     await tick();
+    // Devin Review, PR 1 of the fork: the board sends every pick again when he saves a note on another idea. The same words are not a new decision.
+    await batch.picksSave(env, E3, [{ key, note: "draft 1" }, { key: `renders/${renderId(2, 1)}/0.jpg`, note: "this one" }]);
+    expect(await step()).toBe("drafts");
+    await tick();
     // On second look he keeps draft 1: his newest words win, as for another draft of the idea.
     await batch.picksSave(env, E3, [{ key, note: "on second look, draft 1" }]);
     expect(await step()).toBe("board");
