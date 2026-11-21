@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { TOOLS } from "../worker/mcp";
 import { validate } from "../worker/schema";
-import { approved, direction, draft, E3, PLAN, run, select, type Idea } from "./helpers/engine3";
+import { withRules, approved, direction, draft, E3, PLAN, run, select, type Idea } from "./helpers/engine3";
 
 /** a11-engine v3 Phase 3: the art direction of a picked concept (design pack §3.3, §3.4, §3.7, tests 3.1 to 3.5). */
 
@@ -44,12 +44,12 @@ describe("direction_save", () => {
     const { env, raw, ideas } = await approved();
     const schema = TOOLS.find((t) => t.name === "direction_save")!.inputSchema;
     const args = (d: unknown) => ({ batchId: E3, ideaId: ideas[0]!.id, direction: d });
-    expect(() => validate(schema, args(direction({ drafts: [draft(1), draft(2)] })))).toThrow("needs at least 3 items");
+    expect(() => validate(schema, withRules("direction_save", args(direction({ drafts: [draft(1), draft(2)] }))))).toThrow("needs at least 3 items");
     const { question: _q, ...noQuestion } = draft(2);
-    expect(() => validate(schema, args(direction({ drafts: [draft(1), noQuestion, draft(3)] })))).toThrow("question is required");
+    expect(() => validate(schema, withRules("direction_save", args(direction({ drafts: [draft(1), noQuestion, draft(3)] }))))).toThrow("question is required");
     const { plan: _p, ...noPlan } = draft(3);
     await expect(save(env, ideas[0]!.id, direction({ drafts: [draft(1), draft(2), noPlan] }))).rejects.toThrow("give a layout plan, fromRough");
-    expect(() => validate(schema, args(direction({ drafts: [draft(1), draft(2), draft(3, { question: "   " })] })))).toThrow("wrong format");
+    expect(() => validate(schema, withRules("direction_save", args(direction({ drafts: [draft(1), draft(2), draft(3, { question: "   " })] }))))).toThrow("wrong format");
     await expect(save(env, ideas[0]!.id, direction({ drafts: [draft(1), draft(2), draft(2)] }))).rejects.toThrow("n 1, 2 and 3, once each");
     await expect(save(env, ideas[0]!.id, direction({ drafts: [draft(1), draft(2), draft(3, { plan: "products: []" })] }))).rejects.toThrow("plan is not JSON");
     await expect(save(env, ideas[0]!.id, direction({ drafts: [draft(1), draft(2), draft(3, { plan: '{"products": []}' })] }))).rejects.toThrow('non-empty "products" list');
@@ -172,9 +172,9 @@ describe("direction_save", () => {
       const { plan: _p, ...d } = draft(n);
       return { ...d, productRef: ref };
     };
-    expect(() => validate(schema, { batchId: E3, ideaId: ideas[0]!.id, direction: direction({ drafts: [fromRef(1, "http://example.com/a.jpg"), draft(2), draft(3)] }) })).toThrow("wrong format");
+    expect(() => validate(schema, withRules("direction_save", { batchId: E3, ideaId: ideas[0]!.id, direction: direction({ drafts: [fromRef(1, "http://example.com/a.jpg"), draft(2), draft(3)] }) }))).toThrow("wrong format");
     const all = direction({ drafts: [fromRef(1), fromRef(2), fromRef(3)] });
-    expect(() => validate(schema, { batchId: E3, ideaId: ideas[0]!.id, direction: all })).not.toThrow();
+    expect(() => validate(schema, withRules("direction_save", { batchId: E3, ideaId: ideas[0]!.id, direction: all }))).not.toThrow();
     expect(await save(env, ideas[0]!.id, all)).toMatchObject({ version: 1 });
     const b = await run(env, "batch_get", { id: E3, withPlans: true });
     const d = ideaOf(b, ideas[0]!).direction.drafts;

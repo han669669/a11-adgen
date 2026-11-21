@@ -113,6 +113,7 @@ The connector and the agents use OAuth for `/mcp`. That is separate from this to
 ## 8. Rules for the code
 
 - **Rule budget.** v1 failed by adding a code rule after each bad batch (see `docs/v1-lessons.md`). Keep at most 15 hard checks in code. A hard check tests only true/false facts (a price matches the fact sheet, painted text equals the approved copy). Taste goes into the taste canon in plain words, never into regexes.
+- **House rules.** The owner's settled rules for every agent live in `worker/houserules.ts`. The MCP tool `rules_get` serves them, so a client without the a11 plugin gets them too, and the creative tools refuse a call without the current `rulesVersion`. When the owner settles a rule that every client must follow, add it there in a PR, with a line in `docs/decisions.md`. The plugin agents read the rules from `rules_get` and keep their process steps. Where a step repeats a rule, the text in `worker/houserules.ts` wins; change both together.
 - A new hard check needs a real failure as its test fixture and a line in `docs/decisions.md`.
 - Copy states only facts from the product's fact sheet. Each fact keeps its source URL and quote.
 - Race, ethnicity and religion in copy are a hard no, unless the owner asks.

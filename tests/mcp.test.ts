@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Env } from "../worker/env";
+import { RULES_VERSION } from "../worker/houserules";
 import { handleMcp, INSTRUCTIONS, TOOLS } from "../worker/mcp";
 import { validate } from "../worker/schema";
 
@@ -197,7 +198,7 @@ describe("mcp handler", () => {
     // The critic judges: it has no paid tool and no tool that writes ideas, prompts or verdicts.
     const { readFileSync } = await import("node:fs");
     const critic = readFileSync(new URL("../plugin/agents/critic.md", import.meta.url), "utf8");
-    expect(critic.match(/^tools: (.*)$/m)![1]!.split(", ")).toEqual(["Read", "Grep", "Glob", "mcp__a11__canon_get", "mcp__a11__taste_log", "mcp__a11__batch_get", "mcp__a11__ideas_pick", "mcp__a11__drafts_rank", "mcp__a11__image_get", "mcp__a11__gold_get", "mcp__a11__gold_score"]);
+    expect(critic.match(/^tools: (.*)$/m)![1]!.split(", ")).toEqual(["Read", "Grep", "Glob", "mcp__a11__rules_get", "mcp__a11__canon_get", "mcp__a11__taste_log", "mcp__a11__batch_get", "mcp__a11__ideas_pick", "mcp__a11__drafts_rank", "mcp__a11__image_get", "mcp__a11__gold_get", "mcp__a11__gold_score"]);
     // The copy length guide: only a headline over 8 words is a kill rule (owner, 12-11-2026).
     expect(critic).toContain("Kill a headline over 8 words.");
     expect(critic).toContain("as a warning, not a kill rule");
@@ -218,7 +219,7 @@ describe("mcp handler", () => {
     // The art director has no paid tool and no tool that picks or ranks.
     const { readFileSync } = await import("node:fs");
     const tools = readFileSync(new URL("../plugin/agents/art-director.md", import.meta.url), "utf8").match(/^tools: (.*)$/m)![1]!;
-    expect(tools.split(", ")).toEqual(["Read", "Grep", "Glob", "Bash", "mcp__a11__batch_get", "mcp__a11__brand_get", "mcp__a11__canon_get", "mcp__a11__image_get", "mcp__a11__render_status"]);
+    expect(tools.split(", ")).toEqual(["Read", "Grep", "Glob", "Bash", "mcp__a11__rules_get", "mcp__a11__batch_get", "mcp__a11__brand_get", "mcp__a11__canon_get", "mcp__a11__image_get", "mcp__a11__render_status"]);
     expect(text("final")).toContain("give the finished drafts to the art-director subagent to check");
     expect(text("final")).toContain("When he picks one of the new drafts, ideas_update finalPrompt for that idea first");
   });
@@ -345,7 +346,7 @@ describe("tool call log", () => {
 
 describe("validate", () => {
   const schema = TOOLS.find((t) => t.name === "render_submit")!.inputSchema;
-  const ok = { batch: "b", idea: "i", kind: "draft", prompt: "x".repeat(40), referenceUrls: ["https://a.b/c.png"] };
+  const ok = { rulesVersion: RULES_VERSION, batch: "b", idea: "i", kind: "draft", prompt: "x".repeat(40), referenceUrls: ["https://a.b/c.png"] };
   it("fills defaults", () => expect(validate(schema, ok).numImages).toBe(1));
   it("rejects an unknown kind", () => expect(() => validate(schema, { ...ok, kind: "huge" })).toThrow());
   it("rejects a non-URL reference", () => expect(() => validate(schema, { ...ok, referenceUrls: ["file:///etc/passwd"] })).toThrow());

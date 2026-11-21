@@ -10,6 +10,7 @@ import { picksGet } from "../worker/picks";
 import { validate } from "../worker/schema";
 import { reserve, totals } from "../worker/spend";
 import { fakeD1 } from "./helpers/d1";
+import { withRules } from "./helpers/engine3";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -809,18 +810,18 @@ describe("nested tool input", () => {
     expect((validate(nested as any, { list: [{}] }) as any).list[0].on).toBe(false);
   });
   it("accepts a good list without a pick: the critic picks later with ideas_pick", () => {
-    expect((validate(schema, { batchId: "11111111-1111-1111-1111-111111111111", ideas: [idea] }) as any).ideas[0]).toEqual(idea);
-    expect(() => validate(schema, { batchId: "11111111-1111-1111-1111-111111111111", ideas: [{ ...idea, picked: true }] })).toThrow(
+    expect((validate(schema, withRules("ideas_save", { batchId: "11111111-1111-1111-1111-111111111111", ideas: [idea] })) as any).ideas[0]).toEqual(idea);
+    expect(() => validate(schema, withRules("ideas_save", { batchId: "11111111-1111-1111-1111-111111111111", ideas: [{ ...idea, picked: true }] }))).toThrow(
       "Unknown argument: ideas[0].picked.",
     );
   });
   it("refuses an unknown nested key with its path", () => {
-    expect(() => validate(schema, { batchId: "11111111-1111-1111-1111-111111111111", ideas: [{ ...idea, colour: "red" }] })).toThrow(
+    expect(() => validate(schema, withRules("ideas_save", { batchId: "11111111-1111-1111-1111-111111111111", ideas: [{ ...idea, colour: "red" }] }))).toThrow(
       "Unknown argument: ideas[0].colour.",
     );
   });
   it("refuses null for a nested object", () => {
-    expect(() => validate(schema, { batchId: "11111111-1111-1111-1111-111111111111", ideas: [{ ...idea, copy: null }] })).toThrow(
+    expect(() => validate(schema, withRules("ideas_save", { batchId: "11111111-1111-1111-1111-111111111111", ideas: [{ ...idea, copy: null }] }))).toThrow(
       "ideas[0].copy must be an object.",
     );
   });

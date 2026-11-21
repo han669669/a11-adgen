@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { Env } from "../../worker/env";
+import { RULES_GATED, RULES_VERSION } from "../../worker/houserules";
 import { TOOLS, toolInput } from "../../worker/mcp";
 import { exampleBrief, SOURCES } from "../fixtures/brief";
 import { fakeD1 } from "./d1";
@@ -8,9 +9,13 @@ import { fakeD1 } from "./d1";
 
 export const E3 = "e3000000-0000-4000-8000-000000000003";
 
+/** The args with the current rulesVersion when the tool needs it (callTool's gate, which these direct calls skip). */
+export const withRules = (name: string, args: unknown) =>
+  RULES_GATED.has(name) && args && typeof args === "object" && !Array.isArray(args) ? { rulesVersion: RULES_VERSION, ...args } : args;
+
 export const run = async (env: Env, name: string, args: unknown) => {
   const t = TOOLS.find((x) => x.name === name)!;
-  const c = (await t.run(env, toolInput(t, args))).content[0]!;
+  const c = (await t.run(env, toolInput(t, withRules(name, args)))).content[0]!;
   return JSON.parse(c.type === "text" ? c.text : "{}");
 };
 

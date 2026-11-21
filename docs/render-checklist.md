@@ -4,6 +4,8 @@ Read this file before you write a draft or final prompt, when you pick drafts, a
 
 These are words for you to apply with judgement, not code rules (`docs/v1-lessons.md` §2.2). The idea comes first (`docs/creative-playbook.md` §2). This list stops a good idea from being rejected for its picture.
 
+`rules_get` (`worker/houserules.ts`, section CH) serves a one-line copy of each D and F code to every MCP client. `tests/houserules.test.ts` keeps the codes equal here, there and in `checks_save`. When you add or change a code, change all three.
+
 ## 1. Defects: one of these rejects the ad
 
 | # | Check | The owner's evidence |
