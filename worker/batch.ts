@@ -829,6 +829,7 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
   const e3 = b.engine === 3;
   const draftsDone = new Map<string, boolean>();
   const redirect = new Map<string, boolean>();
+  const ownerDecided = new Map<string, boolean>();
   const ideasOut = ideas.results.map((i) => {
     const drafts = renders.results
       .filter((r) => r.idea === i.id && r.kind === "draft")
@@ -859,7 +860,8 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
     draftsDone.set(i.id, decided || (settled && (eligible.length >= 2 || (eligible.length === 1 && redirected))));
     redirect.set(i.id, !decided && settled && eligible.length <= 1 && !redirected);
     // Engine 3: ranked is the critic's rank of every eligible current draft (it ranks eligible drafts only).
-    const ranked = e3 ? decided || (eligible.length > 0 && eligible.every((d) => rankBy.has(d.key))) : newest.length > 0 && newest.every((d) => rankBy.has(d.key));
+    const ranked = e3 ? eligible.length > 0 && eligible.every((d) => rankBy.has(d.key)) : newest.length > 0 && newest.every((d) => rankBy.has(d.key));
+    ownerDecided.set(i.id, decided);
     return {
       id: i.id,
       n: i.n,
@@ -932,7 +934,7 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
     picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, byOwner: p.by_owner === 1, finalRenderId: p.final_render_id })),
     drafting: renders.results.filter((r) => r.status === "queued").map((r) => r.id),
     // Engine 3 only: the next step of the batch, from its rows (design pack §1.11). Engine 2 batches have none.
-    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, draftsDone: draftsDone.get(i.id) === true, redirect: redirect.get(i.id) === true, rendered: renders.results.some((r) => r.idea === i.id && r.kind !== "rough"), directed: directions.get(i.id)?.current === true })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.n > conceptReview.lastN) }) } : {}),
+    ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, draftsDone: draftsDone.get(i.id) === true, redirect: redirect.get(i.id) === true, decided: ownerDecided.get(i.id) === true, rendered: renders.results.some((r) => r.idea === i.id && r.kind !== "rough"), directed: directions.get(i.id)?.current === true })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.n > conceptReview.lastN) }) } : {}),
   };
 }
 
@@ -946,6 +948,8 @@ type IdeaState = {
   draftsDone: boolean;
   /** Engine 3: 0 or 1 eligible drafts after the redos, and no new direction yet: the art director writes one (§3.6). */
   redirect?: boolean;
+  /** Engine 3: the owner picked a draft of the idea after his newest full pass: no more drafts or rank for it. */
+  decided?: boolean;
   /** Any render row of the idea, also a queued or failed one (ideas_pick freezes the picks then). */
   rendered?: boolean;
   /** The idea has a direction record that is newer than the newest concept review (design pack §1.11 step 6). */
@@ -972,7 +976,7 @@ export function nextStepV3(
   if (picked.some((i) => !i.copy.ownerApproved)) return "copy_review";
   if (picked.some((i) => !i.directed || i.redirect)) return "direction";
   if (picked.some((i) => !i.draftsDone)) return "drafts";
-  if (picked.some((i) => !i.ranked)) return "draft_rank";
+  if (picked.some((i) => !i.ranked && !i.decided)) return "draft_rank";
   if (!["board", "finals", "done"].includes(status)) return "board";
   if (picked.some((i) => !ownerPicked.has(i.id))) return "owner_pick";
   // A queued or failed final is not a final: the step is done only when each picked idea has a finished one.

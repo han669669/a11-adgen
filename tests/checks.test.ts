@@ -258,6 +258,8 @@ describe("checks_save", () => {
     expect((await run(env, "picks_get", { batchId: E3 })).picks.map((p: { draftKey: string }) => p.draftKey)).toEqual([key(8)]);
     // Devin Review, PR 145: his pick ends the draft steps of that idea, so a resumed batch does not go back to drafts.
     expect((await run(env, "batch_get", { id: E3 })).nextStep).toBe("board");
+    // ranked still means the critic's rank is saved: the round 2 drafts were never ranked.
+    expect(ideaOf(await run(env, "batch_get", { id: E3 }), idea).ranked).toBe(false);
     // A new full pass after his pick opens the draft steps again.
     await batch.batchUpdate(env, { id: E3, ownerVerdicts: [{ stage: "draft", mark: "pass", ideaId: idea, ownerSaid: "no, none again" }] });
     expect((await run(env, "batch_get", { id: E3 })).nextStep).not.toBe("board");

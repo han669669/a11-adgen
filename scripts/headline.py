@@ -272,16 +272,29 @@ def split_edge(im, box, vertical):
     r, g, bl = ImageChops.difference(a, b).split()
     step = ImageChops.lighter(ImageChops.lighter(r, g), bl).point(lambda v: 1 if v > SPLIT_STEP else 0)
     data, sw, sh = step.tobytes(), step.width, step.height
-    # step[j] compares region pixels j and j + k: its edge sits at region pixel j + k // 2.
-    if vertical:  # a column inside the box where most of the box's rows step: a vertical edge
+    # step[j] compares region pixels j and j + k. One sharp edge makes a run of steps a few pixels wide: its centre is
+    # the edge, and only an edge whose centre is inside the box counts (an edge just outside it does not).
+    if vertical:  # a column where most of the box's rows step: a vertical edge
         r0, r1 = y0 - cy0, y1 - cy0
-        cols = [p - cx0 - k // 2 for p in range(x0, x1)]
-        best, at = max(((sum(data[r0 * sw + j:r1 * sw:sw]) / (r1 - r0), j) for j in cols if 0 <= j < sw), default=(0, 0))
-        return cx0 + at + k // 2 if best >= SPLIT_SHARE else None
-    c0, c1 = x0 - cx0, x1 - cx0
-    rows = [p - cy0 - k // 2 for p in range(y0, y1)]
-    best, at = max(((sum(data[j * sw + c0:j * sw + c1]) / (c1 - c0), j) for j in rows if 0 <= j < sh), default=(0, 0))
-    return cy0 + at + k // 2 if best >= SPLIT_SHARE else None
+        shares = [sum(data[r0 * sw + j:r1 * sw:sw]) / (r1 - r0) for j in range(sw)]
+        lo, hi, origin = x0, x1, cx0
+    else:  # a row where most of the box's columns step: a horizontal edge
+        c0, c1 = x0 - cx0, x1 - cx0
+        shares = [sum(data[j * sw + c0:j * sw + c1]) / (c1 - c0) for j in range(sh)]
+        lo, hi, origin = y0, y1, cy0
+    j = 0
+    while j < len(shares):
+        if shares[j] < SPLIT_SHARE:
+            j += 1
+            continue
+        end = j
+        while end + 1 < len(shares) and shares[end + 1] >= SPLIT_SHARE:
+            end += 1
+        centre = origin + (j + end) // 2 + k // 2
+        if lo <= centre < hi:
+            return centre
+        j = end + 1
+    return None
 
 
 def foot(im, a, font_path, color, left, right):
