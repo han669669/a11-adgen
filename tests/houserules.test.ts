@@ -19,7 +19,7 @@ const call = (env: Env, name: string, args: unknown) =>
 
 describe("house rules", () => {
   it("has every section, a stable version and the same version for each role", () => {
-    for (const k of ["OW", "CO", "CP", "TY", "PR", "LI", "FO", "ST", "RE", "CH"]) expect(HOUSE_RULES).toContain(`## ${k}. `);
+    for (const k of ["OW", "CO", "CP", "TY", "PR", "LI", "FO", "ST", "RE", "WI", "CH"]) expect(HOUSE_RULES).toContain(`## ${k}. `);
     expect(RULES_VERSION).toMatch(/^[0-9a-f]{8}$/);
     for (const role of RULE_ROLES) expect(houseRules(role).rulesVersion).toBe(RULES_VERSION);
     expect(houseRules().rules).toBe(HOUSE_RULES);

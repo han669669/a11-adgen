@@ -72,6 +72,7 @@ interface FinalRow {
   image_keys: string | null;
   brand_id: string;
   kit_version: number;
+  engine: number;
 }
 
 /** The completed final behind an image key, with checks shared by food_fix and region_fix. */
@@ -81,7 +82,7 @@ async function finalRow(env: Env, key: string, boxes: Box[]): Promise<{ id: stri
   const id = m[1]!;
   checkBoxes(boxes);
   const row = await env.DB.prepare(
-    `SELECT r.batch, r.idea, r.kind, r.status, r.width, r.height, r.image_keys, b.brand_id, b.kit_version
+    `SELECT r.batch, r.idea, r.kind, r.status, r.width, r.height, r.image_keys, b.brand_id, b.kit_version, b.engine
      FROM renders r JOIN batches b ON b.id = r.batch WHERE r.id = ?`,
   )
     .bind(id)
@@ -111,6 +112,7 @@ async function maskedEdit(env: Env, id: string, row: FinalRow, key: string, boxe
     numImages: 1,
     maskUrl,
     id: renderId,
+    wild: row.engine === 1,
   });
   return { ...out, source: key, maskUrl };
 }

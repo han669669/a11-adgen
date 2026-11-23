@@ -293,3 +293,96 @@ describe("0016_canon_scopes", () => {
     expect(triggers.map((t) => t.name)).toEqual(["canon_active_limit_insert", "canon_active_limit_restore"]);
   });
 });
+
+describe("0018_engine_1", () => {
+  // The text of a rebuilt table changes its spacing (the rename quotes the name), so compare it without white space.
+  const SCHEMA = "SELECT type, name, tbl_name, replace(replace(replace(sql, ' ', ''), char(10), ''), '\"', '') AS sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name";
+  const before = readdirSync(new URL("../migrations/", import.meta.url))
+    .filter((n) => n.endsWith(".sql") && n < "0018")
+    .sort();
+  /** A database at 0017 with rows in every table that points at batches, then 0018 in one transaction (as D1 runs it). */
+  const migrated = () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec("PRAGMA foreign_keys = ON");
+    for (const f of before) db.exec(sql(f));
+    db.exec(`
+      INSERT INTO brands (id, slug, name, created_at, updated_at) VALUES ('br', 'catfiddle', 'Cat', 't', 't');
+      INSERT INTO subjects (id, brand_id, kind, title, created_at) VALUES ('su', 'br', 'product', 'Fickle Feline', 't');
+      INSERT INTO batches (id, brand_id, subject_id, kit_version, label, status, insights, notes, engine, created_at, updated_at)
+        VALUES ('b2', 'br', 'su', 1, 'W46', 'board', '[]', 'n', 2, 't1', 't1'), ('b3', 'br', 'su', 1, 'W47', 'finals', '[1]', NULL, 3, 't2', 't2');
+      INSERT INTO ideas (id, batch_id, n, format, insight, visual, headline, picked, created_at)
+        VALUES ('i1', 'b2', 1, 'tof', 'x', 'x', 'x', 1, 't'), ('i2', 'b3', 1, 'tof', 'x', 'x', 'x', 1, 't');
+      INSERT INTO picks (render_key, batch_id, idea_id, created_at) VALUES ('renders/r/1.jpg', 'b2', 'i1', 't');
+      INSERT INTO draft_ranks (render_key, batch_id, idea_id, rank, created_at) VALUES ('renders/r/1.jpg', 'b2', 'i1', 1, 't');
+      INSERT INTO packs (id, batch_id, version, token_hash, title, content, created_at) VALUES ('p1', 'b2', 1, 'h', 't', '{}', 't');
+      INSERT INTO verdicts (id, batch_id, idea_id, stage, mark, owner_said, created_at) VALUES ('v1', 'b3', 'i2', 'draft', 'pass', 'no', 't');
+      INSERT INTO research_sources (id, batch_id, url, retrieved_at, via) VALUES ('s1', 'b3', 'https://example.com', 't', 'search');
+      INSERT INTO batch_records (id, batch_id, kind, version, body, author, created_at) VALUES ('r1', 'b3', 'brief', 1, '{}', 'main', 't');
+    `);
+    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[]).map((t) => t.name);
+    const snapshot = Object.fromEntries(tables.map((t) => [t, db.prepare(`SELECT * FROM "${t}" ORDER BY rowid`).all()]));
+    const schema = db.prepare(SCHEMA).all();
+    db.exec("BEGIN");
+    db.exec(sql("0018_engine_1.sql"));
+    db.exec("COMMIT");
+    return { db, snapshot, schema };
+  };
+  const addBatch = (db: DatabaseSync, id: string, engine: number) =>
+    db.exec(`INSERT INTO batches (id, brand_id, subject_id, kit_version, label, status, engine, created_at, updated_at) VALUES ('${id}', 'br', 'su', 1, 'W48', 'research', ${engine}, 't', 't')`);
+  const addIdea = (db: DatabaseSync, id: string, batch: string, n: number, format: string) =>
+    db.exec(`INSERT INTO ideas (id, batch_id, n, format, insight, visual, headline, picked, created_at) VALUES ('${id}', '${batch}', ${n}, '${format}', 'x', 'x', 'x', 1, 't')`);
+
+  it("keeps every row, index, trigger and foreign key", () => {
+    const { db, snapshot, schema } = migrated();
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    for (const [t, rows] of Object.entries(snapshot)) expect(db.prepare(`SELECT * FROM "${t}" ORDER BY rowid`).all()).toEqual(rows);
+    // Every table, index and trigger is there with the same text, apart from the CHECK of batches.engine.
+    const now = db.prepare(SCHEMA).all() as { name: string; sql: string | null }[];
+    const old = schema as { name: string; sql: string | null }[];
+    expect(now.map((r) => (r.name === "batches" ? { ...r, sql: null } : r))).toEqual(old.map((r) => (r.name === "batches" ? { ...r, sql: null } : r)));
+    expect(now.find((r) => r.name === "batches")!.sql).toContain("CHECK(engineIN(1,2,3))");
+  });
+
+  it("takes engine 1, refuses other engines and keeps the engine fixed", () => {
+    const { db } = migrated();
+    addBatch(db, 'b1', 1);
+    expect(db.prepare("SELECT engine FROM batches WHERE id = 'b1'").get()).toEqual({ engine: 1 });
+    expect(() => addBatch(db, 'b4', 4)).toThrow(/CHECK/);
+    expect(() => addBatch(db, 'b0', 0)).toThrow(/CHECK/);
+    expect(() => db.exec("UPDATE batches SET engine = 2 WHERE id = 'b1'")).toThrow(/fixed/);
+  });
+
+  it("keeps the pick limits: 3 in any mix for engine 1, 1 per stage for engine 2", () => {
+    const { db } = migrated();
+    addBatch(db, 'b1', 1);
+    addIdea(db, 'w1', 'b1', 1, 'tof');
+    addIdea(db, 'w2', 'b1', 2, 'tof');
+    addIdea(db, 'w3', 'b1', 3, 'tof');
+    expect(() => addIdea(db, 'w4', 'b1', 4, 'mof')).toThrow(/Pick limit/);
+    expect(() => addIdea(db, 'i9', 'b2', 9, 'tof')).toThrow(/Pick limit/);
+  });
+
+  it("still refuses a child row of an unknown batch", () => {
+    const { db } = migrated();
+    expect(() => addIdea(db, 'x1', 'nope', 1, 'tof')).toThrow(/FOREIGN KEY/);
+    expect(() => db.exec("INSERT INTO packs (id, batch_id, version, token_hash, title, content, created_at) VALUES ('p9', 'nope', 1, 'h9', 't', '{}', 't')")).toThrow(/FOREIGN KEY/);
+  });
+
+  it("rolls back to engine 2 or 3, and refuses while an engine 1 batch exists", () => {
+    const down = readFileSync(new URL("../migrations/rollback/0018_engine_1.down.sql", import.meta.url), "utf8");
+    const { db, schema, snapshot } = migrated();
+    db.exec("BEGIN");
+    db.exec(down);
+    db.exec("COMMIT");
+    expect(db.prepare(SCHEMA).all()).toEqual(schema);
+    expect(db.prepare("SELECT * FROM batches ORDER BY rowid").all()).toEqual(snapshot.batches);
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+
+    const again = migrated().db;
+    addBatch(again, "b1", 1);
+    again.exec("BEGIN");
+    expect(() => again.exec(down)).toThrow(/CHECK/);
+    again.exec("ROLLBACK");
+    expect(again.prepare("SELECT engine FROM batches WHERE id = 'b1'").get()).toEqual({ engine: 1 });
+  });
+});

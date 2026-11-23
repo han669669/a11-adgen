@@ -741,7 +741,7 @@ describe("copy review", () => {
 
     // He changes the headline and approves in one update: the approval keeps the new words.
     await batch.ideasUpdate(env, [{ id, headline: "Wait, there's ten?", subline: "Ten flavours, one cake.", copyApproved: "yes this one" }]);
-    await expect(batch.copyApprovedCheck(env, b.id, id)).resolves.toBeUndefined();
+    await expect(batch.copyApprovedCheck(env, b.id, id)).resolves.toEqual({ engine: 2 });
     const got = (await batch.batchGet(env, b.id)).ideas.find((i) => i.id === id)!;
     expect(got.headline).toBe("Wait, there's ten?");
     expect(got.copy).toMatchObject({ subline: "Ten flavours, one cake.", ownerApproved: { headline: "Wait, there's ten?", subline: "Ten flavours, one cake.", ownerSaid: "yes this one" } });
@@ -749,7 +749,7 @@ describe("copy review", () => {
     await batch.ideasUpdate(env, [{ id, subline: "Ten flavours." }]);
     await expect(submit(env, draft(b.id, id))).rejects.toThrow("changed after the owner approved");
     await batch.ideasUpdate(env, [{ id, copyApproved: "ok" }]);
-    await expect(batch.copyApprovedCheck(env, b.id, id)).resolves.toBeUndefined();
+    await expect(batch.copyApprovedCheck(env, b.id, id)).resolves.toEqual({ engine: 2 });
   });
 
   it("refuses a draft for an idea that is not picked (v3 design pack §2.6)", async () => {

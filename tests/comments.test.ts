@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import * as batch from "../worker/batch";
 import { brandSave } from "../worker/brand";
 import { COMMENTS_PER_DAY } from "../worker/comments";
@@ -96,6 +96,9 @@ describe("client comments", () => {
   });
 
   it("lists the comments we received after a refresh: full text, ad, Singapore time, newest first, this pack only, nothing deleted", async () => {
+    // The fixed times below must stay inside the 14-day list window: pin the clock.
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-10T00:00:00.000Z") });
+    onTestFinished(() => void vi.useRealTimers());
     const { env, raw } = await makeEnv();
     const html = async () => await (await worker.fetch(new Request(`https://w/c/${TOKEN}`), env)).text();
     expect(await html()).not.toContain("Comments we received");

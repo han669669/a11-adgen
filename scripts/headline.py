@@ -323,11 +323,52 @@ def foot(im, a, font_path, color, left, right):
     im.paste(Image.alpha_composite(im.convert("RGBA"), layer).convert("RGB"))
 
 
+def open_picture(path):
+    try:
+        return Image.open(path, formats=FORMATS).convert("RGB")
+    except OSError as e:
+        sys.exit(f"cannot read the picture {path}: {e}")
+
+
+def place_logo(a, W, H, m):
+    """The kit logo at the kit placement: trimmed, scaled to --logo-width, optically centred (or at --logo-x), at least m from each edge."""
+    if not (0 < a.logo_width <= 1 and 0 <= a.logo_top < 1):
+        sys.exit("--logo-width must be more than 0 and at most 1, --logo-top from 0 to less than 1")
+    if a.logo_x is not None and not (math.isfinite(a.logo_x) and 0 <= a.logo_x and a.logo_x + a.logo_width <= 1):
+        sys.exit("--logo-x must be 0 or more, with the logo inside the picture (logo-x + logo-width <= 1)")
+    try:
+        logo = Image.open(a.logo, formats=["PNG"]).convert("RGBA")
+    except OSError as e:
+        sys.exit(f"cannot read the logo {a.logo}: {e}")
+    if logo.getbbox():
+        logo = logo.crop(logo.getbbox())  # trim a transparent border, as compose_final does
+    lw = max(1, int(W * a.logo_width))
+    logo = logo.resize((lw, max(1, round(logo.height * lw / logo.width))), Image.LANCZOS)
+    ly = int(H * a.logo_top)
+    lx = round(W / 2 - body_centre(logo)) if a.logo_x is None else round(W * a.logo_x)
+    if a.logo_top < m or lx < m * W or lx + logo.width > (1 - m) * W or ly + logo.height > (1 - m) * H:
+        sys.exit(f"the logo is less than --min-margin {100 * m:.0f}% from the picture edge: use the kit placement (--logo-top) and the text column's left edge (--logo-x)")
+    return logo, lx, ly
+
+
+def logo_only(a):
+    """Engine 1 (house rules WI): the kit logo with no words, with the same edge checks."""
+    m = a.min_margin
+    if not 0 <= m < 0.25:
+        sys.exit("--min-margin must be from 0 to less than 0.25")
+    im = open_picture(a.src)
+    W, H = im.size
+    logo, lx, ly = place_logo(a, W, H, m)
+    im.paste(logo, (lx, ly), logo)
+    im.save(a.out, quality=95)
+    print(f"{a.out}: logo only, {logo.width}px wide at {100 * ly / H:.1f}% from the top")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--in", dest="src", required=True)
     p.add_argument("--out", required=True)
-    font = p.add_mutually_exclusive_group(required=True)
+    font = p.add_mutually_exclusive_group()  # needed with a headline: checked after the logo-only branch
     font.add_argument("--family", help="the brand kit's font name, from Google Fonts")
     font.add_argument("--font", help="a font file (a brand font that is not on Google Fonts)")
     p.add_argument("--fallback", help="a Google Fonts family used only when --family cannot be found")
@@ -335,9 +376,9 @@ def main(argv=None):
     sub.add_argument("--sub-family")
     sub.add_argument("--sub-font")
     p.add_argument("--cache", default=os.path.join(os.path.expanduser("~"), ".cache", "a11-fonts"))
-    p.add_argument("--headline", required=True)
+    p.add_argument("--headline", default="", help="the approved headline; leave it out with --logo for a picture with the logo only (engine 1, no words)")
     p.add_argument("--subline", default="")
-    p.add_argument("--area", required=True, help="x0,y0,x1,y1 as fractions")
+    p.add_argument("--area", help="x0,y0,x1,y1 as fractions (needed with a headline)")
     p.add_argument("--wght", type=float)
     p.add_argument("--sub-wght", type=float)
     p.add_argument("--sub-ratio", type=float, default=0.42)
@@ -366,7 +407,16 @@ def main(argv=None):
 
     a.headline = a.headline.replace("|", " | ")
     if not a.headline.replace("|", "").strip():
-        sys.exit("the headline is empty")
+        if not a.logo:
+            sys.exit("the headline is empty: give --headline, or --logo alone for a picture with the logo only (engine 1)")
+        if a.subline or a.footnote:
+            sys.exit("a subline or a footnote needs a headline")
+        # An empty headline with type options is a lost headline (engine 2 or 3), not a logo-only picture.
+        if a.area is not None or a.font or a.family:
+            sys.exit("the headline is empty but --area, --family or --font is given: give the headline, or drop them for the logo only (engine 1)")
+        return logo_only(a)
+    if a.area is None or not (a.font or a.family):
+        sys.exit("a headline needs --area and one of --family or --font")
     bad = non_latin(a.headline + a.subline + (a.footnote or ""))  # the footnote too: a missing glyph draws a box
     if bad:
         sys.exit(f"only Latin-script words are supported (found {bad!r}): set non-Latin or right-to-left copy another way and tell the owner")
@@ -406,10 +456,7 @@ def main(argv=None):
     else:
         sub_path, sub_note = head_path, None
 
-    try:
-        im = Image.open(a.src, formats=FORMATS).convert("RGB")
-    except OSError as e:
-        sys.exit(f"cannot read the picture {a.src}: {e}")
+    im = open_picture(a.src)
     W, H = im.size
     bx0, by0, bw, bh = x0 * W, y0 * H, (x1 - x0) * W, (y1 - y0) * H
     draw = ImageDraw.Draw(im)
@@ -455,22 +502,7 @@ def main(argv=None):
     top = by0
     logo = None
     if a.logo:  # checked before any drawing: a logo that reaches the text stops the script
-        if not (0 < a.logo_width <= 1 and 0 <= a.logo_top < 1):
-            sys.exit("--logo-width must be more than 0 and at most 1, --logo-top from 0 to less than 1")
-        if a.logo_x is not None and not (math.isfinite(a.logo_x) and 0 <= a.logo_x and a.logo_x + a.logo_width <= 1):
-            sys.exit("--logo-x must be 0 or more, with the logo inside the picture (logo-x + logo-width <= 1)")
-        try:
-            logo = Image.open(a.logo, formats=["PNG"]).convert("RGBA")
-        except OSError as e:
-            sys.exit(f"cannot read the logo {a.logo}: {e}")
-        if logo.getbbox():
-            logo = logo.crop(logo.getbbox())  # trim a transparent border, as compose_final does
-        lw = max(1, int(W * a.logo_width))
-        logo = logo.resize((lw, max(1, round(logo.height * lw / logo.width))), Image.LANCZOS)
-        ly = int(H * a.logo_top)
-        lx = round(W / 2 - body_centre(logo)) if a.logo_x is None else round(W * a.logo_x)
-        if a.logo_top < m or lx < m * W or lx + logo.width > (1 - m) * W:
-            sys.exit(f"the logo is less than --min-margin {100 * m:.0f}% from the picture edge: use the kit placement (--logo-top) and the text column's left edge (--logo-x)")
+        logo, lx, ly = place_logo(a, W, H, m)
         if ly + logo.height > top:
             sys.exit(f"the logo bottom ({100 * (ly + logo.height) / H:.1f}%) is under the text top ({100 * top / H:.1f}%): move the area down or make the logo smaller")
         if ly + logo.height + a.min_logo_gap * H > top:

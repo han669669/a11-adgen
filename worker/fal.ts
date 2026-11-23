@@ -17,13 +17,24 @@ export const SIZES = {
   rough: { width: 1024, height: 1280, quality: "low" },
 } as const;
 
+const SUFFIX_HEAD =
+  "Format: a 4:5 portrait static ad. Do not paint a button, a call to action, a URL or a price that the brief does not give. Keep every text and the logo well inside the frame. " +
+  // Owner's old v1 picture notes (docs/render-checklist.md D1, D3, D4, F1): true for every ad, so set once here.
+  "No readable text except the quoted strings and the product's own label: no handwriting, notes, cards or printed paper on props. ";
+const SUFFIX_TAIL = "No drip, spill or stain on the product or a prop.";
+
 /** Code adds this once to every render prompt (hard check 4: no painted CTA). */
 export const RENDER_SUFFIX =
-  "Format: a 4:5 portrait static ad. Do not paint a button, a call to action, a URL or a price that the brief does not give. Keep every text and the logo well inside the frame. " +
-  // Owner's v1 picture notes (docs/render-checklist.md D1, D3, D4, F1): true for every ad, so set once here.
-  "No readable text except the quoted strings and the product's own label: no handwriting, notes, cards or printed paper on props. " +
+  SUFFIX_HEAD +
   "Every object keeps its real size next to the product and either rests on a surface with a contact shadow or is held in a hand; nothing floats. " +
-  "No drip, spill or stain on the product or a prop.";
+  SUFFIX_TAIL;
+
+/**
+ * The suffix of an engine v1 picture (wild concepts, house rules WI; owner 23-11-2026: "no realism needed as in the actual
+ * sizing"): the same text without the real-size rule. Nothing floats, and the rest stays.
+ */
+export const RENDER_SUFFIX_WILD =
+  SUFFIX_HEAD + "Every object either rests on a surface with a contact shadow or is held in a hand; nothing floats. " + SUFFIX_TAIL;
 
 export type Kind = keyof typeof SIZES;
 
@@ -48,6 +59,8 @@ export interface SubmitInput {
   maskUrl?: string;
   /** Render id chosen by the caller, so it can store data for the render before fal accepts it (food_fix paste plan). */
   id?: string;
+  /** Engine v1 (house rules WI): RENDER_SUFFIX_WILD in place of RENDER_SUFFIX. */
+  wild?: boolean;
 }
 
 /** fal took the job (it is billed) but the render row was not saved. The caller must not start the job again. */
@@ -61,7 +74,7 @@ export async function submit(env: Env, input: SubmitInput) {
   const size = SIZES[input.kind];
   const id = input.id ?? crypto.randomUUID();
   const usd = estimate(input.kind, input.numImages, input.referenceUrls.length);
-  const prompt = `${input.prompt.trim()}\n\n${RENDER_SUFFIX}`;
+  const prompt = `${input.prompt.trim()}\n\n${input.wild ? RENDER_SUFFIX_WILD : RENDER_SUFFIX}`;
   const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM renders WHERE batch = ?").bind(input.batch).first<{ n: number }>();
   if ((count?.n ?? 0) >= MAX_BATCH_RENDERS) throw new Error(`Batch ${input.batch} has ${MAX_BATCH_RENDERS} renders, the limit. Start a new batch.`);
   const spendId = await reserve(env, "fal", input.kind, id, usd);

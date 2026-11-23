@@ -29,9 +29,10 @@ describe("controlled rollout: batch_create engine 3", () => {
     const base = { brandSlug: "pasar", subjectId: s.subjectId, label: "W48" };
     await expect(run(s.env, "batch_create", { ...base, engine: 3 })).rejects.toThrow("needs ownerStart");
     await expect(run(s.env, "batch_create", { ...base, engine: 3, ownerStart: "   " })).rejects.toThrow("needs ownerStart");
-    await expect(run(s.env, "batch_create", { ...base, ownerStart: "go" })).rejects.toThrow("ownerStart goes with engine 3 only");
+    await expect(run(s.env, "batch_create", { ...base, ownerStart: "go" })).rejects.toThrow("ownerStart goes with engine 1 or engine 3 only");
     const t = TOOLS.find((x) => x.name === "batch_create")!;
     expect(() => validate(t.inputSchema, { ...base, engine: 4, ownerStart: "go" })).toThrow();
+    expect(() => validate(t.inputSchema, { ...base, engine: 0, ownerStart: "go" })).toThrow();
   });
 
   it("keeps the owner's start line when the notes change later", async () => {

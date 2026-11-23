@@ -110,15 +110,27 @@ export async function factsGet(env: Env, subjectId: string) {
 }
 
 const START = "Engine 3 started by the owner";
+/** Engine v1 (wild concepts, owner 23-11-2026; house rules WI): the first notes line, as for engine 3. */
+const START_E1 = "Engine 1 (wild) started by the owner";
+
+/** Engine v1 batches need migration 0018 (the CHECK of batches.engine takes 1). Before it is live, refuse with a clear message. */
+async function engine1Live(env: Env): Promise<boolean> {
+  const t = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'batches'").first<{ sql: string }>();
+  return /engine\s+IN\s*\(\s*1\s*,/i.test(t?.sql ?? "");
+}
 
 /**
- * A new batch. Engine 2 by default. Engine 3 (a11-engine v3 Phase 7, the controlled rollout) only with the owner's own
- * words that start it (ownerStart): the batch notes keep them, so every engine 3 batch shows who started it and how.
+ * A new batch. Engine 2 by default. Engine 3 (a11-engine v3 Phase 7, the controlled rollout) and engine v1 (wild concepts,
+ * owner 23-11-2026) only with the owner's own words that start it (ownerStart): the batch notes keep them, so every such
+ * batch shows who started it and how.
  */
-export async function batchCreate(env: Env, input: { brandSlug: string; subjectId: string; label: string; engine?: 2 | 3; ownerStart?: string }) {
+export async function batchCreate(env: Env, input: { brandSlug: string; subjectId: string; label: string; engine?: 1 | 2 | 3; ownerStart?: string }) {
   const engine = input.engine ?? 2;
-  if (engine === 3 && !input.ownerStart?.trim()) throw new InputError("An engine 3 batch needs ownerStart: the owner's own words that start engine 3 for this batch.");
-  if (engine === 2 && input.ownerStart) throw new InputError("ownerStart goes with engine 3 only.");
+  if (engine !== 2 && !input.ownerStart?.trim())
+    throw new InputError(`An engine ${engine} batch needs ownerStart: the owner's own words that start engine ${engine} for this batch.`);
+  if (engine === 2 && input.ownerStart) throw new InputError("ownerStart goes with engine 1 or engine 3 only.");
+  if (engine === 1 && !(await engine1Live(env)))
+    throw new Error("Engine 1 batches need migration 0018_engine_1, which is not live yet. Ask the owner to run it (docs/deploy.md step 3).");
   const brand = await brandBySlug(env, input.brandSlug);
   const kit = await latestKit(env, brand.id);
   if (!kit) throw new Error(`Brand ${brand.slug} has no kit yet. Save one with brand_save first.`);
@@ -127,7 +139,8 @@ export async function batchCreate(env: Env, input: { brandSlug: string; subjectI
   const id = crypto.randomUUID();
   const at = now();
   // One line, so a later note can keep it (batchUpdate).
-  const notes = engine === 3 ? `${START} (${at}): "${input.ownerStart!.trim().replace(/\s+/g, " ")}"` : null;
+  const start = engine === 3 ? START : engine === 1 ? START_E1 : null;
+  const notes = start ? `${start} (${at}): "${input.ownerStart!.trim().replace(/\s+/g, " ")}"` : null;
   await env.DB.prepare(
     "INSERT INTO batches (id, brand_id, subject_id, kit_version, label, status, engine, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'research', ?, ?, ?, ?)",
   )
@@ -201,15 +214,26 @@ const BOARD3_GUARD = ` AND (SELECT COUNT(*) FROM ideas WHERE batch_id = batches.
   AND NOT EXISTS (SELECT 1 FROM ideas i WHERE i.batch_id = batches.id AND i.picked = 1 AND i.final_prompt IS NULL
     AND EXISTS (SELECT 1 FROM renders r WHERE r.batch = i.batch_id AND r.idea = i.id AND r.kind = 'draft' AND r.image_keys IS NOT NULL))`;
 
+/** Engine v1 board check, in the status write too: BOARD3_GUARD, and each picked idea has a finished picture. */
+const BOARD1_GUARD = `${BOARD3_GUARD}
+  AND NOT EXISTS (SELECT 1 FROM ideas i WHERE i.batch_id = batches.id AND i.picked = 1
+    AND NOT EXISTS (SELECT 1 FROM renders r WHERE r.batch = i.batch_id AND r.idea = i.id AND r.kind = 'draft' AND r.image_keys IS NOT NULL))`;
+
 export async function batchUpdate(
   env: Env,
   input: { id: string; status?: string; insights?: unknown[]; notes?: string; ownerVerdicts?: OwnerVerdict[] },
 ) {
   // Every picked idea with drafts must have its final prompt before the picks are made (D2: Claude picks the drafts).
-  let board3 = false;
+  let guard = "";
   if (input.status === "board") {
     const b = await env.DB.prepare("SELECT engine FROM batches WHERE id = ?").bind(input.id).first<{ engine: number }>();
-    board3 = b?.engine === 3;
+    guard = b?.engine === 3 ? BOARD3_GUARD : b?.engine === 1 ? BOARD1_GUARD : "";
+    // Engine v1 (house rules WI): exactly 3 picked concepts in any mix of stages, each with its finished picture.
+    if (b?.engine === 1) {
+      const step = ((await batchGet(env, input.id)) as { nextStep?: string }).nextStep ?? "";
+      if (["concepts", "concept_pick", "pictures"].includes(step))
+        throw new Error(`An engine 1 batch reaches status 'board' only with 3 picked concepts, each with its finished picture (nextStep is '${step}': read batch_get).`);
+    }
     // Engine 3: exactly 3 picked ideas in any mix of roles (design pack §2.6), each with approved words, a current
     // direction and its checked drafts (3 eligible, or fewer after a failed redo for each missing one, §3.6).
     if (b?.engine === 3) {
@@ -221,7 +245,7 @@ export async function batchUpdate(
         throw new Error(`An engine 3 batch reaches status 'board' only after the words, the directions and the draft checks of its 3 picks (nextStep is '${step}': read batch_get).`);
     }
     // An engine 2 funnel batch needs exactly one picked idea per stage. Batches made before the stages are exempt.
-    const counts = b?.engine === 3 ? { results: [] } : await env.DB.prepare(
+    const counts = b?.engine === 3 || b?.engine === 1 ? { results: [] } : await env.DB.prepare(
       "SELECT format, SUM(picked) AS n FROM ideas WHERE batch_id = ? AND format IN ('tof', 'mof', 'bof') GROUP BY format",
     ).bind(input.id).all<{ format: string; n: number }>();
     if (counts.results.length) {
@@ -242,9 +266,9 @@ export async function batchUpdate(
   if (input.status) (sets.push("status = ?"), args.push(input.status));
   if (input.insights) (sets.push("insights = ?"), args.push(JSON.stringify(input.insights)));
   if (input.notes !== undefined) {
-    // The first line of an engine 3 batch's notes is the owner's start (batchCreate): a new note keeps it.
-    const old = await env.DB.prepare("SELECT notes FROM batches WHERE id = ? AND engine = 3").bind(input.id).first<{ notes: string | null }>();
-    const start = old?.notes?.startsWith(START) ? old.notes.split("\n")[0]! : null;
+    // The first line of an engine 3 or engine 1 batch's notes is the owner's start (batchCreate): a new note keeps it.
+    const old = await env.DB.prepare("SELECT notes FROM batches WHERE id = ? AND engine IN (1, 3)").bind(input.id).first<{ notes: string | null }>();
+    const start = old?.notes?.startsWith(START) || old?.notes?.startsWith(START_E1) ? old.notes.split("\n")[0]! : null;
     sets.push("notes = ?");
     args.push(start && !(input.notes ?? "").startsWith(start) ? `${start}\n${input.notes ?? ""}` : input.notes);
   }
@@ -255,10 +279,10 @@ export async function batchUpdate(
   const inserts = await verdictInserts(env, input.id, verdicts);
   // One D1 batch is one transaction: the batch row and its verdicts are saved together or not at all.
   const [res] = await env.DB.batch([
-    env.DB.prepare(`UPDATE batches SET ${[...sets, "updated_at = ?"].join(", ")} WHERE id = ?${board3 ? BOARD3_GUARD : ""}`).bind(...args, now(), input.id),
+    env.DB.prepare(`UPDATE batches SET ${[...sets, "updated_at = ?"].join(", ")} WHERE id = ?${guard}`).bind(...args, now(), input.id),
     ...inserts,
   ]);
-  if (res?.meta.changes !== 1) throw new Error(board3 ? "The picks changed while the status was set: the batch needs exactly 3 picked ideas, each with its final prompt after its drafts. Read batch_get and try again." : `No batch with id ${input.id}.`);
+  if (res?.meta.changes !== 1) throw new Error(guard ? "The picks changed while the status was set: the batch needs exactly 3 picked ideas, each with its final prompt after its drafts. Read batch_get and try again." : `No batch with id ${input.id}.`);
   return { id: input.id, updated: sets.map((s) => s.split(" ")[0]), verdictsSaved: verdicts.length };
 }
 
@@ -287,7 +311,7 @@ export async function ideasSaveFull(env: Env, batchId: string, ideas: IdeaInput[
   const batch = await env.DB.prepare("SELECT id, subject_id, engine FROM batches WHERE id = ?").bind(batchId).first<{ id: string; subject_id: string; engine: number }>();
   if (!batch) throw new Error(`No batch with id ${batchId}.`);
   if (batch.engine !== 3 && (territories || promptVersion || ideas.some((i) => i.concept)))
-    throw new InputError("territories, concept and promptVersion are for an engine 3 batch only. This batch is engine 2: save the ideas without them.");
+    throw new InputError(`territories, concept and promptVersion are for an engine 3 batch only. This batch is engine ${batch.engine}: save the ideas without them.`);
   // Read the idea numbers before the checks: a save that commits between this read and the insert takes the same
   // numbers, so UNIQUE (batch_id, n) refuses this whole save when another ideas save of the batch commits in between.
   // (A brief saved in between is not caught: the concepts then carry the brief version that they were checked against.)
@@ -320,7 +344,8 @@ export async function ideasSaveFull(env: Env, batchId: string, ideas: IdeaInput[
   return {
     engine: batch.engine,
     ideas: saved.map((s) => ({ id: s.id, n: s.n, format: s.format, headline: s.headline, picked: !!s.picked })),
-    warnings: [...(v3?.warnings ?? []), ...copyWarnings(ideas)],
+    // Engine v1 sets no words on the picture (house rules WI): its headline is the concept's short name, so no copy warning.
+    warnings: [...(v3?.warnings ?? []), ...(batch.engine === 1 ? [] : copyWarnings(ideas))],
   };
 }
 
@@ -381,14 +406,17 @@ export async function ideasUpdate(env: Env, updates: IdeaUpdate[]) {
 /**
  * The copy review (owner, 12-11-2026: "ill approve of the headlines and all copywriting that goes on the ad images").
  * A draft is rendered only for an idea whose headline and subline the owner approved, as they are now.
+ * Engine v1 (house rules WI, owner 23-11-2026: "no text at all and simply just the branding company logo") has no words
+ * to approve: its draft needs only a picked idea. Returns the batch's engine, so render_submit sizes the draft.
  */
-export async function copyApprovedCheck(env: Env, batchId: string, ideaId: string) {
-  const row = await env.DB.prepare("SELECT headline, copy, picked FROM ideas WHERE id = ? AND batch_id = ?")
+export async function copyApprovedCheck(env: Env, batchId: string, ideaId: string): Promise<{ engine: number }> {
+  const row = await env.DB.prepare("SELECT i.headline, i.copy, i.picked, b.engine FROM ideas i JOIN batches b ON b.id = i.batch_id WHERE i.id = ? AND i.batch_id = ?")
     .bind(ideaId, batchId)
-    .first<{ headline: string; copy: string; picked: number }>();
+    .first<{ headline: string; copy: string; picked: number; engine: number }>();
   if (!row) throw new Error(`No idea ${ideaId} in batch ${batchId}. A draft belongs to an idea of its batch.`);
   // A paid draft only for an idea the critic picked (a11-engine v3 design pack §2.6).
   if (row.picked !== 1) throw new Error(`Idea ${ideaId} is not picked. Drafts are made only for the picked ideas of a batch.`);
+  if (row.engine === 1) return { engine: 1 };
   const copy = JSON.parse(row.copy) as { subline?: string; ownerApproved?: { headline: string; subline: string } };
   const ok = copy.ownerApproved;
   if (!copy.subline?.trim())
@@ -399,6 +427,7 @@ export async function copyApprovedCheck(env: Env, batchId: string, ideaId: strin
     );
   if (ok.headline !== row.headline || ok.subline !== copy.subline)
     throw new Error(`The words of idea ${ideaId} changed after the owner approved them. Show him the new words and save his approval again.`);
+  return { engine: row.engine };
 }
 
 /** Engine 3 roughs (owner, 18-11-2026, decision D3 = A): at most this many for each concept, and for each batch. */
@@ -435,7 +464,7 @@ export async function ideasPick(env: Env, batchId: string, ids: string[] = [], v
   if (!batch) throw new Error(`No batch with id ${batchId}.`);
   if (batch.engine === 3) return conceptPick(env, batchId, ids, v3);
   if (Object.values(v3).some((v) => v !== undefined))
-    throw new InputError("outcome, roles, reserves, review, promptVersion and ownerSwap are for an engine 3 batch only. This batch is engine 2: send the ids only.");
+    throw new InputError(`outcome, roles, reserves, review, promptVersion and ownerSwap are for an engine 3 batch only. This batch is engine ${batch.engine}: send the ids only.`);
   if (!ids.length) throw new InputError("Name 1 to 3 ideas to pick.");
   if (new Set(ids).size !== ids.length) throw new Error("Each idea id may appear only once.");
   // Check every id first, so a wrong id never leaves the others picked.
@@ -601,7 +630,7 @@ export async function tasteLog(env: Env, limit = 30, before?: string) {
   if (parsed && (Number.isNaN(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== before!.slice(0, 10))) throw new InputError("before must be a real UTC date or time, such as 2026-11-12 or 2026-11-12T10:00:00.000Z.");
   const cut = !before ? "9999" : before.length === 10 ? before : parsed!.toISOString();
   const picks = await env.DB.prepare(
-    `SELECT p.render_key, p.idea_id, p.batch_id, p.note, p.created_at, i.format, i.headline, i.visual, b.label
+    `SELECT p.render_key, p.idea_id, p.batch_id, p.note, p.created_at, i.format, i.headline, i.visual, b.label, b.engine
      FROM picks p JOIN ideas i ON i.id = p.idea_id AND i.batch_id = p.batch_id JOIN batches b ON b.id = p.batch_id
      WHERE p.by_owner = 1 AND p.created_at < ? ORDER BY p.created_at DESC LIMIT ?`,
   ).bind(cut, limit).all<Record<string, any>>();
@@ -610,7 +639,7 @@ export async function tasteLog(env: Env, limit = 30, before?: string) {
     "SELECT render_key, idea_id, rank, reason FROM draft_ranks WHERE idea_id IN (SELECT value FROM json_each(?)) AND created_at < ? ORDER BY rank",
   ).bind(JSON.stringify(ideaIds), cut).all<{ render_key: string; idea_id: string; rank: number; reason: string | null }>();
   const verdicts = await env.DB.prepare(
-    `SELECT v.created_at, v.stage, v.mark, v.source_mark, v.owner_said, v.notes, v.render_key, b.label, i.format, i.headline, pk.version
+    `SELECT v.created_at, v.stage, v.mark, v.source_mark, v.owner_said, v.notes, v.render_key, b.label, b.engine, i.format, i.headline, pk.version
      FROM verdicts v LEFT JOIN batches b ON b.id = v.batch_id LEFT JOIN ideas i ON i.id = v.idea_id LEFT JOIN packs pk ON pk.id = v.pack_id
      WHERE v.created_at < ? ORDER BY v.created_at DESC, v.rowid DESC LIMIT ?`,
   ).bind(cut, limit).all<Record<string, any>>();
@@ -635,6 +664,7 @@ export async function tasteLog(env: Env, limit = 30, before?: string) {
     verdicts: verdicts.results.map((v) => ({
       at: v.created_at,
       batch: v.label ?? null,
+      engine: v.engine ?? null,
       stage: v.stage,
       mark: v.mark,
       sourceMark: v.source_mark,
@@ -649,6 +679,7 @@ export async function tasteLog(env: Env, limit = 30, before?: string) {
       const chosen = mine.find((r) => r.render_key === p.render_key);
       return {
         batch: p.label,
+        engine: p.engine,
         stage: p.format,
         headline: p.headline,
         visual: p.visual,
@@ -667,9 +698,9 @@ export async function tasteLog(env: Env, limit = 30, before?: string) {
  */
 export async function finalRender(env: Env, batchId: string, key: string) {
   const pick = await env.DB.prepare(
-    `SELECT p.idea_id, p.final_render_id, i.final_prompt, i.final_refs FROM picks p JOIN ideas i ON i.id = p.idea_id
-     WHERE p.batch_id = ? AND p.render_key = ?`,
-  ).bind(batchId, key).first<{ idea_id: string; final_render_id: string | null; final_prompt: string | null; final_refs: string }>();
+    `SELECT p.idea_id, p.final_render_id, i.final_prompt, i.final_refs, b.engine FROM picks p JOIN ideas i ON i.id = p.idea_id
+     JOIN batches b ON b.id = p.batch_id WHERE p.batch_id = ? AND p.render_key = ?`,
+  ).bind(batchId, key).first<{ idea_id: string; final_render_id: string | null; final_prompt: string | null; final_refs: string; engine: number }>();
   if (!pick) throw new Error(`${key} is not a pick of batch ${batchId}.`);
   const held = pick.final_render_id;
   if (held?.startsWith("accepted:"))
@@ -703,7 +734,7 @@ export async function finalRender(env: Env, batchId: string, key: string) {
   const refs = [fal.mediaUrl(env, key), ...(JSON.parse(pick.final_refs) as string[])];
   let r: Awaited<ReturnType<typeof fal.submit>>;
   try {
-    r = await fal.submit(env, { batch: batchId, idea: pick.idea_id, kind: "final", prompt: pick.final_prompt, referenceUrls: refs, numImages: 1 });
+    r = await fal.submit(env, { batch: batchId, idea: pick.idea_id, kind: "final", prompt: pick.final_prompt, referenceUrls: refs, numImages: 1, wild: pick.engine === 1 });
   } catch (e) {
     // fal took the job (billed) but its row was not saved: keep the pick closed for ever, so no second final is paid.
     // Any other error: fal did not take the job, so free the pick and the owner can tap Render again.
@@ -841,6 +872,8 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
   ]);
   const e3 = b.engine === 3;
   const draftsDone = new Map<string, boolean>();
+  // Engine v1: the idea has a picture made after the owner's newest full pass (or he picked one).
+  const hasPicture = new Map<string, boolean>();
   const redirect = new Map<string, boolean>();
   const ownerDecided = new Map<string, boolean>();
   const ideasOut = ideas.results.map((i) => {
@@ -875,6 +908,7 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
     // Engine 3: ranked is the critic's rank of every eligible current draft (it ranks eligible drafts only).
     const ranked = e3 ? eligible.length > 0 && eligible.every((d) => rankBy.has(d.key)) : newest.length > 0 && newest.every((d) => rankBy.has(d.key));
     ownerDecided.set(i.id, decided);
+    hasPicture.set(i.id, ownerPicked.has(i.id) || current.length > 0);
     return {
       id: i.id,
       n: i.n,
@@ -946,7 +980,8 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
     ideas: ideasOut,
     picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, byOwner: p.by_owner === 1, finalRenderId: p.final_render_id })),
     drafting: renders.results.filter((r) => r.status === "queued").map((r) => r.id),
-    // Engine 3 only: the next step of the batch, from its rows (design pack §1.11). Engine 2 batches have none.
+    // Engine 1 and engine 3: the next step of the batch, from its rows (design pack §1.11). Engine 2 batches have none.
+    ...(engine === 1 ? { nextStep: nextStepV1(b.status as string, ideasOut.map((i) => ({ ...i, hasPicture: hasPicture.get(i.id) === true })), ownerPicked) } : {}),
     ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, draftsDone: draftsDone.get(i.id) === true, redirect: redirect.get(i.id) === true, decided: ownerDecided.get(i.id) === true, rendered: renders.results.some((r) => r.idea === i.id && r.kind !== "rough"), directed: directions.get(i.id)?.current === true })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.n > conceptReview.lastN) }) } : {}),
   };
 }
@@ -968,6 +1003,29 @@ type IdeaState = {
   /** The idea has a direction record that is newer than the newest concept review (design pack §1.11 step 6). */
   directed: boolean;
 };
+
+/**
+ * The first step of an engine v1 batch (wild concepts, house rules WI) that is not done yet. Pure, like nextStepV3.
+ * concepts: the writer saves 6 to 10 concepts. concept_pick: the critic picks 3 blind. pictures: one low draft for each
+ * pick (and a new one after a full pass), with its logo and final prompt. board, owner_pick, finals: as for engine 2. finish: the
+ * logo on each raw final, then status 'done'. No copy review, no rank.
+ */
+export function nextStepV1(
+  status: string,
+  ideas: { id: string; picked: boolean; hasPicture: boolean; finalPrompt?: string | null; finals: { status: unknown }[] }[],
+  ownerPicked: Set<string>,
+): string {
+  const picked = ideas.filter((i) => i.picked);
+  if (ideas.length === 0) return "concepts";
+  if (picked.length < 3) return "concept_pick";
+  if (picked.some((i) => !i.hasPicture)) return "pictures";
+  // A polled draft is a raw render: the logo and the final prompt come after it (the 'wild' prompt, step 4).
+  if (!["board", "finals", "done"].includes(status)) return picked.some((i) => !i.finalPrompt) ? "pictures" : "board";
+  if (picked.some((i) => !ownerPicked.has(i.id))) return "owner_pick";
+  if (picked.some((i) => !i.finals.some((f) => f.status === "done"))) return "finals";
+  // A polled final is a raw render too: the logo is set in code and uploaded, then status 'done' ('final' prompt, step 6).
+  return status === "done" ? "done" : "finish";
+}
 
 /** The first step of an engine 3 batch that is not done yet. Pure: it reads only the rows that batchGet has read. */
 export function nextStepV3(

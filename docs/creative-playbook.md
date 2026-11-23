@@ -290,6 +290,16 @@ On the Allies of Skin test the owner rejected or held back two finals that the d
 - **Measure the final again.** After each final, run `python3 scripts/cap_check.py --render <raw final> --box X0,Y0,X1,Y1 --split Y` on a bottle, a jar with a lid or any pack with a cap (the box round the product on plain stage, missing any prop and ending at the base, above the contact shadow; `--split` is the first row below the cap and the neck, read off the picture: the top of any shoulder, because the shoulder belongs to the body). It fails when the cap is off the body centre by more than 1% of the body width. Fix a small offset in code with a smooth sideways move of the cap on plain backdrop; never paste. Check the shape (F1) and the print at the size the owner sees (render checklist D11).
 - **Keep the print readable under the light.** Every final prompt says "no glare, streak or reflection across any letter". A highlight belongs on an edge outside the printed area.
 
+### 7.13 Engine v1: wild concepts, no words (owner, 23-11-2026)
+
+The owner made 3 wild ads for Cat & the Fiddle outside a11 and called them usable: a giant slice on a yellow seamless with the logo at the top centre, two slices side by side, and a cat beside a slice. The cat head looked AI and the cat ad had no logo. Engine v1 makes ads of that kind. The rules are house rules section WI (`rules_get`); the steps are the `wild` prompt (`/a11:wild`).
+
+- **Wild, but true food.** Scale is free (a giant slice, a small animal). The food is not free: it must look like what the buyer gets. Find the brand's own photos of the product first (layers, colours, cut face, topping) and use them as the references. Show each draft beside the real photo it was compared with.
+- **No words.** No headline, subline or footnote. Only the real kit logo, set in code with `scripts/headline.py --logo` and no `--headline`. A painted logo only when it is better for the concept, and then letter by letter the real logo (D7).
+- **References from outside the category.** Editorial, art, fashion, still life and set design, found with `exa_search`. Name the reference each concept takes from.
+- **Animals and figures** pass the first-glance test with real fur, eyes and face. No human faces.
+- **Low drafts, high finals.** One low draft for each of the 3 concepts; the owner's chosen drafts get the high final (`final_render`). Both leave the real-size rule out of the fal suffix.
+
 ## 8. The owner's copy standard (owner, 09-11-2026)
 
 The owner approved the W47 v3 Meta text and rejected the rewrite in packs v4 and v5 ("the previously v3 copywriting's much much much better"). Approved copy is reused word for word in every later pack of the batch (`pack` prompt, step 4). Do not retype it: give `pack_publish` `copyFromVersion` (the approved pack's version) and the render ids, with no Meta text, and the server copies the text exactly. The launch plan and the health note of that version stay unless the call gives new ones. `picks_get` shows each pack version's copy. Write new copy only when no earlier pack exists or the owner asks for it, and show it next to the approved copy before you publish.

@@ -45,7 +45,7 @@ describe("mcp handler", () => {
   });
   it("lists the prompts and returns one with its arguments filled in", async () => {
     const list: any = await (await post({ jsonrpc: "2.0", id: 4, method: "prompts/list" })).json();
-    expect(list.result.prompts.map((p: any) => p.name)).toEqual(["brand", "batch", "redesign", "final", "pack", "learn", "results", "gold-test"]);
+    expect(list.result.prompts.map((p: any) => p.name)).toEqual(["brand", "batch", "wild", "redesign", "final", "pack", "learn", "results", "gold-test"]);
     const got: any = await (await post({ jsonrpc: "2.0", id: 5, method: "prompts/get", params: { name: "final", arguments: { batchId: "abc-123" } } })).json();
     expect(got.result.messages[0].content.text).toContain("Batch abc-123");
     expect(got.result.messages[0].role).toBe("user");
@@ -286,7 +286,7 @@ describe("mcp handler", () => {
       const documented = [...text.matchAll(/^- ([A-Za-z]+)(?: \(required\))?: /gm)].map((m) => m[1]);
       expect(documented.sort(), `${p.name}: documented arguments`).toEqual(p.arguments.map((a) => a.name).sort());
       const args: Record<string, string> = {};
-      for (const a of p.arguments) if (a.required || (p.name === "batch" && a.name !== "batchId")) args[a.name] = sample[a.name]!;
+      for (const a of p.arguments) if (a.required || ((p.name === "batch" || p.name === "wild") && a.name !== "batchId")) args[a.name] = sample[a.name]!;
       const viaTool: any = ((await (await post({ jsonrpc: "2.0", id: 30, method: "tools/call", params: { name: "prompt_get", arguments: { name: p.name, arguments: args } } })).json()) as any).result;
       expect(viaTool.isError, `${p.name}: ${viaTool.content[0].text}`).toBeUndefined();
       const viaPrompt: any = await (await post({ jsonrpc: "2.0", id: 31, method: "prompts/get", params: { name: p.name, arguments: args } })).json();

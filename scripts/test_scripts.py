@@ -629,6 +629,50 @@ class Headline(Tmp):
         self.assertIn("--leading must be", exit_message(self.run_, "--font", self.FONT, "--headline", "Hi", "--area", "0,0,1,1", "--leading", "0.3"))
 
 
+class LogoOnly(Tmp):
+    # Engine 1 (house rules WI, owner 23-11-2026): the kit logo with no words. It needs no font.
+    def run_(self, *extra, src=None):
+        src = src or self.save("in.png", np.full((500, 400, 3), 220))
+        out = os.path.join(self.dir.name, "out.png")  # lossless, so a pixel outside the logo box must not change
+        with contextlib.redirect_stdout(io.StringIO()) as buf:
+            headline.main(["--in", src, "--out", out, *extra])
+        return out, buf.getvalue()
+
+    def logo(self, w=100, h=40):
+        path = os.path.join(self.dir.name, "logo.png")
+        Image.new("RGBA", (w, h), (0, 0, 0, 255)).save(path)
+        return path
+
+    def test_the_logo_alone_changes_only_the_logo_box(self):
+        arr = np.full((500, 400, 3), 220)
+        arr[300:, :] = (250, 200, 10)  # a yellow floor, untouched
+        src = self.save("in.png", arr)
+        out, msg = self.run_("--logo", self.logo(), "--logo-width", "0.25", "--logo-top", "0.05", src=src)
+        a = np.asarray(Image.open(out).convert("RGB")).astype(int)
+        lw, lh, ly = 100, 40, 25  # 0.25 x 400 wide, 40 x 100/100 high, 0.05 x 500 from the top
+        lx = 200 - lw // 2
+        self.assertLess(int(a[ly + 20, 200].mean()), 60)  # the logo's middle
+        outside = np.ones(a.shape[:2], bool)
+        outside[ly - 2:ly + lh + 2, lx - 2:lx + lw + 2] = False
+        self.assertEqual(int(np.abs(a - arr)[outside].max()), 0, "only the logo box changed")
+        self.assertIn("logo only", msg)
+
+    def test_no_words_and_no_logo_is_refused(self):
+        self.assertIn("--logo alone", exit_message(self.run_))
+        self.assertIn("needs a headline", exit_message(self.run_, "--logo", self.logo(), "--subline", "So good."))
+        self.assertIn("needs a headline", exit_message(self.run_, "--logo", self.logo(), "--footnote", "Study, 2025."))
+
+    def test_an_empty_headline_with_type_options_is_refused(self):
+        # An engine 2 or 3 call that lost its headline must not pass as a logo-only picture.
+        self.assertIn("drop them for the logo only", exit_message(self.run_, "--logo", self.logo(), "--area", "0.1,0.1,0.9,0.3"))
+        self.assertIn("drop them for the logo only", exit_message(self.run_, "--logo", self.logo(), "--family", "Inter"))
+
+    def test_a_logo_too_near_the_edge_is_refused(self):
+        self.assertIn("--min-margin", exit_message(self.run_, "--logo", self.logo(), "--logo-top", "0.01"))
+        self.assertIn("--min-margin", exit_message(self.run_, "--logo", self.logo(), "--logo-width", "0.95"))
+        self.assertIn("--min-margin", exit_message(self.run_, "--logo", self.logo(10, 100), "--logo-width", "0.1", "--logo-top", "0.9"))
+
+
 class PhotoFinish(Tmp):
     def grey(self, v, size=(96, 128)):
         return Image.fromarray(np.full((size[1], size[0], 3), v, np.uint8))
