@@ -276,5 +276,10 @@ describe("engine v1: rules and the wild prompt", () => {
     const out = promptGet("final", { batchId: "11111111-1111-4111-8111-111111111111" });
     if (typeof out === "string") throw new Error(out);
     expect(out.messages[0]!.content.text).toContain("a light touch that keeps the draft's photograph");
+    expect(out.messages[0]!.content.text).toContain("engine 1: no finish pass and no food redraw, WI7");
+    expect(rules).toContain("FO3 (the high final keeps the draft instead: WI7)");
+    const wild = promptGet("wild", { brand: "catfiddle", productUrl: "https://b.example/p", productTitle: "Fickle Feline", label: "W48" });
+    if (typeof wild === "string") throw new Error(wild);
+    expect(wild.messages[0]!.content.text).toContain("save each skeleton's plan in the batch notes with the draft's renderId");
   });
 });
