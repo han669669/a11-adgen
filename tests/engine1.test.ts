@@ -263,4 +263,18 @@ describe("engine v1: rules and the wild prompt", () => {
     expect(text("final", { batchId: "11111111-1111-4111-8111-111111111111" })).toContain("batch_update status 'done' (batch_get nextStep 'finish'");
     expect(text("learn", {})).toContain("An engine 1 row (taste_log engine 1: wild concepts) teaches engine 1 only");
   });
+
+  it("puts the batch c1a43bcc lessons on the pictures only: a light-touch final, edges at full size, real angles", () => {
+    const rules = houseRules("main").rules;
+    expect(rules).toContain("Craft checks on the pictures only, never limits on the concepts");
+    expect(rules).toContain("never makes the food more perfect than the draft");
+    expect(rules).toContain("stepped or pixelated lines");
+    expect(rules).toContain("camera angles that the brand's real photos show");
+    expect(rules).toContain("A note for the critic, not a gate for the writer");
+    expect(rules).toContain("The food path is the one of engines 2 and 3, with scale free");
+    expect(rules).toContain("finalRefs stay empty and the final prompt never asks the model to redraw the food");
+    const out = promptGet("final", { batchId: "11111111-1111-4111-8111-111111111111" });
+    if (typeof out === "string") throw new Error(out);
+    expect(out.messages[0]!.content.text).toContain("a light touch that keeps the draft's photograph");
+  });
 });
