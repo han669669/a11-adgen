@@ -259,6 +259,7 @@ describe("engine v1: rules and the wild prompt", () => {
     const wild = text("wild", { brand: "catfiddle", productUrl: "https://b.example/p", productTitle: "Fickle Feline", label: "W48" });
     expect(wild.indexOf("logoTopPct is under 4")).toBeGreaterThan(-1);
     expect(wild.indexOf("logoTopPct is under 4")).toBeLessThan(wild.indexOf("batch_create (brandSlug"));
+    expect(wild).toContain("logo.sourceUrl and refs[].sourceUrl, never its /m/brands/ url");
     expect(text("final", { batchId: "11111111-1111-4111-8111-111111111111" })).toContain("batch_update status 'done' (batch_get nextStep 'finish'");
     expect(text("learn", {})).toContain("An engine 1 row (taste_log engine 1: wild concepts) teaches engine 1 only");
   });
