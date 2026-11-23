@@ -6,7 +6,7 @@ Use the [blueprint](blueprint.md) for the system design, the [decisions log](dec
 
 ## Current state
 
-Reviewed 23-11-2026 SGT. Merged means on `main`; it does not mean verified in production.
+Reviewed 24-11-2026 SGT. Merged means on `main`; it does not mean verified in production.
 
 | Work | Status and evidence | Next action |
 |---|---|---|
