@@ -30,7 +30,7 @@ export const RENDER_SUFFIX =
   SUFFIX_TAIL;
 
 /**
- * The suffix of an engine v1 picture (wild concepts, house rules E1; owner 23-11-2026: "no realism needed as in the actual
+ * The suffix of an engine v1 picture (wild concepts, house rules WI; owner 23-11-2026: "no realism needed as in the actual
  * sizing"): the same text without the real-size rule. Nothing floats, and the rest stays.
  */
 export const RENDER_SUFFIX_WILD =
@@ -59,7 +59,7 @@ export interface SubmitInput {
   maskUrl?: string;
   /** Render id chosen by the caller, so it can store data for the render before fal accepts it (food_fix paste plan). */
   id?: string;
-  /** Engine v1 render (house rules E1): RENDER_SUFFIX_WILD in place of RENDER_SUFFIX. Size and price follow kind as usual. */
+  /** Engine v1 (house rules WI): RENDER_SUFFIX_WILD in place of RENDER_SUFFIX. */
   wild?: boolean;
 }
 

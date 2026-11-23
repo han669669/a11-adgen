@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { inflateSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../worker/env";
-import { check } from "../worker/fal";
+import { check, RENDER_SUFFIX, RENDER_SUFFIX_WILD } from "../worker/fal";
 import { foodFix, regionFix } from "../worker/food";
 import worker from "../worker/index";
 import { pasteBack } from "../worker/paste";
@@ -55,7 +55,7 @@ describe("mask PNG", () => {
 const RID = "aaaaaaaa-0000-0000-0000-000000000001";
 const KEY = `renders/${RID}/1.jpg`;
 
-function makeEnv(opts: { food?: string; laterFood?: string; kind?: string } = {}) {
+function makeEnv(opts: { food?: string; laterFood?: string; kind?: string; engine?: number } = {}) {
   const DB = fakeD1();
   const raw = (DB as unknown as { raw: DatabaseSync }).raw;
   const kit = (food: string | undefined, v = 1) =>
@@ -76,8 +76,10 @@ function makeEnv(opts: { food?: string; laterFood?: string; kind?: string } = {}
   raw.exec(`
     INSERT INTO brands (id, slug, name, created_at, updated_at) VALUES ('br', 'wongi', 'WonGi', 't', 't');
     INSERT INTO subjects (id, brand_id, kind, title, created_at) VALUES ('su', 'br', 'product', 'Pop Barley', 't');
-    INSERT INTO batches (id, brand_id, subject_id, kit_version, label, status, created_at, updated_at) VALUES ('ba', 'br', 'su', 1, 'W46b', 'board', 't', 't');
   `);
+  raw
+    .prepare("INSERT INTO batches (id, brand_id, subject_id, kit_version, label, status, engine, created_at, updated_at) VALUES ('ba', 'br', 'su', 1, 'W46b', 'board', ?, 't', 't')")
+    .run(opts.engine ?? 2);
   raw.prepare("INSERT INTO brand_kits (id, brand_id, version, kit, created_at) VALUES ('k1', 'br', 1, ?, 't')").run(kit(opts.food));
   if (opts.laterFood !== undefined) raw.prepare("INSERT INTO brand_kits (id, brand_id, version, kit, created_at) VALUES ('k2', 'br', 2, ?, 't')").run(kit(opts.laterFood, 2));
   raw
@@ -243,6 +245,19 @@ describe("region_fix", () => {
     expect(body.prompt).not.toContain("Irregular puffed grains.");
     const plan = JSON.parse(String(saved.get(`renders/${out.id}/paste.json`)!.bytes));
     expect(plan).toEqual({ source: KEY, width: 1536, height: 1920, boxes: [{ x: 46, y: 29, w: 30, h: 21 }] });
+  });
+
+  it("uses the engine v1 suffix, with no real-size rule, on an engine 1 batch only (house rules WI)", async () => {
+    const edit = "Remove the yellow sticky note; show the empty clear jar behind it.";
+    const boxes = [{ x: 46, y: 29, w: 30, h: 21 }];
+    const wild = makeEnv({ engine: 1 });
+    let sent = stubFal();
+    await regionFix(wild.env, { key: KEY, boxes, edit });
+    expect(sent[0]!.prompt).toContain(RENDER_SUFFIX_WILD);
+    expect(sent[0]!.prompt).not.toContain("real size");
+    sent = stubFal();
+    await regionFix(makeEnv().env, { key: KEY, boxes, edit });
+    expect(sent[0]!.prompt).toContain(RENDER_SUFFIX);
   });
 
   it("refuses a blank edit, a draft and a box outside the picture", async () => {

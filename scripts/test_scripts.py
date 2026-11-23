@@ -662,6 +662,11 @@ class LogoOnly(Tmp):
         self.assertIn("needs a headline", exit_message(self.run_, "--logo", self.logo(), "--subline", "So good."))
         self.assertIn("needs a headline", exit_message(self.run_, "--logo", self.logo(), "--footnote", "Study, 2025."))
 
+    def test_an_empty_headline_with_type_options_is_refused(self):
+        # An engine 2 or 3 call that lost its headline must not pass as a logo-only picture.
+        self.assertIn("drop them for the logo only", exit_message(self.run_, "--logo", self.logo(), "--area", "0.1,0.1,0.9,0.3"))
+        self.assertIn("drop them for the logo only", exit_message(self.run_, "--logo", self.logo(), "--family", "Inter"))
+
     def test_a_logo_too_near_the_edge_is_refused(self):
         self.assertIn("--min-margin", exit_message(self.run_, "--logo", self.logo(), "--logo-top", "0.01"))
         self.assertIn("--min-margin", exit_message(self.run_, "--logo", self.logo(), "--logo-width", "0.95"))

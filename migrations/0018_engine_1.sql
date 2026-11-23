@@ -2,7 +2,7 @@
 -- one picture each, no words and only the kit logo (worker/houserules.ts section WI).
 -- SQLite cannot change a CHECK in place, so the table is built again (the 0004 pattern: defer the foreign keys until the
 -- end of the transaction). Same columns (0002 plus engine from 0015), the same rows in the same order, the same two
--- indexes and the same trigger. Six tables refer to batches(id) by name, so they point at the new table after the rename.
+-- indexes and the same trigger. The child tables refer to batches(id) by name, so they point at the new table after the rename.
 -- Two triggers on ideas read batches (the pick limits of 0015). SQLite refuses to rename a table while a trigger names a
 -- table that does not exist ("error in trigger ...: no such table: main.batches"), so they are dropped first and made again
 -- after the rename with the same text.

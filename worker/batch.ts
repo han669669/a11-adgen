@@ -630,7 +630,7 @@ export async function tasteLog(env: Env, limit = 30, before?: string) {
   if (parsed && (Number.isNaN(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== before!.slice(0, 10))) throw new InputError("before must be a real UTC date or time, such as 2026-11-12 or 2026-11-12T10:00:00.000Z.");
   const cut = !before ? "9999" : before.length === 10 ? before : parsed!.toISOString();
   const picks = await env.DB.prepare(
-    `SELECT p.render_key, p.idea_id, p.batch_id, p.note, p.created_at, i.format, i.headline, i.visual, b.label
+    `SELECT p.render_key, p.idea_id, p.batch_id, p.note, p.created_at, i.format, i.headline, i.visual, b.label, b.engine
      FROM picks p JOIN ideas i ON i.id = p.idea_id AND i.batch_id = p.batch_id JOIN batches b ON b.id = p.batch_id
      WHERE p.by_owner = 1 AND p.created_at < ? ORDER BY p.created_at DESC LIMIT ?`,
   ).bind(cut, limit).all<Record<string, any>>();
@@ -639,7 +639,7 @@ export async function tasteLog(env: Env, limit = 30, before?: string) {
     "SELECT render_key, idea_id, rank, reason FROM draft_ranks WHERE idea_id IN (SELECT value FROM json_each(?)) AND created_at < ? ORDER BY rank",
   ).bind(JSON.stringify(ideaIds), cut).all<{ render_key: string; idea_id: string; rank: number; reason: string | null }>();
   const verdicts = await env.DB.prepare(
-    `SELECT v.created_at, v.stage, v.mark, v.source_mark, v.owner_said, v.notes, v.render_key, b.label, i.format, i.headline, pk.version
+    `SELECT v.created_at, v.stage, v.mark, v.source_mark, v.owner_said, v.notes, v.render_key, b.label, b.engine, i.format, i.headline, pk.version
      FROM verdicts v LEFT JOIN batches b ON b.id = v.batch_id LEFT JOIN ideas i ON i.id = v.idea_id LEFT JOIN packs pk ON pk.id = v.pack_id
      WHERE v.created_at < ? ORDER BY v.created_at DESC, v.rowid DESC LIMIT ?`,
   ).bind(cut, limit).all<Record<string, any>>();
@@ -664,6 +664,7 @@ export async function tasteLog(env: Env, limit = 30, before?: string) {
     verdicts: verdicts.results.map((v) => ({
       at: v.created_at,
       batch: v.label ?? null,
+      engine: v.engine ?? null,
       stage: v.stage,
       mark: v.mark,
       sourceMark: v.source_mark,
@@ -678,6 +679,7 @@ export async function tasteLog(env: Env, limit = 30, before?: string) {
       const chosen = mine.find((r) => r.render_key === p.render_key);
       return {
         batch: p.label,
+        engine: p.engine,
         stage: p.format,
         headline: p.headline,
         visual: p.visual,
@@ -732,7 +734,7 @@ export async function finalRender(env: Env, batchId: string, key: string) {
   const refs = [fal.mediaUrl(env, key), ...(JSON.parse(pick.final_refs) as string[])];
   let r: Awaited<ReturnType<typeof fal.submit>>;
   try {
-    r = await fal.submit(env, { batch: batchId, idea: pick.idea_id, kind: "final", prompt: pick.final_prompt, referenceUrls: refs, numImages: 1, ...(pick.engine === 1 ? { wild: true } : {}) });
+    r = await fal.submit(env, { batch: batchId, idea: pick.idea_id, kind: "final", prompt: pick.final_prompt, referenceUrls: refs, numImages: 1, wild: pick.engine === 1 });
   } catch (e) {
     // fal took the job (billed) but its row was not saved: keep the pick closed for ever, so no second final is paid.
     // Any other error: fal did not take the job, so free the pick and the owner can tap Render again.

@@ -96,7 +96,7 @@ describe("client comments", () => {
   });
 
   it("lists the comments we received after a refresh: full text, ad, Singapore time, newest first, this pack only, nothing deleted", async () => {
-    // The fixed times below must stay inside the 14-day list window: pin the clock (the test broke on 23-11-2026).
+    // The fixed times below must stay inside the 14-day list window: pin the clock.
     vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-10T00:00:00.000Z") });
     onTestFinished(() => void vi.useRealTimers());
     const { env, raw } = await makeEnv();

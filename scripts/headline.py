@@ -323,6 +323,13 @@ def foot(im, a, font_path, color, left, right):
     im.paste(Image.alpha_composite(im.convert("RGBA"), layer).convert("RGB"))
 
 
+def open_picture(path):
+    try:
+        return Image.open(path, formats=FORMATS).convert("RGB")
+    except OSError as e:
+        sys.exit(f"cannot read the picture {path}: {e}")
+
+
 def place_logo(a, W, H, m):
     """The kit logo at the kit placement: trimmed, scaled to --logo-width, optically centred (or at --logo-x), at least m from each edge."""
     if not (0 < a.logo_width <= 1 and 0 <= a.logo_top < 1):
@@ -349,10 +356,7 @@ def logo_only(a):
     m = a.min_margin
     if not 0 <= m < 0.25:
         sys.exit("--min-margin must be from 0 to less than 0.25")
-    try:
-        im = Image.open(a.src, formats=FORMATS).convert("RGB")
-    except OSError as e:
-        sys.exit(f"cannot read the picture {a.src}: {e}")
+    im = open_picture(a.src)
     W, H = im.size
     logo, lx, ly = place_logo(a, W, H, m)
     im.paste(logo, (lx, ly), logo)
@@ -407,6 +411,9 @@ def main(argv=None):
             sys.exit("the headline is empty: give --headline, or --logo alone for a picture with the logo only (engine 1)")
         if a.subline or a.footnote:
             sys.exit("a subline or a footnote needs a headline")
+        # An empty headline with type options is a lost headline (engine 2 or 3), not a logo-only picture.
+        if a.area is not None or a.font or a.family:
+            sys.exit("the headline is empty but --area, --family or --font is given: give the headline, or drop them for the logo only (engine 1)")
         return logo_only(a)
     if a.area is None or not (a.font or a.family):
         sys.exit("a headline needs --area and one of --family or --font")
@@ -449,10 +456,7 @@ def main(argv=None):
     else:
         sub_path, sub_note = head_path, None
 
-    try:
-        im = Image.open(a.src, formats=FORMATS).convert("RGB")
-    except OSError as e:
-        sys.exit(f"cannot read the picture {a.src}: {e}")
+    im = open_picture(a.src)
     W, H = im.size
     bx0, by0, bw, bh = x0 * W, y0 * H, (x1 - x0) * W, (y1 - y0) * H
     draw = ImageDraw.Draw(im)

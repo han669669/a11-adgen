@@ -165,7 +165,7 @@ describe("client results upload", () => {
   });
 
   it("lists the files we received on every load of the page: name and Singapore time, newest first, no delete", async () => {
-    // The fixed times below must stay inside the 14-day list window: pin the clock (the test broke on 23-11-2026).
+    // The fixed times below must stay inside the 14-day list window: pin the clock.
     vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-10T00:00:00.000Z") });
     onTestFinished(() => void vi.useRealTimers());
     const { env, raw } = await makeEnv();

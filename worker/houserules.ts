@@ -193,7 +193,7 @@ const SECTIONS: readonly Section[] = [
       "Pictures: one low draft for each picked concept (render_submit kind draft, numImages 1) from the real brand photos, with the kit logo set. Redo a failed draft once. The owner gives a verdict on each draft. final_render makes a high final of each draft he chose, then a touch-up (region_fix, food_fix) where it is needed, then the logo. A pack only when he asks for one; the Meta text only at the pack step.",
       "Logo: set the real kit logo in code at the kit place by default (scripts/headline.py --logo with no --headline). When a painted logo is better for the concept (on the brand's own box or wall), the model may paint it: then RE1 and the code part of D7 do not apply, and the painted logo must match the real logo letter by letter (D7).",
       "Animals and figures are allowed. Each must pass the first-glance test (LI1) with real fur, eyes and face (the cat head of 23-11-2026 looked AI). No human faces.",
-      "Engine 1 verdicts teach engine 1 only: do not move them into the engine 2 or 3 canon (canon_update). No gold score for engine 1.",
+      "Engine 1 verdicts teach engine 1 only: do not move them into the engine 2 or 3 canon (canon_update). taste_log names the engine of each pick and verdict: read an engine 1 row only for engine 1. No gold score for engine 1.",
     ],
   },
 ];

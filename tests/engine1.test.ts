@@ -131,6 +131,38 @@ describe("engine v1: pictures", () => {
     expect(body.prompt).not.toContain("real size");
   });
 
+  it("uses the wild suffix on the finish pass of an engine 1 final (render_submit kind final)", async () => {
+    const { env, id, ideas } = await withConcepts();
+    await run(env, "ideas_pick", { batchId: id, ids: [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id] });
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      Response.json({ request_id: "q1", status_url: "https://queue.fal.run/s", response_url: "https://queue.fal.run/r" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await run(env, "render_submit", {
+      batch: id, idea: ideas[0]!.id, kind: "final",
+      prompt: "Keep this photograph exactly; match the cheesecake texture of the second reference.",
+      referenceUrls: ["https://w/m/renders/f/0.jpg", "https://w/m/refs/11111111-1111-4111-8111-111111111111.jpg"],
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(body).toMatchObject({ image_size: { width: 1536, height: 1920 }, quality: "high" });
+    expect(body.prompt).toContain(fal.RENDER_SUFFIX_WILD);
+    expect(body.prompt).not.toContain("real size");
+  });
+
+  it("names the engine of each pick and verdict in taste_log, so engine 1 rows stay apart (WI10)", async () => {
+    const { env, raw, id, ideas, base } = await withConcepts();
+    const ids = [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id];
+    await run(env, "ideas_pick", { batchId: id, ids });
+    ids.forEach((x, i) => addDraft(raw, id, `r${i}`, x));
+    await batch.picksSave(env, id, [{ key: "renders/r0/0.jpg", note: "the giant slice" }]);
+    await batch.batchUpdate(env, { id, ownerVerdicts: [{ ideaId: ids[1]!, stage: "draft", mark: "pass", ownerSaid: "not this one" }] });
+    const other = await run(env, "batch_create", base);
+    const two = await run(env, "ideas_save", { batchId: other.id, ideas: [{ format: "tof", insight: "x x x", visual: "a slice", headline: "Too slow.", copy: { subline: "Real cheesecake." } }] });
+    await batch.batchUpdate(env, { id: other.id, ownerVerdicts: [{ ideaId: two.ideas[0].id, stage: "draft", mark: "pass", ownerSaid: "no" }] });
+    const log = await batch.tasteLog(env);
+    expect(log.picks.map((p: { engine: number }) => p.engine)).toEqual([1]);
+    expect(log.verdicts.map((v: { engine: number | null; ownerSaid: string }) => [v.engine, v.ownerSaid]).sort()).toEqual([[1, "not this one"], [2, "no"]]);
+  });
+
   it("leaves an engine 2 draft as it was", async () => {
     const { env, raw, base } = await seeded();
     const b = await run(env, "batch_create", base);
