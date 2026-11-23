@@ -191,9 +191,11 @@ describe("engine v1: board and next step", () => {
     addDraft(raw, id, "r2", b);
     await expect(batch.batchUpdate(env, { id, status: "board" })).rejects.toThrow("nextStep is 'pictures'");
     addDraft(raw, id, "r3", c);
-    expect((await batch.batchGet(env, id)).nextStep).toBe("board");
-    await expect(batch.batchUpdate(env, { id, status: "board" })).rejects.toThrow("Set finalPrompt");
+    // Raw drafts with no final prompt: a resumed session finishes them (the logo, finalPrompt) before the board.
+    expect((await batch.batchGet(env, id)).nextStep).toBe("pictures");
+    await expect(batch.batchUpdate(env, { id, status: "board" })).rejects.toThrow("nextStep is 'pictures'");
     await batch.ideasUpdate(env, [a, b, c].map((x) => ({ id: x, finalPrompt: "Keep this photograph exactly." })));
+    expect((await batch.batchGet(env, id)).nextStep).toBe("board");
     await batch.batchUpdate(env, { id, status: "board" });
     expect((await batch.batchGet(env, id)).nextStep).toBe("owner_pick");
     await batch.picksSave(env, id, [{ key: "renders/r1/0.jpg" }, { key: "renders/r2/0.jpg" }, { key: "renders/r3/0.jpg" }]);
@@ -210,17 +212,19 @@ describe("engine v1: board and next step", () => {
   });
 
   it("nextStepV1 walks the steps in order", () => {
-    const i = (id: string, picked: boolean, hasPicture = false, finals: { status: string }[] = []) => ({ id, picked, hasPicture, finals });
+    const i = (id: string, picked: boolean, hasPicture = false, finals: { status: string }[] = []) => ({ id, picked, hasPicture, finalPrompt: "p", finals });
     const none = new Set<string>();
     expect(batch.nextStepV1("research", [], none)).toBe("concepts");
     expect(batch.nextStepV1("ideas", [i("a", true), i("b", false)], none)).toBe("concept_pick");
     expect(batch.nextStepV1("ideas", [i("a", true, true), i("b", true), i("c", true, true)], none)).toBe("pictures");
     const three = [i("a", true, true), i("b", true, true), i("c", true, true)];
+    expect(batch.nextStepV1("drafts", three.map((x, n) => ({ ...x, finalPrompt: n === 1 ? null : "p" })), none)).toBe("pictures");
     expect(batch.nextStepV1("drafts", three, none)).toBe("board");
     expect(batch.nextStepV1("board", three, new Set(["a", "b"]))).toBe("owner_pick");
     expect(batch.nextStepV1("finals", three, new Set(["a", "b", "c"]))).toBe("finals");
     const done = three.map((x) => ({ ...x, finals: [{ status: "done" }] }));
-    expect(batch.nextStepV1("finals", done, new Set(["a", "b", "c"]))).toBe("done");
+    expect(batch.nextStepV1("finals", done, new Set(["a", "b", "c"]))).toBe("finish");
+    expect(batch.nextStepV1("done", done, new Set(["a", "b", "c"]))).toBe("done");
   });
 });
 
@@ -244,5 +248,18 @@ describe("engine v1: rules and the wild prompt", () => {
     expect(text).toContain("--logo-top <kit logoTopPct / 100> and no --headline");
     expect(text).not.toContain("copyApproved");
     expect(promptGet("wild", { brand: "catfiddle" })).toBe("A new batch needs productUrl, productTitle and label. To resume, give batchId.");
+  });
+
+  it("checks the kit's logo top before batch_create, ends the finals at 'done', and keeps engine 1 out of the canon", () => {
+    const text = (name: string, args: Record<string, string>) => {
+      const out = promptGet(name, args);
+      if (typeof out === "string") throw new Error(out);
+      return out.messages[0]!.content.text;
+    };
+    const wild = text("wild", { brand: "catfiddle", productUrl: "https://b.example/p", productTitle: "Fickle Feline", label: "W48" });
+    expect(wild.indexOf("logoTopPct is under 4")).toBeGreaterThan(-1);
+    expect(wild.indexOf("logoTopPct is under 4")).toBeLessThan(wild.indexOf("batch_create (brandSlug"));
+    expect(text("final", { batchId: "11111111-1111-4111-8111-111111111111" })).toContain("batch_update status 'done' (batch_get nextStep 'finish'");
+    expect(text("learn", {})).toContain("An engine 1 row (taste_log engine 1: wild concepts) teaches engine 1 only");
   });
 });

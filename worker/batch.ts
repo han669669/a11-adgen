@@ -1007,21 +1007,24 @@ type IdeaState = {
 /**
  * The first step of an engine v1 batch (wild concepts, house rules WI) that is not done yet. Pure, like nextStepV3.
  * concepts: the writer saves 6 to 10 concepts. concept_pick: the critic picks 3 blind. pictures: one low draft for each
- * pick (and a new one after a full pass). board, owner_pick, finals, done: as for engine 2. No copy review, no rank.
+ * pick (and a new one after a full pass), with its logo and final prompt. board, owner_pick, finals: as for engine 2. finish: the
+ * logo on each raw final, then status 'done'. No copy review, no rank.
  */
 export function nextStepV1(
   status: string,
-  ideas: { id: string; picked: boolean; hasPicture: boolean; finals: { status: unknown }[] }[],
+  ideas: { id: string; picked: boolean; hasPicture: boolean; finalPrompt?: string | null; finals: { status: unknown }[] }[],
   ownerPicked: Set<string>,
 ): string {
   const picked = ideas.filter((i) => i.picked);
   if (ideas.length === 0) return "concepts";
   if (picked.length < 3) return "concept_pick";
   if (picked.some((i) => !i.hasPicture)) return "pictures";
-  if (!["board", "finals", "done"].includes(status)) return "board";
+  // A polled draft is a raw render: the logo and the final prompt come after it (the 'wild' prompt, step 4).
+  if (!["board", "finals", "done"].includes(status)) return picked.some((i) => !i.finalPrompt) ? "pictures" : "board";
   if (picked.some((i) => !ownerPicked.has(i.id))) return "owner_pick";
   if (picked.some((i) => !i.finals.some((f) => f.status === "done"))) return "finals";
-  return "done";
+  // A polled final is a raw render too: the logo is set in code and uploaded, then status 'done' ('final' prompt, step 6).
+  return status === "done" ? "done" : "finish";
 }
 
 /** The first step of an engine 3 batch that is not done yet. Pure: it reads only the rows that batchGet has read. */
