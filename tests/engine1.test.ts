@@ -1,0 +1,175 @@
+import { readFileSync } from "node:fs";
+import type { DatabaseSync } from "node:sqlite";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as batch from "../worker/batch";
+import type { Env } from "../worker/env";
+import * as fal from "../worker/fal";
+import { run } from "./helpers/engine3";
+import { fakeD1 } from "./helpers/d1";
+
+/** Engine v1: wild concepts, one high picture each, no words, only the kit logo (owner 23-11-2026; house rules E1). */
+
+const sql = (name: string) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8");
+
+async function seeded() {
+  const env = { DB: fakeD1(), SPEND_CAP_USD: "5.00", PUBLIC_BASE_URL: "https://w", FAL_KEY: "k" } as unknown as Env;
+  const raw = (env.DB as unknown as { raw: DatabaseSync }).raw;
+  raw.prepare("INSERT INTO brands (id, slug, name, created_at, updated_at) VALUES ('b1', 'catfiddle', 'Cat & the Fiddle', 'now', 'now')").run();
+  raw.prepare("INSERT INTO brand_kits (id, brand_id, version, kit, created_at) VALUES ('k1', 'b1', 1, '{}', 'now')").run();
+  const subject = await run(env, "subject_save", { brandSlug: "catfiddle", kind: "product", title: "Fickle Feline", url: "https://example.com/p" });
+  const base = { brandSlug: "catfiddle", subjectId: subject.id as string, label: "W48 wild" };
+  return { env, raw, base };
+}
+
+/** An engine 1 batch with 8 wild concepts (all tof: a wild ad has no funnel step of its own). */
+async function withConcepts() {
+  const s = await seeded();
+  const b = await run(s.env, "batch_create", { ...s.base, engine: 1, ownerStart: "go wild, engine v1" });
+  const saved = await run(s.env, "ideas_save", {
+    batchId: b.id,
+    ideas: [...Array(8)].map((_, i) => ({ format: "tof", insight: "The slice is the hero.", visual: `A giant slice on yellow, take ${i + 1}.`, headline: `Concept ${i + 1}` })),
+  });
+  return { ...s, id: b.id as string, ideas: saved.ideas as { id: string }[], warnings: saved.warnings as string[] };
+}
+
+const addDraft = (raw: DatabaseSync, batchId: string, rid: string, ideaId: string, at = "2026-11-23T07:00:00.000Z") =>
+  raw
+    .prepare(
+      `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, image_keys, usd_est, created_at, updated_at)
+       VALUES (?, ?, ?, 'draft', 'done', 'p', '[]', 1536, 1920, 'high', 1, ?, 0.06, ?, ?)`,
+    )
+    .run(rid, batchId, ideaId, JSON.stringify([`renders/${rid}/0.jpg`]), at, at);
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("engine v1: batch_create", () => {
+  it("makes engine 1 only with the owner's words, keeps them in the notes, and keeps them on a new note", async () => {
+    const { env, base } = await seeded();
+    await expect(run(env, "batch_create", { ...base, engine: 1 })).rejects.toThrow("An engine 1 batch needs ownerStart");
+    const b = await run(env, "batch_create", { ...base, engine: 1, ownerStart: "go wild\n engine v1" });
+    expect(b).toMatchObject({ engine: 1, status: "research" });
+    const got = await batch.batchGet(env, b.id);
+    expect(got).toMatchObject({ engine: 1, nextStep: "concepts" });
+    expect(got.notes).toMatch(/^Engine 1 \(wild\) started by the owner \(.+\): "go wild engine v1"$/);
+    await batch.batchUpdate(env, { id: b.id, notes: "References found." });
+    expect((await batch.batchGet(env, b.id)).notes).toMatch(/^Engine 1 \(wild\) started by the owner .+\nReferences found\.$/);
+  });
+
+  it("refuses engine 1 before migration 0018 is live, and writes nothing", async () => {
+    const { env, raw, base } = await seeded();
+    raw.exec("BEGIN");
+    raw.exec(sql("rollback/0018_engine_1.down.sql"));
+    raw.exec("COMMIT");
+    await expect(run(env, "batch_create", { ...base, engine: 1, ownerStart: "go" })).rejects.toThrow("need migration 0018_engine_1");
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM batches").get()).toEqual({ n: 0 });
+    // Engines 2 and 3 still work on the old table.
+    await expect(run(env, "batch_create", base)).resolves.toMatchObject({ engine: 2 });
+  });
+});
+
+describe("engine v1: concepts and picks", () => {
+  it("saves concepts with no copy warning and refuses the engine 3 fields", async () => {
+    const { env, id, warnings } = await withConcepts();
+    expect(warnings).toEqual([]);
+    await expect(run(env, "ideas_save", { batchId: id, promptVersion: "0.2.32", ideas: [{ format: "tof", insight: "x x x", visual: "a slice", headline: "c" }] }))
+      .rejects.toThrow("This batch is engine 1");
+    expect((await batch.batchGet(env, id)).nextStep).toBe("concept_pick");
+  });
+
+  it("takes 3 picks in any mix of stages, and no more", async () => {
+    const { env, id, ideas } = await withConcepts();
+    await run(env, "ideas_pick", { batchId: id, ids: [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id] });
+    await expect(run(env, "ideas_pick", { batchId: id, ids: [ideas[3]!.id] })).rejects.toThrow("Pick limit");
+    await expect(run(env, "ideas_pick", { batchId: id, ids: [ideas[3]!.id], outcome: "select" })).rejects.toThrow("This batch is engine 1");
+    expect((await batch.batchGet(env, id)).nextStep).toBe("pictures");
+  });
+});
+
+describe("engine v1: pictures", () => {
+  it("needs a picked concept and no approved words", async () => {
+    const { env, id, ideas } = await withConcepts();
+    await run(env, "ideas_pick", { batchId: id, ids: [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id] });
+    await expect(batch.copyApprovedCheck(env, id, ideas[0]!.id)).resolves.toEqual({ engine: 1 });
+    await expect(batch.copyApprovedCheck(env, id, ideas[5]!.id)).rejects.toThrow("is not picked");
+  });
+
+  it("renders at the final size, quality and price, one image, with no real-size rule in the prompt", async () => {
+    const { env, raw, id, ideas } = await withConcepts();
+    await run(env, "ideas_pick", { batchId: id, ids: [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id] });
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      Response.json({ request_id: "q1", status_url: "https://queue.fal.run/s", response_url: "https://queue.fal.run/r" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const out = await run(env, "render_submit", {
+      batch: id, idea: ideas[0]!.id, kind: "draft", numImages: 3,
+      prompt: "A giant slice of Fickle Feline cheesecake on a yellow seamless, real layers, clean cut faces.",
+      referenceUrls: ["https://w/m/refs/11111111-1111-4111-8111-111111111111.jpg"],
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(body).toMatchObject({ image_size: { width: 1536, height: 1920 }, quality: "high", num_images: 1 });
+    expect(body.prompt).toContain(fal.RENDER_SUFFIX_WILD);
+    expect(body.prompt).not.toContain("real size");
+    expect(out.usdEstimate).toBe(fal.estimate("final", 1, 1));
+    // The spend ledger and the renders table still call it a draft: it is the picture the owner judges.
+    expect(raw.prepare("SELECT kind, quality, width FROM renders").get()).toEqual({ kind: "draft", quality: "high", width: 1536 });
+  });
+
+  it("leaves an engine 2 draft as it was", async () => {
+    const { env, raw, base } = await seeded();
+    const b = await run(env, "batch_create", base);
+    const saved = await run(env, "ideas_save", { batchId: b.id, ideas: [{ format: "tof", insight: "x x x", visual: "a slice", headline: "Too slow.", copy: { subline: "Real cheesecake." } }] });
+    const ideaId = saved.ideas[0].id;
+    await run(env, "ideas_pick", { batchId: b.id, ids: [ideaId] });
+    await batch.ideasUpdate(env, [{ id: ideaId, copyApproved: "ok" }]);
+    const fetchMock = vi.fn(async () => Response.json({ request_id: "q1", status_url: "https://queue.fal.run/s", response_url: "https://queue.fal.run/r" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await run(env, "render_submit", { batch: b.id, idea: ideaId, kind: "draft", prompt: "A slice on a counter, real photograph, honest light.", referenceUrls: ["https://w/m/refs/a.jpg"] });
+    const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body).toMatchObject({ image_size: { width: 1024, height: 1280 }, quality: "low" });
+    expect(body.prompt).toContain(fal.RENDER_SUFFIX);
+    expect(raw.prepare("SELECT quality FROM renders").get()).toEqual({ quality: "low" });
+  });
+});
+
+describe("engine v1: board and next step", () => {
+  it("reaches the board only with 3 picks, each with a picture and its final prompt", async () => {
+    const { env, raw, id, ideas } = await withConcepts();
+    const [a, b, c] = [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id];
+    await run(env, "ideas_pick", { batchId: id, ids: [a, b] });
+    await expect(batch.batchUpdate(env, { id, status: "board" })).rejects.toThrow("nextStep is 'concept_pick'");
+    await run(env, "ideas_pick", { batchId: id, ids: [c] });
+    addDraft(raw, id, "r1", a);
+    addDraft(raw, id, "r2", b);
+    await expect(batch.batchUpdate(env, { id, status: "board" })).rejects.toThrow("nextStep is 'pictures'");
+    addDraft(raw, id, "r3", c);
+    expect((await batch.batchGet(env, id)).nextStep).toBe("board");
+    await expect(batch.batchUpdate(env, { id, status: "board" })).rejects.toThrow("Set finalPrompt");
+    await batch.ideasUpdate(env, [a, b, c].map((x) => ({ id: x, finalPrompt: "Keep this photograph exactly." })));
+    await batch.batchUpdate(env, { id, status: "board" });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("owner_pick");
+    await batch.picksSave(env, id, [{ key: "renders/r1/0.jpg" }, { key: "renders/r2/0.jpg" }, { key: "renders/r3/0.jpg" }]);
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finals");
+  });
+
+  it("asks for a new picture after the owner passes on one", async () => {
+    const { env, raw, id, ideas } = await withConcepts();
+    const ids = [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id];
+    await run(env, "ideas_pick", { batchId: id, ids });
+    ids.forEach((x, i) => addDraft(raw, id, `r${i}`, x));
+    await batch.batchUpdate(env, { id, ownerVerdicts: [{ stage: "draft", mark: "pass", ideaId: ids[0]!, ownerSaid: "cat head looks fake" }] });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("pictures");
+  });
+
+  it("nextStepV1 walks the steps in order", () => {
+    const i = (id: string, picked: boolean, hasPicture = false, finals: { status: string }[] = []) => ({ id, picked, hasPicture, finals });
+    const none = new Set<string>();
+    expect(batch.nextStepV1("research", [], none)).toBe("concepts");
+    expect(batch.nextStepV1("ideas", [i("a", true), i("b", false)], none)).toBe("concept_pick");
+    expect(batch.nextStepV1("ideas", [i("a", true, true), i("b", true), i("c", true, true)], none)).toBe("pictures");
+    const three = [i("a", true, true), i("b", true, true), i("c", true, true)];
+    expect(batch.nextStepV1("drafts", three, none)).toBe("board");
+    expect(batch.nextStepV1("board", three, new Set(["a", "b"]))).toBe("owner_pick");
+    expect(batch.nextStepV1("finals", three, new Set(["a", "b", "c"]))).toBe("finals");
+    const done = three.map((x) => ({ ...x, finals: [{ status: "done" }] }));
+    expect(batch.nextStepV1("finals", done, new Set(["a", "b", "c"]))).toBe("done");
+  });
+});
