@@ -1022,7 +1022,7 @@ export const TOOLS: Tool[] = [
   {
     name: "final_render",
     description:
-      "Start the high final for one pick. It uses the idea's finalPrompt, the picked draft as the first reference, then the idea's finalRefs. Paid (about US$0.08). House recipe (docs/creative-playbook.md §7): finalPrompt is prompt 2 and finalRefs stay empty (the draft carries the true pack). Then poll render_status. When food shows and the real product pixels are not in the picture, run the finish pass (render_submit kind final, references: this final then the kit's texture photo, prompt 3); after a product lock (§7.4) skip it. Then crop the food at full size and compare it with the kit's texture photo (docs/creative-playbook.md §6.4). compose_final with brandSlug only the verified version.",
+      "Start the high final for one pick. It uses the idea's finalPrompt, the picked draft as the first reference, then the idea's finalRefs. Paid (about US$0.08). House recipe (docs/creative-playbook.md §7): finalPrompt is prompt 2 and finalRefs stay empty (the draft carries the true pack). Then poll render_status. When food shows and the real product pixels are not in the picture, run the finish pass (render_submit kind final, references: this final then the kit's texture photo, prompt 3); after a product lock (§7.4) skip it; an engine 1 final never gets it (house rule WI7: a light touch, no food redraw). Then crop the food at full size and compare it with the kit's texture photo (docs/creative-playbook.md §6.4). compose_final with brandSlug only the verified version.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1079,7 +1079,7 @@ export const TOOLS: Tool[] = [
   {
     name: "food_fix",
     description:
-      "Repair only (the house recipe's finish pass comes first, docs/creative-playbook.md §7): re-render only the food in a finished final so it looks like the real product. Give boxes around every visible piece of food (whole percents of the picture, x and y from the top-left; include the food inside jars). The server builds the mask (white = boxes), uses the kit's texture photos, packshot and food description, and keeps everything outside the boxes. keep = what must not change (fill levels, heap sizes, text near the boxes). Paid (about US$0.09). Then poll render_status, crop the food and compare it with the kit's texture photo; if it does not match, run again on the new key. compose_final the result that matches.",
+      "Repair only (the house recipe's finish pass comes first, docs/creative-playbook.md §7; engine 1 has no finish pass, so use this only for a food defect you name, WI7): re-render only the food in a finished final so it looks like the real product. Give boxes around every visible piece of food (whole percents of the picture, x and y from the top-left; include the food inside jars). The server builds the mask (white = boxes), uses the kit's texture photos, packshot and food description, and keeps everything outside the boxes. keep = what must not change (fill levels, heap sizes, text near the boxes). Paid (about US$0.09). Then poll render_status, crop the food and compare it with the kit's texture photo; if it does not match, run again on the new key. compose_final the result that matches.",
     inputSchema: {
       type: "object",
       properties: {

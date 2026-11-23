@@ -5,6 +5,7 @@ import * as batch from "../worker/batch";
 import type { Env } from "../worker/env";
 import * as fal from "../worker/fal";
 import { houseRules } from "../worker/houserules";
+import { TOOLS } from "../worker/mcp";
 import { promptGet } from "../worker/prompts";
 import { run } from "./helpers/engine3";
 import { fakeD1 } from "./helpers/d1";
@@ -262,5 +263,27 @@ describe("engine v1: rules and the wild prompt", () => {
     expect(wild).toContain("logo.sourceUrl and refs[].sourceUrl, never its /m/brands/ url");
     expect(text("final", { batchId: "11111111-1111-4111-8111-111111111111" })).toContain("batch_update status 'done' (batch_get nextStep 'finish'");
     expect(text("learn", {})).toContain("An engine 1 row (taste_log engine 1: wild concepts) teaches engine 1 only");
+  });
+
+  it("puts the batch c1a43bcc lessons on the pictures only: a light-touch final, edges at full size, real angles", () => {
+    const rules = houseRules("main").rules;
+    expect(rules).toContain("Craft checks on the pictures only, never limits on the concepts");
+    expect(rules).toContain("never makes the food more perfect than the draft");
+    expect(rules).toContain("stepped or pixelated lines");
+    expect(rules).toContain("camera angles that the brand's real photos show");
+    expect(rules).toContain("A note for the critic, not a gate for the writer");
+    expect(rules).toContain("The food path is the one of engines 2 and 3, with scale free");
+    expect(rules).toContain("finalRefs stay empty and the final prompt never asks the model to redraw the food");
+    const out = promptGet("final", { batchId: "11111111-1111-4111-8111-111111111111" });
+    if (typeof out === "string") throw new Error(out);
+    expect(out.messages[0]!.content.text).toContain("a light touch that keeps the draft's photograph");
+    expect(out.messages[0]!.content.text).toContain("engine 1: no finish pass and no food redraw, WI7");
+    expect(rules).toContain("FO3 (the high final keeps the draft instead: WI7)");
+    const wild = promptGet("wild", { brand: "catfiddle", productUrl: "https://b.example/p", productTitle: "Fickle Feline", label: "W48" });
+    if (typeof wild === "string") throw new Error(wild);
+    expect(wild.messages[0]!.content.text).toContain("save each skeleton's plan in the batch notes with the draft's renderId");
+    const desc = (n: string) => TOOLS.find((x) => x.name === n)!.description;
+    expect(desc("final_render")).toContain("an engine 1 final never gets it (house rule WI7");
+    expect(desc("food_fix")).toContain("engine 1 has no finish pass");
   });
 });
