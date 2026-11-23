@@ -696,9 +696,9 @@ export async function tasteLog(env: Env, limit = 30, before?: string) {
  */
 export async function finalRender(env: Env, batchId: string, key: string) {
   const pick = await env.DB.prepare(
-    `SELECT p.idea_id, p.final_render_id, i.final_prompt, i.final_refs FROM picks p JOIN ideas i ON i.id = p.idea_id
-     WHERE p.batch_id = ? AND p.render_key = ?`,
-  ).bind(batchId, key).first<{ idea_id: string; final_render_id: string | null; final_prompt: string | null; final_refs: string }>();
+    `SELECT p.idea_id, p.final_render_id, i.final_prompt, i.final_refs, b.engine FROM picks p JOIN ideas i ON i.id = p.idea_id
+     JOIN batches b ON b.id = p.batch_id WHERE p.batch_id = ? AND p.render_key = ?`,
+  ).bind(batchId, key).first<{ idea_id: string; final_render_id: string | null; final_prompt: string | null; final_refs: string; engine: number }>();
   if (!pick) throw new Error(`${key} is not a pick of batch ${batchId}.`);
   const held = pick.final_render_id;
   if (held?.startsWith("accepted:"))
@@ -732,7 +732,7 @@ export async function finalRender(env: Env, batchId: string, key: string) {
   const refs = [fal.mediaUrl(env, key), ...(JSON.parse(pick.final_refs) as string[])];
   let r: Awaited<ReturnType<typeof fal.submit>>;
   try {
-    r = await fal.submit(env, { batch: batchId, idea: pick.idea_id, kind: "final", prompt: pick.final_prompt, referenceUrls: refs, numImages: 1 });
+    r = await fal.submit(env, { batch: batchId, idea: pick.idea_id, kind: "final", prompt: pick.final_prompt, referenceUrls: refs, numImages: 1, ...(pick.engine === 1 ? { wild: true } : {}) });
   } catch (e) {
     // fal took the job (billed) but its row was not saved: keep the pick closed for ever, so no second final is paid.
     // Any other error: fal did not take the job, so free the pick and the owner can tap Render again.
@@ -1004,7 +1004,7 @@ type IdeaState = {
 
 /**
  * The first step of an engine v1 batch (wild concepts, house rules E1) that is not done yet. Pure, like nextStepV3.
- * concepts: the writer saves 6 to 10 concepts. concept_pick: the critic picks 3 blind. pictures: one high picture for each
+ * concepts: the writer saves 6 to 10 concepts. concept_pick: the critic picks 3 blind. pictures: one low draft for each
  * pick (and a new one after a full pass). board, owner_pick, finals, done: as for engine 2. No copy review, no rank.
  */
 export function nextStepV1(

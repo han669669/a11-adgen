@@ -59,7 +59,7 @@ export interface SubmitInput {
   maskUrl?: string;
   /** Render id chosen by the caller, so it can store data for the render before fal accepts it (food_fix paste plan). */
   id?: string;
-  /** Engine v1 draft (house rules E1): the final size, quality and price, and RENDER_SUFFIX_WILD. */
+  /** Engine v1 render (house rules E1): RENDER_SUFFIX_WILD in place of RENDER_SUFFIX. Size and price follow kind as usual. */
   wild?: boolean;
 }
 
@@ -71,11 +71,9 @@ export class AcceptedError extends Error {
 }
 
 export async function submit(env: Env, input: SubmitInput) {
-  // An engine v1 picture is the ad itself: no low draft comes before it, and real-looking food needs the high quality.
-  const priced = input.wild && input.kind === "draft" ? "final" : input.kind;
-  const size = SIZES[priced];
+  const size = SIZES[input.kind];
   const id = input.id ?? crypto.randomUUID();
-  const usd = estimate(priced, input.numImages, input.referenceUrls.length);
+  const usd = estimate(input.kind, input.numImages, input.referenceUrls.length);
   const prompt = `${input.prompt.trim()}\n\n${input.wild ? RENDER_SUFFIX_WILD : RENDER_SUFFIX}`;
   const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM renders WHERE batch = ?").bind(input.batch).first<{ n: number }>();
   if ((count?.n ?? 0) >= MAX_BATCH_RENDERS) throw new Error(`Batch ${input.batch} has ${MAX_BATCH_RENDERS} renders, the limit. Start a new batch.`);

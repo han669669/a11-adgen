@@ -7,7 +7,7 @@ import * as fal from "../worker/fal";
 import { run } from "./helpers/engine3";
 import { fakeD1 } from "./helpers/d1";
 
-/** Engine v1: wild concepts, one high picture each, no words, only the kit logo (owner 23-11-2026; house rules E1). */
+/** Engine v1: wild concepts, one low draft each and a high final of each chosen draft, no words, only the kit logo (owner 23-11-2026; house rules E1). */
 
 const sql = (name: string) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8");
 
@@ -36,7 +36,7 @@ const addDraft = (raw: DatabaseSync, batchId: string, rid: string, ideaId: strin
   raw
     .prepare(
       `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, image_keys, usd_est, created_at, updated_at)
-       VALUES (?, ?, ?, 'draft', 'done', 'p', '[]', 1536, 1920, 'high', 1, ?, 0.06, ?, ?)`,
+       VALUES (?, ?, ?, 'draft', 'done', 'p', '[]', 1024, 1280, 'low', 1, ?, 0.01, ?, ?)`,
     )
     .run(rid, batchId, ideaId, JSON.stringify([`renders/${rid}/0.jpg`]), at, at);
 
@@ -93,7 +93,7 @@ describe("engine v1: pictures", () => {
     await expect(batch.copyApprovedCheck(env, id, ideas[5]!.id)).rejects.toThrow("is not picked");
   });
 
-  it("renders at the final size, quality and price, one image, with no real-size rule in the prompt", async () => {
+  it("renders one low draft for each call, with no real-size rule in the prompt", async () => {
     const { env, raw, id, ideas } = await withConcepts();
     await run(env, "ideas_pick", { batchId: id, ids: [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id] });
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
@@ -105,12 +105,28 @@ describe("engine v1: pictures", () => {
       referenceUrls: ["https://w/m/refs/11111111-1111-4111-8111-111111111111.jpg"],
     });
     const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(body).toMatchObject({ image_size: { width: 1024, height: 1280 }, quality: "low", num_images: 1 });
+    expect(body.prompt).toContain(fal.RENDER_SUFFIX_WILD);
+    expect(body.prompt).not.toContain("real size");
+    expect(out.usdEstimate).toBe(fal.estimate("draft", 1, 1));
+    expect(raw.prepare("SELECT kind, quality, width FROM renders").get()).toEqual({ kind: "draft", quality: "low", width: 1024 });
+  });
+
+  it("renders the final of a chosen draft at high quality, with no real-size rule in the prompt", async () => {
+    const { env, raw, id, ideas } = await withConcepts();
+    const ids = [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id];
+    await run(env, "ideas_pick", { batchId: id, ids });
+    ids.forEach((x, i) => addDraft(raw, id, `r${i}`, x));
+    await batch.ideasUpdate(env, [{ id: ids[0]!, finalPrompt: "Keep this photograph exactly; real layers, clean cut faces." }]);
+    await batch.picksSave(env, id, [{ key: "renders/r0/0.jpg" }]);
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      Response.json({ request_id: "q1", status_url: "https://queue.fal.run/s", response_url: "https://queue.fal.run/r" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await batch.finalRender(env, id, "renders/r0/0.jpg");
+    const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
     expect(body).toMatchObject({ image_size: { width: 1536, height: 1920 }, quality: "high", num_images: 1 });
     expect(body.prompt).toContain(fal.RENDER_SUFFIX_WILD);
     expect(body.prompt).not.toContain("real size");
-    expect(out.usdEstimate).toBe(fal.estimate("final", 1, 1));
-    // The spend ledger and the renders table still call it a draft: it is the picture the owner judges.
-    expect(raw.prepare("SELECT kind, quality, width FROM renders").get()).toEqual({ kind: "draft", quality: "high", width: 1536 });
   });
 
   it("leaves an engine 2 draft as it was", async () => {
