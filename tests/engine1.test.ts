@@ -4,10 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as batch from "../worker/batch";
 import type { Env } from "../worker/env";
 import * as fal from "../worker/fal";
+import { houseRules } from "../worker/houserules";
+import { promptGet } from "../worker/prompts";
 import { run } from "./helpers/engine3";
 import { fakeD1 } from "./helpers/d1";
 
-/** Engine v1: wild concepts, one low draft each and a high final of each chosen draft, no words, only the kit logo (owner 23-11-2026; house rules E1). */
+/** Engine v1: wild concepts, one low draft each and a high final of each chosen draft, no words, only the kit logo (owner 23-11-2026; house rules WI). */
 
 const sql = (name: string) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8");
 
@@ -187,5 +189,28 @@ describe("engine v1: board and next step", () => {
     expect(batch.nextStepV1("finals", three, new Set(["a", "b", "c"]))).toBe("finals");
     const done = three.map((x) => ({ ...x, finals: [{ status: "done" }] }));
     expect(batch.nextStepV1("finals", done, new Set(["a", "b", "c"]))).toBe("done");
+  });
+});
+
+describe("engine v1: rules and the wild prompt", () => {
+  it("gives every role the WI section, with the rules that are off and the logo rule", () => {
+    for (const role of ["writer", "critic", "art-director", "main"] as const) {
+      const rules = houseRules(role).rules;
+      expect(rules).toContain("## WI. Engine v1 (wild concepts)");
+      expect(rules).toContain("ST1 (the calm rule)");
+      expect(rules).toContain("\"old v1\"");
+    }
+  });
+
+  it("starts an engine 1 batch with the owner's words, low drafts and the logo only", () => {
+    const out = promptGet("wild", { brand: "catfiddle", productUrl: "https://b.example/p", productTitle: "Fickle Feline", label: "W48" });
+    if (typeof out === "string") throw new Error(out);
+    const text = out.messages[0]!.content.text;
+    expect(text).toContain("First call rules_get");
+    expect(text).toContain("engine 1, ownerStart: the owner's exact words");
+    expect(text).toContain("render_submit kind 'draft' with numImages 1");
+    expect(text).toContain("--logo-top <kit logoTopPct / 100> and no --headline");
+    expect(text).not.toContain("copyApproved");
+    expect(promptGet("wild", { brand: "catfiddle" })).toBe("A new batch needs productUrl, productTitle and label. To resume, give batchId.");
   });
 });

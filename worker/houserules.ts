@@ -179,6 +179,23 @@ const SECTIONS: readonly Section[] = [
       "A final that needs more than one repair is drafted again with a simpler scene.",
     ],
   },
+  {
+    key: "WI",
+    title: "Engine v1 (wild concepts)",
+    roles: ALL,
+    rules: [
+      "Engine v1 is batch engine 1 (owner, 23-11-2026). The old tool (han669669/ai-ad-generator) is \"old v1\", never \"v1\". Start engine 1 only on the owner's words: batch_create engine 1 with ownerStart. It makes 3 wild concepts for one brand and one product, and each concept is one picture.",
+      "No words on an engine 1 picture: no headline, no subline, no footnote. Only the real kit logo. Off for engine 1: the words part of OW8 (the logo stays), CO1, CO3, all of CP, TY1 to TY4, the words parts of TY5 to TY7, TY8 and TY9, PR1 and PR2 (real size), ST1 (the calm rule) and the checks F1, F5, F6 and F7. Every other rule stays, and D1 to D11 apply.",
+      "Wild: a concept that no one else would think of, high taste, on brand (the brand's colours and world) and very pleasing to the eye. Scale is free (a giant slice, a small animal beside it). Busy is allowed when the concept needs it. The food stays appetising and true.",
+      "Food truth is strict. Before the concepts, find the brand's own photos of the product (layers, colours, cut faces, crust, topping) and use them as the references of each picture. Show each draft beside its real photo and compare them. Food that differs from the real one is D2.",
+      "References: look outside the category (editorial, art, fashion, still life) with exa_search, read the links that fit, and name the reference each concept takes from. No mood-board file.",
+      "Process: the writer makes 6 to 10 concepts (ideas_save: headline is the concept name, visual is the picture, insight is why it fits the brand; format tof). A fresh critic picks 3 blind with ideas_pick, in any mix. No stop for the owner at the concepts and no copy review: copyApproved is not needed.",
+      "Pictures: one low draft for each picked concept (render_submit kind draft, numImages 1) from the real brand photos, with the kit logo set. Redo a failed draft once. The owner gives a verdict on each draft. final_render makes a high final of each draft he chose, then a touch-up (region_fix, food_fix) where it is needed, then the logo. A pack only when he asks for one; the Meta text only at the pack step.",
+      "Logo: set the real kit logo in code at the kit place by default (scripts/headline.py --logo with no --headline). When a painted logo is better for the concept (on the brand's own box or wall), the model may paint it: then RE1 and the code part of D7 do not apply, and the painted logo must match the real logo letter by letter (D7).",
+      "Animals and figures are allowed. Each must pass the first-glance test (LI1) with real fur, eyes and face (the cat head of 23-11-2026 looked AI). No human faces.",
+      "Engine 1 verdicts teach engine 1 only: do not move them into the engine 2 or 3 canon (canon_update). No gold score for engine 1.",
+    ],
+  },
 ];
 
 const defects = () =>

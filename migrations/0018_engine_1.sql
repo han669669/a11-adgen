@@ -1,5 +1,5 @@
 -- Engine v1 (wild concepts, owner 23-11-2026): batches.engine takes the value 1. Engine v1 makes 3 wild concepts with
--- one picture each, no words and only the kit logo (worker/houserules.ts section E1).
+-- one picture each, no words and only the kit logo (worker/houserules.ts section WI).
 -- SQLite cannot change a CHECK in place, so the table is built again (the 0004 pattern: defer the foreign keys until the
 -- end of the transaction). Same columns (0002 plus engine from 0015), the same rows in the same order, the same two
 -- indexes and the same trigger. Six tables refer to batches(id) by name, so they point at the new table after the rename.

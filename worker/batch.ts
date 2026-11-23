@@ -110,7 +110,7 @@ export async function factsGet(env: Env, subjectId: string) {
 }
 
 const START = "Engine 3 started by the owner";
-/** Engine v1 (wild concepts, owner 23-11-2026; house rules E1): the first notes line, as for engine 3. */
+/** Engine v1 (wild concepts, owner 23-11-2026; house rules WI): the first notes line, as for engine 3. */
 const START_E1 = "Engine 1 (wild) started by the owner";
 
 /** Engine v1 batches need migration 0018 (the CHECK of batches.engine takes 1). Before it is live, refuse with a clear message. */
@@ -228,7 +228,7 @@ export async function batchUpdate(
   if (input.status === "board") {
     const b = await env.DB.prepare("SELECT engine FROM batches WHERE id = ?").bind(input.id).first<{ engine: number }>();
     guard = b?.engine === 3 ? BOARD3_GUARD : b?.engine === 1 ? BOARD1_GUARD : "";
-    // Engine v1 (house rules E1): exactly 3 picked concepts in any mix of stages, each with its finished picture.
+    // Engine v1 (house rules WI): exactly 3 picked concepts in any mix of stages, each with its finished picture.
     if (b?.engine === 1) {
       const step = ((await batchGet(env, input.id)) as { nextStep?: string }).nextStep ?? "";
       if (["concepts", "concept_pick", "pictures"].includes(step))
@@ -344,7 +344,7 @@ export async function ideasSaveFull(env: Env, batchId: string, ideas: IdeaInput[
   return {
     engine: batch.engine,
     ideas: saved.map((s) => ({ id: s.id, n: s.n, format: s.format, headline: s.headline, picked: !!s.picked })),
-    // Engine v1 sets no words on the picture (house rules E1): its headline is the concept's short name, so no copy warning.
+    // Engine v1 sets no words on the picture (house rules WI): its headline is the concept's short name, so no copy warning.
     warnings: [...(v3?.warnings ?? []), ...(batch.engine === 1 ? [] : copyWarnings(ideas))],
   };
 }
@@ -406,7 +406,7 @@ export async function ideasUpdate(env: Env, updates: IdeaUpdate[]) {
 /**
  * The copy review (owner, 12-11-2026: "ill approve of the headlines and all copywriting that goes on the ad images").
  * A draft is rendered only for an idea whose headline and subline the owner approved, as they are now.
- * Engine v1 (house rules E1, owner 23-11-2026: "no text at all and simply just the branding company logo") has no words
+ * Engine v1 (house rules WI, owner 23-11-2026: "no text at all and simply just the branding company logo") has no words
  * to approve: its draft needs only a picked idea. Returns the batch's engine, so render_submit sizes the draft.
  */
 export async function copyApprovedCheck(env: Env, batchId: string, ideaId: string): Promise<{ engine: number }> {
@@ -1003,7 +1003,7 @@ type IdeaState = {
 };
 
 /**
- * The first step of an engine v1 batch (wild concepts, house rules E1) that is not done yet. Pure, like nextStepV3.
+ * The first step of an engine v1 batch (wild concepts, house rules WI) that is not done yet. Pure, like nextStepV3.
  * concepts: the writer saves 6 to 10 concepts. concept_pick: the critic picks 3 blind. pictures: one low draft for each
  * pick (and a new one after a full pass). board, owner_pick, finals, done: as for engine 2. No copy review, no rank.
  */

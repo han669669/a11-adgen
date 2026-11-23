@@ -21,7 +21,7 @@ execution: code
 
 ### Summary
 
-Add engine 1 beside engine 2 (funnel ideas) and engine 3 (concepts with copy). An engine 1 batch writes 6 to 10 wild concepts, a fresh critic picks 3 blind, each picked concept gets one high-quality picture with no words, the kit logo is set in code, and the owner gives a verdict on each of the 3 finished ads. Finals and touch-ups use the existing tools.
+Add engine 1 beside engine 2 (funnel ideas) and engine 3 (concepts with copy). An engine 1 batch writes 6 to 10 wild concepts, a fresh critic picks 3 blind, each picked concept gets one low draft with no words and the kit logo, the owner gives a verdict on each draft, and each chosen draft gets a high final. Finals and touch-ups use the existing tools.
 
 ### Problem Frame
 
@@ -43,8 +43,8 @@ Owner spec (verbatim, the spec of record): "let's try out drafting 3 drafts each
 
 - **R1.** `batch_create` takes `engine: 1` only with `ownerStart` (the owner's exact words). The engine stays fixed. Engines 2 and 3 do not change.
 - **R2.** An engine 1 batch has exactly 3 picked concepts, in any mix of funnel stages, before status `board`. Each picked concept has one finished picture (a redo is allowed) and its `finalPrompt`.
-- **R3.** `render_submit` kind `draft` on an engine 1 batch needs a picked idea and no copy approval. It renders at the final size and quality (1536x1920, high) at the final price.
-- **R4.** Engine 1 pictures carry no words. The kit logo is set in code: `scripts/headline.py` sets the logo alone when no headline is given, with the same breathing-space checks.
+- **R3.** `render_submit` kind `draft` on an engine 1 batch needs a picked idea and no copy approval. It renders one low draft (1024x1280, low) at the draft price. `final_render` of a chosen draft renders it high (1536x1920). Both use the wild suffix with no real-size rule.
+- **R4.** Engine 1 pictures carry no words. The kit logo is set in code by default: `scripts/headline.py` sets the logo alone when no headline is given, with the same breathing-space checks. The logo may be painted into the scene when that is better (owner, 23-11-2026); a painted logo is checked against the real logo (D7).
 - **R5.** The server prompt suffix for an engine 1 render leaves out the real-size sentence. Every other sentence stays.
 - **R6.** Food and product truth rules (FO, PR3 to PR7, LI, D1 to D11) apply to engine 1. Copy rules (CP), the copy review, the cover and point tests (CO1, CO3), the words rules of TY, the scale rules (PR1, PR2, F1), F5 and F7 do not apply.
 - **R7.** `rules_get` serves an engine 1 section that names each exception and each rule that stays; `RULES_VERSION` changes.
@@ -56,7 +56,7 @@ Owner spec (verbatim, the spec of record): "let's try out drafting 3 drafts each
 
 - **AE1 (R1, R9).** Before 0018: `batch_create engine 1` answers "needs migration 0018". After: it saves engine 1 and the notes start with the owner's words.
 - **AE2 (R2).** An engine 1 batch with 2 picks, or 3 picks with one idea without a finished picture, cannot go to status `board`. Three tof picks are allowed; a fourth pick is refused by the pick trigger.
-- **AE3 (R3).** On an engine 1 batch, `render_submit` kind draft for a picked idea with no `ownerApproved` copy starts a 1536x1920 high render. For an idea that is not picked it refuses.
+- **AE3 (R3).** On an engine 1 batch, `render_submit` kind draft for a picked idea with no `ownerApproved` copy starts a 1024x1280 low render. For an idea that is not picked it refuses.
 
 ### Scope Boundaries
 
@@ -71,14 +71,14 @@ Owner spec (verbatim, the spec of record): "let's try out drafting 3 drafts each
 - **KTD2. Engine 1 reuses the engine 2 path.** Ideas use the engine 2 shape (`headline` holds the concept's short name and is never set on the picture); `ideas_pick` takes ids only; drafts, `picks_save`, `final_render`, `compose_final`, `food_fix`, `region_fix` stay the same. Engine 1 branches only in `batchCreate`, `ideasSave` (no copy warnings), `copyApprovedCheck`, the `render_submit` draft size, the board gate and `batchGet` (`nextStep`).
 - **KTD3. `fal.submit` takes `wild: true`.** It renders a draft at the final size, quality and price, and uses a suffix without the real-size sentence. The spend ledger keeps kind `draft`.
 - **KTD4. The migration gate reads `sqlite_master`.** Same pattern as `roughCheck`: before an engine 1 insert, check that the `batches` table SQL allows 1. No new table.
-- **KTD5. One house-rules section `E1`, roles all.** It states which rules are off and which stay. No other section text changes, so engines 2 and 3 keep their rules.
+- **KTD5. One house-rules section `WI` (engine v1, wild concepts), roles all. Its rule codes are WI1 to WI10; a key `E1` would give codes such as `E11`.** It states which rules are off and which stay. No other section text changes, so engines 2 and 3 keep their rules.
 
 ### High-Level Technical Design
 
 ```
 batch_create(engine 1, ownerStart) -> facts + truth photos -> research references (exa, batchId)
   -> ideas_save 6-10 concepts -> critic ideas_pick 3 (any stage)
-  -> render_submit draft x3 (high, wild suffix, real brand photos as refs)
+  -> render_submit draft x3 (low, wild suffix, real brand photos as refs)
   -> headline.py logo only -> ideas_update finalPrompt -> batch_update board
   -> owner verdicts -> picks_save -> final_render / region_fix / food_fix -> compose_final
 nextStepV1: concepts -> concept_pick -> pictures -> board -> owner_pick -> finals -> done
@@ -86,12 +86,14 @@ nextStepV1: concepts -> concept_pick -> pictures -> board -> owner_pick -> final
 
 ### Assumptions
 
-These are the defaults sent to the owner as questions on 23-11-2026; his answers win.
+These are the defaults sent to the owner as questions on 23-11-2026. His answers (23-11-2026 09:56 UTC) confirmed them, except where a line says "Owner changed".
 
 - Any in-scope brand.
-- 3 concepts with 1 picture each, at high quality; one redo of a failed picture. No low drafts.
+- 3 concepts with 1 picture each; one redo of a failed picture. Owner changed: low drafts, and a high final of each chosen draft.
 - The critic picks the 3 concepts blind; the owner gives verdicts on the 3 finished ads, with no stop at the concept step.
-- The calm rule (one hero, 5 elements or fewer) stays. Animals are allowed and must pass the first-glance test; no human faces.
+- Owner changed: the calm rule (ST1, 5 elements or fewer, and F6) is off for engine 1. Animals are allowed and must pass the first-glance test; no human faces.
+- Owner changed: the logo is set in code by default, and may be painted when that is better.
+- No mood-board file: ingest reference links when they fit.
 - Spend stays under the existing cap with no extra gate.
 
 ### Sequencing
@@ -115,7 +117,7 @@ U1 (migration) first, because the tests of U2 need engine 1 rows. U3 and U4 do n
 - **Requirements:** R1, R2, R3, R5, R8, R9.
 - **Files:** `worker/batch.ts`, `worker/fal.ts`, `worker/mcp.ts`, `tests/engine1.test.ts`.
 - **Approach:** KTD2 to KTD4. `batchCreate` accepts 1 with `ownerStart`, writes an "Engine 1 (wild) started by the owner" first notes line, and the notes update keeps that line as it does for engine 3. `nextStepV1` is a pure function beside `nextStepV3`. The board gate for engine 1 asks for exactly 3 picks, each with a finished draft, plus the existing `finalPrompt` check, with the same guarded write. Tool descriptions (`batch_create`, `ideas_save`, `render_submit`) and the server instructions name engine 1.
-- **Test scenarios:** AE1, AE2, AE3; engine 1 without `ownerStart` refused; `ideas_save` on engine 1 gives no copy warnings and refuses engine 3 fields; `nextStepV1` for each state; the fal request body of an engine 1 draft has 1536x1920, high, the final price and no real-size sentence; an engine 2 draft is unchanged.
+- **Test scenarios:** AE1, AE2, AE3; engine 1 without `ownerStart` refused; `ideas_save` on engine 1 gives no copy warnings and refuses engine 3 fields; `nextStepV1` for each state; the fal request body of an engine 1 draft has 1024x1280, low, the draft price and no real-size sentence; an engine 1 final has 1536x1920, high and the wild suffix; an engine 2 draft is unchanged.
 - **Verification:** `npx vitest run tests/engine1.test.ts tests/batch.test.ts tests/fal.test.ts`.
 
 ### U3. House rules, prompt and plugin command
@@ -123,8 +125,8 @@ U1 (migration) first, because the tests of U2 need engine 1 rows. U3 and U4 do n
 - **Goal:** every client gets the engine 1 rules and process from the server.
 - **Requirements:** R6, R7, R8.
 - **Files:** `worker/houserules.ts`, `worker/prompts.ts`, `plugin/commands/wild.md`, `plugin/.claude-plugin/plugin.json` (0.2.32), `tests/houserules.test.ts`, the test that checks plugin commands against the prompts.
-- **Approach:** section `E1` (KTD5). Prompt `wild`: rules_get, brand and product, a truth sheet from the brand's real photos (sizes not needed; layers, colours and cut faces true), references from outside the category with exa and their links, 6 to 10 concepts, the critic's blind pick of 3, 3 high pictures from the real photos, logo set in code, show each picture beside its real photo, the owner's verdicts, then the final prompt. The `final` prompt gets one engine 1 line (logo only).
-- **Test scenarios:** `rules_get` text has E1 and the version changes; the `wild` prompt text names rules_get, engine 1, ownerStart and logo only; the plugin command lists the same arguments.
+- **Approach:** section `WI` (KTD5). Prompt `wild`: rules_get, brand and product, a truth sheet from the brand's real photos (sizes not needed; layers, colours and cut faces true), references from outside the category with exa and their links, 6 to 10 concepts, the critic's blind pick of 3, 3 low drafts from the real photos, logo set in code (or painted when better), show each picture beside its real photo, the owner's verdicts, then the final prompt. The `final` prompt gets one engine 1 line (logo only).
+- **Test scenarios:** `rules_get` text has WI and the version changes; the `wild` prompt text names rules_get, engine 1, ownerStart and logo only; the plugin command lists the same arguments.
 - **Verification:** `npx vitest run tests/houserules.test.ts` and the command test.
 
 ### U4. Logo-only mode in headline.py
@@ -140,7 +142,7 @@ U1 (migration) first, because the tests of U2 need engine 1 rows. U3 and U4 do n
 
 - **Goal:** the handoff and the decisions log tell every agent about engine 1.
 - **Files:** `docs/decisions.md`, `docs/progress.md`, `docs/creative-playbook.md` (new §7.13), `docs/deploy.md` (migration 0018 in the list), `AGENTS.md` (naming rule, R10).
-- **Approach:** one decisions row with the exceptions and the dropped Haiku items; a progress row with what is and is not verified; the playbook section points to E1 and the prompt.
+- **Approach:** one decisions row with the exceptions and the dropped Haiku items; a progress row with what is and is not verified; the playbook section points to WI and the prompt.
 
 ## Verification Contract
 
