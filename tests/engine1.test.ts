@@ -5,6 +5,7 @@ import * as batch from "../worker/batch";
 import type { Env } from "../worker/env";
 import * as fal from "../worker/fal";
 import { houseRules } from "../worker/houserules";
+import { TOOLS } from "../worker/mcp";
 import { promptGet } from "../worker/prompts";
 import { run } from "./helpers/engine3";
 import { fakeD1 } from "./helpers/d1";
@@ -281,5 +282,8 @@ describe("engine v1: rules and the wild prompt", () => {
     const wild = promptGet("wild", { brand: "catfiddle", productUrl: "https://b.example/p", productTitle: "Fickle Feline", label: "W48" });
     if (typeof wild === "string") throw new Error(wild);
     expect(wild.messages[0]!.content.text).toContain("save each skeleton's plan in the batch notes with the draft's renderId");
+    const desc = (n: string) => TOOLS.find((x) => x.name === n)!.description;
+    expect(desc("final_render")).toContain("an engine 1 final never gets it (house rule WI7");
+    expect(desc("food_fix")).toContain("engine 1 has no finish pass");
   });
 });
