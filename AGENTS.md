@@ -11,10 +11,10 @@ This document uses ASD-STE100 Simplified Technical English with British spelling
 2. [Project progress and direction](docs/progress.md): current work, blockers, decisions needed and next actions.
 3. `docs/blueprint.md`: the design and the build plan.
 4. `docs/decisions.md`: every owner decision, with the date.
-5. `docs/v1-lessons.md`: what the old tool (`han669669/ai-ad-generator`) taught us.
-6. `docs/taste-seed.md`: the owner's taste, from his marks on v1. This seeds the taste canon.
+5. `docs/v1-lessons.md`: what the old tool (`han669669/ai-ad-generator`, "old v1") taught us.
+6. `docs/taste-seed.md`: the owner's taste, from his marks on old v1. This seeds the taste canon.
 7. `docs/creative-playbook.md`: the bar for every ad (the option B test), the funnel stages and the batch process. Read it, and `docs/backlog.md`, before you write ideas.
-8. `docs/render-checklist.md`: the owner's picture notes from v1 (writing on props, scale, props, physics, hands, copy). Read it before you write a prompt, pick a draft or send a final.
+8. `docs/render-checklist.md`: the owner's picture notes from old v1 (writing on props, scale, props, physics, hands, copy). Read it before you write a prompt, pick a draft or send a final.
 9. `docs/security-checklist.md`: the standing security gate. Run it on every change. The owner must not need to ask.
 10. `docs/backlog.md`: ideas the owner parked, and ideas the owner declined. Do not start a parked item without the owner's say. Do not suggest a declined item again.
 
@@ -40,6 +40,8 @@ Every change must move one of these goals. Say which one in each PR.
 1. **Goal 1:** self-learning, self-curating, self-improving, always high-taste, thoughtful, creative, human-directed static ads for our target client (Singapore F&B and wellness brands that already run Meta ads).
 2. **Goal 2:** a static ad so good that a Singapore company that already runs paid campaigns pays real money for it. It fixes their creative fatigue, or it gets better results than their current ads. They run the winners and stop the losers.
 
+**Names (owner, 23-11-2026).** The old tool `han669669/ai-ad-generator` is "old v1". Never call it "v1" in new text; older text that says "v1" for it means old v1. "Engine v1" (code `engine: 1`) is the wild-concept pipeline of this repo: 3 wild concepts, one picture each, no words and only the kit logo (house rules section WI in `worker/houserules.ts`).
+
 The business: a11studio.pro sells 16 static ads per month (4 per week) for S$2,800 (S$800 for the first 3 founding brands). The site promises a full refund when the first 4 ads do not beat the client's CTR in 72 hours. The site still names four weekly formats (The Hook, The Anatomy, Us vs Them, The Offer). Since 07-11-2026 the tool makes funnel stages instead. Each batch makes 3 ads: 1 top of funnel, 1 middle and 1 bottom. The owner runs batches until one ad is top tier (`docs/creative-playbook.md`). The site copy needs the owner's update.
 
 ---
@@ -61,7 +63,7 @@ The business: a11studio.pro sells 16 static ads per month (4 per week) for S$2,8
 | D2 | Least human attention, with one human step. The owner does not pick ideas. Since 07-11-2026 (second change) he picks 1 of the 3 drafts for each idea. | Claude picks the ideas, ranks the drafts blind, then stops and shows the 3 drafts of each idea (chat or the board). The owner picks. Claude runs the finals. `taste_log` keeps what he chose and passed for each idea he picked a draft from, so Claude learns his taste. A pass on all 3 drafts, a note on a final and a verdict on pack copy go in `verdicts` (`batch_update` `ownerVerdicts`), and `taste_log` returns them. |
 | D3 | No access to client Meta ad accounts (a11 does not manage their ads). | Results come from the client: an Ads Manager screenshot or CSV export. Claude reads it. The learning loop must work without results too. |
 | D4 | Public repo `han669669/a11-adgen` (owner, 2026-11-08: public so cubic.dev reviews on its free tier; was private on 2026-11-06). Treat it as public: no secret, token, hash, private link or open weakness in it. | |
-| D5 | Port v1 data (marks, notes, Used ads) when it serves the goals. | Seeds the taste canon, the swipe file and the gold test set. |
+| D5 | Port old v1 data (marks, notes, Used ads) when it serves the goals. | Seeds the taste canon, the swipe file and the gold test set. |
 | D6 | Use the Cloudflare `workers.dev` subdomain. | `a11adgen.gamingcomputing.workers.dev`. The account subdomain is `gamingcomputing`. A bare `a11-adgen.workers.dev` is not possible. Owner chose the Worker name `a11adgen` (2026-11-06). Do not change the account subdomain: 3 other Workers use it. |
 | D7 | Secret keys: the owner gives them when you ask. | Ask only at the step that needs the key. Never ask him to paste a key in chat. See section 11. |
 
@@ -112,7 +114,7 @@ The connector and the agents use OAuth for `/mcp`. That is separate from this to
 
 ## 8. Rules for the code
 
-- **Rule budget.** v1 failed by adding a code rule after each bad batch (see `docs/v1-lessons.md`). Keep at most 15 hard checks in code. A hard check tests only true/false facts (a price matches the fact sheet, painted text equals the approved copy). Taste goes into the taste canon in plain words, never into regexes.
+- **Rule budget.** Old v1 failed by adding a code rule after each bad batch (see `docs/v1-lessons.md`). Keep at most 15 hard checks in code. A hard check tests only true/false facts (a price matches the fact sheet, painted text equals the approved copy). Taste goes into the taste canon in plain words, never into regexes.
 - **House rules.** The owner's settled rules for every agent live in `worker/houserules.ts`. The MCP tool `rules_get` serves them, so a client without the a11 plugin gets them too, and the creative tools refuse a call without the current `rulesVersion`. When the owner settles a rule that every client must follow, add it there in a PR, with a line in `docs/decisions.md`. The plugin agents read the rules from `rules_get` and keep their process steps. Where a step repeats a rule, the text in `worker/houserules.ts` wins; change both together.
 - **Finish kit.** A client with only the MCP gets the finish scripts from the free tool `finish_kit` (issue 147): the Worker serves the files that `finishkit.build.ts` lists, from the build of its own commit, at `GET /finish/<name>`, with their SHA-256. The scripts run on the client, never in the Worker. Server text never sends a client to look for a repository. A new script that every client needs goes in `finishkit.build.ts` and `worker/finishkit.ts`.
 - A new hard check needs a real failure as its test fixture and a line in `docs/decisions.md`.
