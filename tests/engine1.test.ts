@@ -320,5 +320,8 @@ describe("engine v1: rules and the wild prompt", () => {
     expect(desc("render_submit")).toContain("when food shows, the only reference is the food lock skeleton");
     expect(desc("render_submit")).toContain("a concept with no food has the brand's real product photos as the references (D10)");
     expect(desc("render_submit")).not.toContain("the brand's real product and food photos are the references");
+    // Engines 2 and 3: the skeleton is for a matte closed product; a glossy one is photographed in the scene light (D10).
+    expect(desc("render_submit")).toContain("a glossy or rounded product (a bottle, a tube, a glossy jar) gets the brand's real photo as its reference only");
+    expect(desc("render_submit")).not.toContain("for a closed product the product-lock skeleton only");
   });
 });
