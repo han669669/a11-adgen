@@ -16,6 +16,9 @@ Needs Python 3 with Pillow and numpy (reprint also needs OpenCV: opencv-python-h
             A plan product may name its own real photo ("photo", with an "alpha" from `cutout`): for a range of
             different items (engine 3, owner 18-11-2026: model-drawn cake slices were "ai food slop"; the brand's
             real slice photos, cut out and composed, were kept by the model).
+            Holes (opt-in, the plan's "holes" or "holeMask"): no product pixel is pasted there, so an extra can show
+            through the real food (engine 1, owner 25-11-2026: cat ears that peek out behind a real cake). Lock only from a
+            real photo at the concept's camera angle; this script never invents a top, a back or a cut from a front packshot.
   reprint   Put the real packshot print back on each product of a render made from a layout skeleton (the model smears small print).
   swap      Replace the product in an existing draft or final with the real one (repair of a picked draft).
             --lower-only keeps the scene above the label: for an open, almost empty jar (the packshot cannot show that
@@ -431,7 +434,11 @@ def load_plan(path):
     A product may also give its own real photo (a range of different items, such as cake slices of each flavour):
     "photo": the file, "alpha": its mask from `cutout` (same size), "box": [x0, y0, x1, y1] px in that photo (default: the
     mask's box), "blur": px of softness for an item further back. Paths are relative to the plan file. Without "photo"
-    the product is the --packshot."""
+    the product is the --packshot.
+    Holes (opt-in; engine 1, owner 25-11-2026): "holes": [[x0, y0, x1, y1], ...] (canvas fractions) and/or "holeMask": a grey
+    PNG the canvas size (white = hole). No product pixel is pasted in a hole: it stays the skeleton backdrop, so the model
+    can add an extra there (cat ears that peek out behind a cake, a paw, a prop). Every other product pixel is the real photo.
+    Without holes the layout is as before."""
     import json
     try:
         with open(path) as f:
@@ -470,6 +477,16 @@ def load_plan(path):
             sys.exit(f"product {i + 1}: box must be [x0, y0, x1, y1] in whole pixels")
         if not (num(q.get("blur", 0)) and 0 <= q.get("blur", 0) <= 20):
             sys.exit(f"product {i + 1}: blur must be from 0 to 20 px")
+    holes = plan.get("holes", [])
+    if not isinstance(holes, list):
+        sys.exit("\"holes\" must be a list of [x0, y0, x1, y1] fractions")
+    for i, r in enumerate(holes):
+        if not (isinstance(r, list) and len(r) == 4 and all(num(v) for v in r) and 0 <= r[0] < r[2] <= 1 and 0 <= r[1] < r[3] <= 1):
+            sys.exit(f"hole {i + 1}: must be [x0, y0, x1, y1] fractions inside the canvas (0 to 1) with x0<x1, y0<y1")
+    if "holeMask" in plan:
+        if not (isinstance(plan["holeMask"], str) and plan["holeMask"]):
+            sys.exit("\"holeMask\" must be a file name")
+        plan["holeMask"] = os.path.join(os.path.dirname(os.path.abspath(path)), plan["holeMask"])
     for i, sh in enumerate(plan.get("shapes", [])):
         r = sh.get("rect") if isinstance(sh, dict) else None
         if not (isinstance(r, list) and len(r) == 4 and all(num(v) for v in r) and r[0] < r[2] and r[1] < r[3]):
@@ -541,6 +558,26 @@ def soften(img, r):
     return out, pad
 
 
+def hole_map(plan, W, H):
+    """The plan's holes as one boolean (H, W) array per hole (the holeMask last), or None when the plan has no holes."""
+    maps = []
+    for x0, y0, x1, y1 in plan.get("holes", []):
+        m = np.zeros((H, W), bool)
+        m[round(y0 * H):round(y1 * H), round(x0 * W):round(x1 * W)] = True
+        maps.append(m)
+    if "holeMask" in plan:
+        try:
+            m = Image.open(plan["holeMask"], formats=FORMATS).convert("L")
+        except OSError as e:
+            sys.exit(f"cannot read the holeMask {plan['holeMask']}: {e}")
+        if m.size != (W, H):
+            sys.exit(f"the holeMask is {m.size[0]}x{m.size[1]} but the canvas is {W}x{H}")
+        maps.append(np.asarray(m) > 127)
+    if any(not m.any() for m in maps):
+        sys.exit("a hole has no pixels: make it at least 1 px")
+    return np.stack(maps) if maps else None
+
+
 def layout(a):
     """A skeleton from a plan: products at their own places, sizes, sides and small turns (a messy stack, a loose group, one upright),
     over flat shapes that draw the room's real-scale cues (tile rows, a worktop edge). The model then builds the scene around them."""
@@ -559,10 +596,12 @@ def layout(a):
     for sh in plan.get("shapes", []):
         x0, y0, x1, y1 = sh["rect"]
         d.rectangle((round(x0 * W), round(y0 * H), round(x1 * W) - 1, round(y1 * H) - 1), fill=rgb(str(sh.get("fill", "#808080"))))
+    holes = hole_map(plan, W, H)
     pieces = {}
     if a.packshot:
         pieces[None] = (product_piece(pack, box, a.alpha), box)
     boxes = []
+    hit = np.zeros(0 if holes is None else len(holes), bool)   # which holes lie over a product
     for q in plan["products"]:
         key = (q["photo"], q.get("alpha"), tuple(q.get("box") or ())) if "photo" in q else None
         if key not in pieces:
@@ -575,9 +614,22 @@ def layout(a):
             x, y = x - pad, y - pad
         layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))   # paste clips a piece that bleeds off an edge; alpha_composite refuses it
         layer.paste(img, (x, y))   # no mask: a mask would apply the alpha twice and leave a dark ring on every soft edge
+        if holes is not None:   # skip the paste in each hole (alpha set to 0), not a second alpha multiply
+            al = np.array(layer.getchannel("A"))
+            seen = al > 0
+            for k, h in enumerate(holes):
+                hit[k] |= bool((seen & h).any())
+            al[holes.any(axis=0)] = 0
+            if not al.any():
+                sys.exit(f"product {len(boxes) + 1}: the holes cover all of its pixels, so no real food is left to lock. Make the holes smaller.")
+            layer.putalpha(Image.fromarray(al, "L"))
         canvas.alpha_composite(layer)
         print(f"product {len(boxes) + 1}: x {x},{x + img.width} y {y},{y + img.height}")
         boxes.append((x, y))
+    if holes is not None and not hit.all():
+        k = int(np.argmin(hit))
+        name = f"hole {k + 1}" if k < len(plan.get("holes", [])) else "the holeMask"
+        sys.exit(f"{name} lies outside every product: a hole goes over a product, where an extra must show through it.")
     canvas.convert("RGB").save(a.out, quality=95)
     shape = f", H/W {(box[3] - box[1]) / (box[2] - box[0]):.3f}" if a.packshot else ""
     print(f"{a.out}: {len(plan['products'])} products on {W}x{H}{shape}")
@@ -762,7 +814,7 @@ def main():
     o.add_argument("--cx", type=float, default=None, help="centre x of the jar in the padded packshot (default: the middle of the picture)")
     o.add_argument("--out", required=True)
     o.set_defaults(fn=open_source)
-    y = sub.add_parser("layout", help="a skeleton from a plan file: products at their own places, sides and small turns, over flat real-scale cues")
+    y = sub.add_parser("layout", help="a skeleton from a plan file: products at their own places, sides and small turns, over flat real-scale cues; the plan's \"holes\" or \"holeMask\" (opt-in) leave product pixels out, so an extra can show through")
     y.add_argument("--packshot", help="the product for every plan product without its own photo")
     y.add_argument("--box", help="x0,y0,x1,y1 of the product in the packshot")
     y.add_argument("--alpha", help="a silhouette mask the size of the packshot (from `cutout`) instead of a rounded box")
