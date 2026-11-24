@@ -307,12 +307,17 @@ describe("engine v1: rules and the wild prompt", () => {
     expect(wild).toContain("This skeleton, with the lock and its holes, is the only reference of the draft");
     expect(wild).toContain("keep every food pixel of the reference exactly, and do not redraw or reshape the food");
     expect(wild).toContain("never swap the whole packshot over the extras");
+    expect(wild).toContain("a food plan is never reprinted: when a flat printed pack shows in the same picture, also keep a pack-only plan");
+    const resume = promptGet("wild", { brand: "catfiddle", productUrl: "https://b.example/p", productTitle: "Fickle Feline", label: "W48", batchId: "11111111-1111-4111-8111-111111111111" });
+    if (typeof resume === "string") throw new Error(resume);
+    expect(resume.messages[0]!.content.text).toContain("When the batch notes have no ANGLE SHEET yet (step 1), do step 1 first");
     expect(wild).not.toContain("the brand's real photos as the references (the food at an angle");
     const finish = wild.indexOf("Run scripts/photo_finish.py on each, then set the kit logo with scripts/headline.py --logo");
     expect(finish).toBeGreaterThan(wild.indexOf("This skeleton, with the lock and its holes"));
     expect(wild.slice(finish, finish + 300)).toContain("and no --headline");
     const desc = (n: string) => TOOLS.find((x) => x.name === n)!.description;
-    expect(desc("render_submit")).toContain("the only reference is the food lock skeleton");
+    expect(desc("render_submit")).toContain("when food shows, the only reference is the food lock skeleton");
+    expect(desc("render_submit")).toContain("a concept with no food has the brand's real product photos as the references (D10)");
     expect(desc("render_submit")).not.toContain("the brand's real product and food photos are the references");
   });
 });
