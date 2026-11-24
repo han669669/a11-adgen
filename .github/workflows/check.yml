@@ -13,22 +13,25 @@ concurrency:
   group: check-${{ github.ref }}
   cancel-in-progress: true
 
+# Runners: Avrea (avrea.com, owner 24-11-2026). A pull request from a fork runs on GitHub-hosted runners, so no
+# outside code reaches an Avrea runner or its credit. The way back: set the repository variable CI_GITHUB_HOSTED
+# to true (Settings, Secrets and variables, Actions, Variables), and every job runs on GitHub-hosted runners again.
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (vars.CI_GITHUB_HOSTED == 'true' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)) && 'ubuntu-latest' || 'avrea-ubuntu-latest-4-vcpu-8gb' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
-          cache: npm
+          # No npm archive cache: Avrea caches npm downloads itself.
       - run: npm ci
       # Typecheck, all tests (node:sqlite needs Node 22), vite build and a wrangler dry-run. No secrets: nothing deploys from here.
       - run: npm run check
 
   scripts:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (vars.CI_GITHUB_HOSTED == 'true' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)) && 'ubuntu-latest' || 'avrea-ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
