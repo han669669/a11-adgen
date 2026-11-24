@@ -311,6 +311,7 @@ describe("engine v1: rules and the wild prompt", () => {
     const resume = promptGet("wild", { brand: "catfiddle", productUrl: "https://b.example/p", productTitle: "Fickle Feline", label: "W48", batchId: "11111111-1111-4111-8111-111111111111" });
     if (typeof resume === "string") throw new Error(resume);
     expect(resume.messages[0]!.content.text).toContain("When the batch notes have no ANGLE SHEET yet (step 1), do step 1 first");
+    expect(resume.messages[0]!.content.text).toContain("Keep the facts that batch_get already shows, and facts_save only new ones");
     expect(wild).not.toContain("the brand's real photos as the references (the food at an angle");
     const finish = wild.indexOf("Run scripts/photo_finish.py on each, then set the kit logo with scripts/headline.py --logo");
     expect(finish).toBeGreaterThan(wild.indexOf("This skeleton, with the lock and its holes"));
