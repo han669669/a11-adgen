@@ -5,7 +5,7 @@ import * as batch from "../worker/batch";
 import type { Env } from "../worker/env";
 import * as fal from "../worker/fal";
 import { houseRules } from "../worker/houserules";
-import { TOOLS } from "../worker/mcp";
+import { INSTRUCTIONS, TOOLS } from "../worker/mcp";
 import { promptGet } from "../worker/prompts";
 import { run } from "./helpers/engine3";
 import { fakeD1 } from "./helpers/d1";
@@ -323,5 +323,10 @@ describe("engine v1: rules and the wild prompt", () => {
     // Engines 2 and 3: the skeleton is for a matte closed product; a glossy one is photographed in the scene light (D10).
     expect(desc("render_submit")).toContain("a glossy or rounded product (a bottle, a tube, a glossy jar) gets the brand's real photo as its reference only");
     expect(desc("render_submit")).not.toContain("for a closed product the product-lock skeleton only");
+    const glossy = "a glossy or rounded product, such as a bottle, a tube or a glossy jar: the brand's real photo as its reference only";
+    expect(INSTRUCTIONS).toContain(glossy);
+    const b = promptGet("batch", { brand: "catfiddle", productUrl: "https://b.example/p", productTitle: "Fickle Feline", label: "W48" });
+    if (typeof b === "string") throw new Error(b);
+    expect(b.messages[0]!.content.text).toContain(glossy);
   });
 });
