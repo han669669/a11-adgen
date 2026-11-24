@@ -319,6 +319,68 @@ class LayoutReprint(Tmp):
         sk = np.asarray(Image.open(os.path.join(self.dir.name, "out.png")).convert("L"))
         self.assertGreater(int(sk[20, 25]), 200, "the carton's pale face shows at the top-left corner")
 
+    def food(self, top=30):
+        """A real food photo: an orange block on a white backdrop, from row top to row 110, and its mask from cutout."""
+        a = np.full((120, 100, 3), 255, np.uint8); a[top:110, 10:90] = (210, 140, 60)
+        self.save("cake.png", a); self.save("m_cake.png", np.where(a.min(axis=2) < 250, 255, 0))
+        return {"cx": 0.5, "base": 0.8, "height": 0.4, "photo": "cake.png", "alpha": "m_cake.png"}
+
+    def lock(self, item, **over):
+        with contextlib.redirect_stdout(io.StringIO()):
+            product_lock.layout(self.ns(packshot=None, box=None, plan=self.plan(bg="#2040C0", shapes=[], products=[item], **over)))
+        return np.asarray(Image.open(os.path.join(self.dir.name, "out.png")).convert("RGB")).astype(int)
+
+    def food_box(self, sk):
+        ys, xs = np.nonzero(sk[..., 0] - sk[..., 2] > 100)
+        return xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
+
+    def test_layout_hole_keeps_the_backdrop_and_the_real_food_round_it(self):
+        # Engine 1, owner 25-11-2026: the lock leaves a hole where an extra must show (peek ears behind a cake).
+        item = self.food()
+        full = self.lock(item)
+        x0, y0, x1, y1 = self.food_box(full)
+        top = y0 + (y1 - y0) // 3
+        hole = [x0 / 400, y0 / 500, x1 / 400, top / 500]   # the upper third of the piece
+        sk = self.lock(item, holes=[hole])
+        bg = np.array((0x20, 0x40, 0xC0))
+        inside = sk[round(hole[1] * 500) + 2:round(hole[3] * 500) - 2, x0 + 2:x1 - 2]
+        self.assertLess(np.abs(inside - bg).max(), 3, "the hole is the plan's backdrop, not food")
+        below = sk[top + 4:y1 - 4, x0 + 4:x1 - 4]
+        self.assertTrue((below == full[top + 4:y1 - 4, x0 + 4:x1 - 4]).all(), "the food outside the hole is the real photo, pixel for pixel")
+        self.assertLess(np.abs(below - (210, 140, 60)).max(), 6, "the food outside the hole has the photo's colour")
+
+    def test_layout_hole_mask_makes_a_peek_shape(self):
+        # The Cat & the Fiddle peek: the food fills the lower 70% of its photo; a hole at the top centre of the piece lets ears through.
+        item = self.food(top=36)
+        x0, y0, x1, y1 = self.food_box(self.lock(item))
+        m = np.zeros((500, 400), np.uint8)
+        cx = (x0 + x1) // 2
+        m[y0 - 40:y0 + 30, cx - 25:cx + 25] = 255   # the ears' place: above the cake and into its top edge
+        self.save("hole.png", m)
+        sk = self.lock(item, holeMask="hole.png")
+        self.assertLess(np.abs(sk[y0:y0 + 28, cx - 23:cx + 23] - (0x20, 0x40, 0xC0)).max(), 3, "the hole in the cake is empty")
+        self.assertLess(np.abs(sk[y0 + 36:y1 - 6, x0 + 6:x1 - 6] - (210, 140, 60)).max(), 6, "the cake below the hole is intact")
+        self.assertLess(np.abs(sk[y0 + 6:y0 + 28, x0 + 6:cx - 30] - (210, 140, 60)).max(), 6, "the cake beside the hole is intact")
+
+    def test_layout_refuses_a_bad_hole(self):
+        item = self.food()
+        msg = exit_message(product_lock.layout, self.ns(packshot=None, box=None, plan=self.plan(products=[item], holes=[[0, 0, 1, 1]])))
+        self.assertIn("cover all of its pixels", msg)
+        msg = exit_message(product_lock.layout, self.ns(packshot=None, box=None, plan=self.plan(products=[item], holes=[[0.2, 0.9, 0.5, 1.2]])))
+        self.assertIn("inside the canvas", msg)
+        msg = exit_message(product_lock.layout, self.ns(packshot=None, box=None, plan=self.plan(products=[item], holes=[[0, 0, 0.1, 0.1]])))
+        self.assertIn("lies outside every product", msg)
+        self.save("small.png", np.zeros((50, 40), np.uint8))
+        msg = exit_message(product_lock.layout, self.ns(packshot=None, box=None, plan=self.plan(products=[item], holeMask="small.png")))
+        self.assertIn("the canvas is 400x500", msg)
+
+    def test_product_lock_has_no_command_that_invents_an_angle(self):
+        # Owner, 25-11-2026: refuse an angle that no real photo shows; never 3D-guess a top, a back or a cut from a front packshot.
+        import subprocess
+        out = subprocess.run([sys.executable, os.path.join(HERE, "product_lock.py"), "--help"], capture_output=True, text=True, check=True).stdout
+        cmds = set(re.search(r"\{([a-z0-9,-]+)\}", out).group(1).split(","))
+        self.assertEqual(cmds, {"relight", "vary-food", "cutout", "pad45", "open-source", "layout", "reprint", "skeleton", "swap"})
+
     def test_reprint_leaves_a_product_that_does_not_fit(self):
         flat = self.save("flat.png", np.full((500, 400, 3), 128))
         self.assertIn("no product fitted", exit_message(product_lock.reprint, self.rp(flat)))
