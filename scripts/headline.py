@@ -527,10 +527,13 @@ def main(argv=None):
             boxes.append(draw.textbbox((x, y), line, font=font, anchor=anchor))
             if marked:  # word by word, so the accent words take their own colour; the spaces keep the line's own width
                 words = line.split(" ")
+                accented = any(word.casefold() in marked for word in words)
+                if not accented:  # a line with no accent word is checked as one run, as without --accent
+                    runs.append((boxes[-1], color))
                 for i, word in enumerate(words):
                     fill = accent_color if word.casefold() in marked else color
                     draw.text((x, y), word, font=font, fill=fill, anchor=anchor)
-                    if word:
+                    if word and accented:
                         runs.append((draw.textbbox((x, y), word, font=font, anchor=anchor), fill))
                     x += draw.textlength(word + (" " if i < len(words) - 1 else ""), font=font)
             else:

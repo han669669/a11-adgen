@@ -49,6 +49,16 @@ def ink_mask(rgb, body, sigma):
     return body & (lo < 0.8 * masked_blur(lo, body, sigma))
 
 
+def light_ink_mask(rgb, body, sigma):
+    """Light print (a white or silver line): clearly lighter than the body around it, with sharp edges. A studio
+    highlight is lighter too, but its edges are soft, so it is left out."""
+    lo = lum(rgb)
+    lighter = body & (lo > 1.12 * masked_blur(lo, body, sigma))
+    edge = np.abs(lo - cv2.GaussianBlur(lo, (0, 0), 1.0)) > 10
+    near_edge = cv2.dilate(edge.astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    return lighter & near_edge
+
+
 def transfer(render, pack, r, q, inset, min_score):
     H, W = render.shape[:2]
     pw, rw = q["w"], r["w"]
@@ -108,11 +118,14 @@ def transfer(render, pack, r, q, inset, min_score):
     cr = np.dstack([masked_blur(render[..., i], rclean, sigma) for i in range(3)])  # the render's clean body light
     cp = np.dstack([masked_blur(placed[..., i], pclean, sigma) for i in range(3)])  # the packshot's clean body light
     gain = (lum(cr) / np.maximum(lum(cp), 1))[..., None]
-    # Only the packshot's print moves: its ink and a band of 1/20 of the body width round it, so the light parts of a
-    # mark (the silver stripes and curls of the B/SKIN mark) come too, with the soft letter edges. A studio highlight on
-    # the packshot's plain label, away from the print, is not print, so it stays behind (Devin Review, PR 156).
+    # Only the packshot's print moves: its dark ink, its sharp-edged light ink (a white line), and a band of 1/20 of the
+    # body width round them, so the light parts of a mark (the silver stripes and curls of the B/SKIN mark) come too,
+    # with the soft letter edges. A soft studio highlight on the packshot's plain label is not print, so it stays behind
+    # (Devin Review, PR 156).
     k = max(3, int(round(rw / 10)) | 1)
-    pmark = cv2.dilate(ink_mask(placed, in_label, max(rw / 30, 3)).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    sig = max(rw / 30, 3)
+    printed = ink_mask(placed, in_label, sig) | light_ink_mask(placed, in_label, sig)
+    pmark = cv2.dilate(printed.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
     pmark = cv2.GaussianBlur(pmark.astype(np.float32), (0, 0), max(rw / 120, 1))[..., None]
     new = np.clip(cr + (placed - cp) * gain * pmark, 0, 255)
     # The whole label box takes the new pixels, so no model-drawn letter is left behind (ghosting). Its fine grain comes

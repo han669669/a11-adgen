@@ -1172,7 +1172,9 @@ class LabelTransfer(Tmp):
     def test_a_studio_highlight_on_the_packshot_stays_behind(self):
         # Devin Review, PR 156: a bright strip on the packshot's plain label is not print and must not come across.
         pack = bottle((300, 300), 100, 116, 150, 260, 70, 44, PRINT)
-        pack[144 + 12:144 + 100, 100 + 85:100 + 89] = (255, 250, 200)  # a narrow highlight at 0.85 of the width, no print there
+        xs = np.arange(300)  # a narrow, soft-edged highlight at 0.87 of the width (as a studio light makes it), no print there
+        glow = np.exp(-((xs - 187) / 2.5) ** 2)[None, :, None]
+        pack[156:244] = pack[156:244] + (np.array([255, 250, 200]) - pack[156:244]) * glow * (pack[156:244, :, :1] > 200)
         render = bottle((480, 400), 150, 174, 200, 440, 105, 66, PRINT, light=True)
         src, pk = self.save("r.png", render), self.save("p2.png", pack)
         out = os.path.join(self.dir.name, "o.png")
@@ -1181,6 +1183,19 @@ class LabelTransfer(Tmp):
         o = np.asarray(Image.open(out).convert("RGB")).astype(int)
         x, y = 125 + int(0.87 * 150), 266 + int(0.45 * 174)
         self.assertLess(int(np.abs(o[y, x] - render[y, x]).max()), 12)  # the render's own light, no strip
+
+    def test_a_separate_light_print_line_comes_across(self):
+        # Devin Review, PR 156: a white line away from the dark print is real print and must come back.
+        pack = bottle((300, 300), 100, 116, 150, 260, 70, 44, PRINT)
+        pack[144 + int(0.66 * 116):144 + int(0.70 * 116), 100 + 35:100 + 65] = (252, 250, 244)  # a white net-weight line
+        render = bottle((480, 400), 150, 174, 200, 440, 105, 66, PRINT, light=True)
+        src, pk = self.save("r.png", render), self.save("p3.png", pack)
+        out = os.path.join(self.dir.name, "o.png")
+        with contextlib.redirect_stdout(io.StringIO()):
+            label_transfer.main(["--in", src, "--out", out, "--body", "F1B807", "--at", "265,320", "--packshot", pk, "--pack-at", "110,240"])
+        o = np.asarray(Image.open(out).convert("RGB")).astype(int)
+        x, y = 125 + int(0.5 * 150), 266 + int(0.68 * 174)
+        self.assertGreater(int(o[y, x, 2]), 150)  # white, not the yellow body (blue channel near 6)
 
     def test_a_render_with_no_matching_print_is_refused(self):
         code, _, _ = self.run_(bottle((480, 400), 150, 174, 200, 440, 105, 66, [(0.1, 0.2, 0.2, 0.9)]))
@@ -1215,6 +1230,21 @@ class WordContrast(Tmp):
         self.assertIn("DD4430", msg)
         with contextlib.redirect_stdout(io.StringIO()):
             headline.main(args + ["--accent", "enough", "--accent-color", "FFE9A8"])  # a light accent reads
+
+    def test_a_line_with_no_accent_is_checked_as_one_run(self):
+        # Devin Review, PR 156: an accent on one line must not change the check of another line.
+        runs = []
+        orig = headline.backdrop_colour
+        headline.backdrop_colour = lambda im, box: (runs.append(box), orig(im, box))[1]
+        try:
+            src = self.save("in.png", np.full((500, 400, 3), 230))
+            out = os.path.join(self.dir.name, "out.jpg")
+            with contextlib.redirect_stdout(io.StringIO()):
+                headline.main(["--in", src, "--out", out, "--font", FONT, "--headline", "Ten flavours | one cake", "--area", "0.1,0.2,0.9,0.5",
+                               "--accent", "cake", "--accent-color", "DD4430"])
+        finally:
+            headline.backdrop_colour = orig
+        self.assertEqual(len(runs), 1 + 2)  # line 1 as one run; line 2 word by word ("one", "cake")
 
     def test_apca_knows_light_words_from_dark_words(self):
         self.assertGreater(headline.apca_lc((0, 0, 0), (255, 255, 255)), 100)
