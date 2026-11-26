@@ -62,7 +62,7 @@ Words you can read (owner, 26-11-2026, B/SKIN tof: dark words on a mid sage wall
 words on a darker green wall were approved): the script stops when a line of words has too little lightness contrast
 with the backdrop under it. It measures the APCA lightness contrast (Lc; it knows light words on a dark backdrop from
 dark words on a light one, which the older WCAG ratio does not) of --color against the median backdrop colour under
-each line, and needs at least 40. On the B/SKIN batch the rejected dark words on sage gave Lc 32 to 38, and the lowest
+each line (and each accent word, in --accent-color), and needs at least 40. On the B/SKIN batch the rejected dark words on sage gave Lc 32 to 38, and the lowest
 line of an approved final gave 43. The message says what white and near-black words would give, so choose light or dark
 words (and the matching logo) from it, or move the words onto another tone.
 """
@@ -516,6 +516,7 @@ def main(argv=None):
 
     ink = [0]  # the lowest drawn pixel row: descenders and marks such as a cedilla count (the --product-top check)
     boxes = []  # each drawn line's ink box (the split check)
+    runs = []  # each run of one colour with its ink box (the contrast check)
     src = im.copy()  # the backdrop under the words, before any drawing
 
     def put(lines, font, step, y, anchor="la", marked=frozenset()):
@@ -527,10 +528,14 @@ def main(argv=None):
             if marked:  # word by word, so the accent words take their own colour; the spaces keep the line's own width
                 words = line.split(" ")
                 for i, word in enumerate(words):
-                    draw.text((x, y), word, font=font, fill=accent_color if word.casefold() in marked else color, anchor=anchor)
+                    fill = accent_color if word.casefold() in marked else color
+                    draw.text((x, y), word, font=font, fill=fill, anchor=anchor)
+                    if word:
+                        runs.append((draw.textbbox((x, y), word, font=font, anchor=anchor), fill))
                     x += draw.textlength(word + (" " if i < len(words) - 1 else ""), font=font)
             else:
                 draw.text((x, y), line, font=font, fill=color, anchor=anchor)
+                runs.append((boxes[-1], color))
             y += step
         return y
 
@@ -563,16 +568,18 @@ def main(argv=None):
         at = split_edge(src, b, vertical=False)
         if at is not None:
             sys.exit(across.format("across", 100 * at / H, "height"))
-    # Words you can read (owner, 26-11-2026): each line needs APCA Lc MIN_LC against the backdrop under it.
-    for b in boxes:
+    # Words you can read (owner, 26-11-2026): each run of one colour (a line, or an accent word) needs APCA Lc MIN_LC
+    # against the backdrop under it.
+    for b, fill in runs:
         back = backdrop_colour(src, b)
         if back is None:
             continue
-        lc = apca_lc(color, back)
+        lc = apca_lc(fill, back)
         if abs(lc) < MIN_LC:
             light, dark = apca_lc((255, 255, 255), back), apca_lc((20, 20, 20), back)
-            sys.exit(f"the words are hard to read: {a.color} on the backdrop under them ({'%02X%02X%02X' % back}) gives APCA Lc {abs(lc):.0f}, under {MIN_LC}. "
-                     f"White words would give Lc {abs(light):.0f}, near-black words Lc {abs(dark):.0f}: set --color to a light or a dark kit colour "
+            name = a.color if fill == color else a.accent_color
+            sys.exit(f"the words are hard to read: {name} on the backdrop under them ({'%02X%02X%02X' % back}) gives APCA Lc {abs(lc):.0f}, under {MIN_LC}. "
+                     f"White words would give Lc {abs(light):.0f}, near-black words Lc {abs(dark):.0f}: set --color (or --accent-color) to a light or a dark kit colour "
                      "(with the matching logo), or move the words onto a tone with more contrast")
     if a.footnote:
         foot(im, a, sub_path, color, bx0, bx0 + bw)

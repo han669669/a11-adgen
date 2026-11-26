@@ -111,8 +111,11 @@ def tone(a, p, k):
     span = white - s0
 
     def curve(v):
-        rolled = np.where(v > s0, s0 + span * (1 - np.exp(-np.maximum(v - s0, 0) / span)), v)
-        return v + (rolled - v) * k
+        # Up to strength 1 a mix of the line and the shoulder; above it a tighter shoulder (span / k), so the curve
+        # always rises and never swaps two channels (a mix past 1 turned down and made a warm highlight blue).
+        sp = span / max(k, 1.0)
+        rolled = np.where(v > s0, s0 + sp * (1 - np.exp(-np.maximum(v - s0, 0) / sp)), v)
+        return v + (rolled - v) * min(k, 1.0)
 
     # Hue kept (owner, 26-11-2026: the B/SKIN bottle's lit side turned green): the curve moves each pixel's highest and
     # lowest channel, and the middle channel keeps its place between them. A curve on each channel alone pulls a bright

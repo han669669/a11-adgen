@@ -1045,9 +1045,6 @@ class CapCheck(Tmp):
         self.assertIn("not inside the box", exit_message(
             self.check, "--render", self.bottle(0), "--box", "40,60,360,650", "--split", "700"))
 
-if __name__ == "__main__":
-    sys.exit(unittest.main())
-
 
 class HueSafeTone(unittest.TestCase):
     """Owner, 26-11-2026 (B/SKIN): the lit side of a yellow bottle turned green in the finish. The tone step keeps hue."""
@@ -1064,6 +1061,14 @@ class HueSafeTone(unittest.TestCase):
         self.assertLess(int(out[0]), 245)  # the shoulder still rolls the highlight off
         self.assertLess(abs(self.hue(out) - self.hue(lit)), 1.0)
         self.assertLess(out[1] / out[0], 221 / 252 + 0.02)  # green did not gain on red (the old step gave 0.94)
+
+    def test_full_strength_keeps_the_channel_order(self):
+        # Devin Review, PR 156: a mix past strength 1 turned down and made a warm highlight blue.
+        for c in [(255, 235, 221), (250, 245, 200), (255, 255, 240)]:
+            img = Image.fromarray(np.full((16, 16, 3), c, np.uint8))
+            out = np.asarray(photo_finish.finish(img, strength=2, skip=("soften", "halation", "lens", "grain")))[8, 8].astype(int)
+            self.assertEqual(list(np.argsort(out, kind="stable")), list(np.argsort(c, kind="stable")), (c, out))
+            self.assertLess(abs(self.hue(out) - self.hue(c)), 3.0, (c, out))
 
     def test_each_saturated_colour_keeps_its_hue(self):
         for c in [(255, 200, 0), (250, 120, 40), (60, 200, 250), (240, 230, 120), (200, 40, 160)]:
@@ -1164,6 +1169,19 @@ class LabelTransfer(Tmp):
         self.assertGreater(at(0.5, 0.435).sum(), 3 * 120)  # the ghost line is gone
         self.assertGreater(at(0.15, 0.70)[0], at(0.85, 0.70)[0] + 20)  # the render's light is kept: left brighter
 
+    def test_a_studio_highlight_on_the_packshot_stays_behind(self):
+        # Devin Review, PR 156: a bright strip on the packshot's plain label is not print and must not come across.
+        pack = bottle((300, 300), 100, 116, 150, 260, 70, 44, PRINT)
+        pack[144 + 12:144 + 100, 100 + 85:100 + 89] = (255, 250, 200)  # a narrow highlight at 0.85 of the width, no print there
+        render = bottle((480, 400), 150, 174, 200, 440, 105, 66, PRINT, light=True)
+        src, pk = self.save("r.png", render), self.save("p2.png", pack)
+        out = os.path.join(self.dir.name, "o.png")
+        with contextlib.redirect_stdout(io.StringIO()):
+            label_transfer.main(["--in", src, "--out", out, "--body", "F1B807", "--at", "265,320", "--packshot", pk, "--pack-at", "110,240"])
+        o = np.asarray(Image.open(out).convert("RGB")).astype(int)
+        x, y = 125 + int(0.87 * 150), 266 + int(0.45 * 174)
+        self.assertLess(int(np.abs(o[y, x] - render[y, x]).max()), 12)  # the render's own light, no strip
+
     def test_a_render_with_no_matching_print_is_refused(self):
         code, _, _ = self.run_(bottle((480, 400), 150, 174, 200, 440, 105, 66, [(0.1, 0.2, 0.2, 0.9)]))
         self.assertIn("does not match the packshot", str(code))
@@ -1188,7 +1206,21 @@ class WordContrast(Tmp):
         self.assertTrue(os.path.isfile(self.run_("F6F2EA", sage)))
         self.assertTrue(os.path.isfile(self.run_("3B3836", (219, 210, 185))))  # the cream wall: dark words pass
 
+    def test_an_accent_word_is_checked_in_its_own_colour(self):
+        # Devin Review, PR 156: ivory words with a red accent on sage passed, though the red word cannot be read.
+        src = self.save("in.png", np.full((500, 400, 3), (123, 142, 123)))
+        out = os.path.join(self.dir.name, "out.jpg")
+        args = ["--in", src, "--out", out, "--font", FONT, "--headline", "Light enough", "--area", "0.1,0.2,0.9,0.5", "--color", "F6F2EA"]
+        msg = exit_message(headline.main, args + ["--accent", "enough", "--accent-color", "DD4430"])
+        self.assertIn("DD4430", msg)
+        with contextlib.redirect_stdout(io.StringIO()):
+            headline.main(args + ["--accent", "enough", "--accent-color", "FFE9A8"])  # a light accent reads
+
     def test_apca_knows_light_words_from_dark_words(self):
         self.assertGreater(headline.apca_lc((0, 0, 0), (255, 255, 255)), 100)
         self.assertLess(headline.apca_lc((255, 255, 255), (0, 0, 0)), -100)
         self.assertEqual(headline.apca_lc((128, 128, 128), (130, 130, 130)), 0)
+
+
+if __name__ == "__main__":
+    sys.exit(unittest.main())

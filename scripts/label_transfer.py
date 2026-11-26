@@ -108,7 +108,13 @@ def transfer(render, pack, r, q, inset, min_score):
     cr = np.dstack([masked_blur(render[..., i], rclean, sigma) for i in range(3)])  # the render's clean body light
     cp = np.dstack([masked_blur(placed[..., i], pclean, sigma) for i in range(3)])  # the packshot's clean body light
     gain = (lum(cr) / np.maximum(lum(cp), 1))[..., None]
-    new = np.clip(cr + (placed - cp) * gain, 0, 255)
+    # Only the packshot's print moves: its ink and a band of 1/20 of the body width round it, so the light parts of a
+    # mark (the silver stripes and curls of the B/SKIN mark) come too, with the soft letter edges. A studio highlight on
+    # the packshot's plain label, away from the print, is not print, so it stays behind (Devin Review, PR 156).
+    k = max(3, int(round(rw / 10)) | 1)
+    pmark = cv2.dilate(ink_mask(placed, in_label, max(rw / 30, 3)).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    pmark = cv2.GaussianBlur(pmark.astype(np.float32), (0, 0), max(rw / 120, 1))[..., None]
+    new = np.clip(cr + (placed - cp) * gain * pmark, 0, 255)
     # The whole label box takes the new pixels, so no model-drawn letter is left behind (ghosting). Its fine grain comes
     # back in scripts/photo_finish.py.
     w = label[..., None]

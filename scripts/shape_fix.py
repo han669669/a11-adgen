@@ -65,7 +65,7 @@ def colour_mask(rgb, colour):
     """True where a pixel has the body colour's hue (its light and its shade both count)."""
     h0, s0, v0 = colorsys.rgb_to_hsv(*(c / 255 for c in colour))
     if s0 < 0.25:
-        sys.exit("--body must be a clear colour (the label's colour), not a grey or a white: this script finds the body by its hue")
+        sys.exit("--body must be a clear colour (the label's colour), not a grey, a white or a cream: this script finds the body by its hue; on a white or pale label, patch the print from the packshot locally")
     a = rgb / 255
     mx, mn = a.max(2), a.min(2)
     d = np.maximum(mx - mn, 1e-6)
