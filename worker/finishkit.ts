@@ -14,6 +14,8 @@ const USES: Record<string, string> = {
   "photo_finish.py": "The real-camera finish on drafts and finals, before headline.py.",
   "product_lock.py": "The real pack: skeleton and layout (a layout plan), reprint (the real print back on a render made from a skeleton), swap (the real pack into a picked draft), cutout.",
   "pack_check.py": "The pack's height over width against the packshot (2%).",
+  "shape_fix.py": "Measures a front-on product body (and its cap) against the packshot and corrects a small drift in code, before the owner sees the picture.",
+  "label_transfer.py": "Puts the packshot's real label print on a front-on product in a render, in the render's own light (it needs shape_fix.py beside it).",
   "cap_check.py": "The cap on the body centre of a bottle (1% of its width).",
   "box_print.py": "The real box print on a boxed product, from a box-print config for that product.",
   "food_grade.py": "Moves the food colour of a packshot toward the brand's real close-up photo.",

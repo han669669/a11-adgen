@@ -33,6 +33,9 @@ headline = load("headline")
 photo_finish = load("photo_finish")
 pack_check = load("pack_check")
 cap_check = load("cap_check")
+sys.path.insert(0, HERE)  # label_transfer imports shape_fix from its own folder, as in the finish kit
+shape_fix = load("shape_fix")
+label_transfer = load("label_transfer")
 
 
 def exit_message(fn, *args):
@@ -1044,3 +1047,148 @@ class CapCheck(Tmp):
 
 if __name__ == "__main__":
     sys.exit(unittest.main())
+
+
+class HueSafeTone(unittest.TestCase):
+    """Owner, 26-11-2026 (B/SKIN): the lit side of a yellow bottle turned green in the finish. The tone step keeps hue."""
+
+    @staticmethod
+    def hue(rgb):
+        import colorsys
+        return colorsys.rgb_to_hsv(*(c / 255 for c in rgb))[0] * 360
+
+    def test_a_bright_yellow_keeps_its_hue(self):
+        lit = (252, 221, 75)  # the bottle's lit side in the real final; the old step gave (231, 217, 83), a lime
+        img = Image.fromarray(np.full((32, 32, 3), lit, np.uint8))
+        out = np.asarray(photo_finish.finish(img, skip=("soften", "halation", "lens", "grain")))[16, 16].astype(int)
+        self.assertLess(int(out[0]), 245)  # the shoulder still rolls the highlight off
+        self.assertLess(abs(self.hue(out) - self.hue(lit)), 1.0)
+        self.assertLess(out[1] / out[0], 221 / 252 + 0.02)  # green did not gain on red (the old step gave 0.94)
+
+    def test_each_saturated_colour_keeps_its_hue(self):
+        for c in [(255, 200, 0), (250, 120, 40), (60, 200, 250), (240, 230, 120), (200, 40, 160)]:
+            img = Image.fromarray(np.full((16, 16, 3), c, np.uint8))
+            out = np.asarray(photo_finish.finish(img, skip=("soften", "halation", "lens", "grain")))[8, 8]
+            self.assertLess(abs(self.hue(out) - self.hue(c)), 1.5, c)
+
+
+def bottle(size, bw, bh, cx, bot, capw, caph, ink=None, light=False, bg=(150, 210, 190)):
+    """A front-on bottle: a yellow body with optional dark print, a white cap on top, on a mint backdrop."""
+    H, W = size
+    img = np.zeros((H, W, 3), np.float32)
+    img[:] = bg
+    x0, y0 = cx - bw // 2, bot - bh
+    body = np.zeros((bh, bw, 3), np.float32)
+    body[:] = (241, 184, 7)
+    if light:  # the scene light: brighter on the left
+        body *= np.linspace(1.08, 0.82, bw)[None, :, None]
+    img[y0:bot, x0:x0 + bw] = np.clip(body, 0, 255)
+    img[y0 - caph:y0, cx - capw // 2:cx - capw // 2 + capw] = (245, 244, 238)
+    for fx0, fy0, fx1, fy1 in ink or []:  # print boxes as fractions of the body
+        img[y0 + int(fy0 * bh):y0 + int(fy1 * bh), x0 + int(fx0 * bw):x0 + int(fx1 * bw)] = (40, 38, 36)
+    return img
+
+
+PRINT = [(0.25, 0.30, 0.75, 0.36), (0.20, 0.50, 0.80, 0.54), (0.30, 0.58, 0.70, 0.61), (0.22, 0.76, 0.32, 0.83), (0.62, 0.78, 0.74, 0.82)]
+
+
+class ShapeFix(Tmp):
+    """Owner, 26-11-2026: each model pass made the body 1 to 5% too tall for its width and the cap too narrow."""
+
+    def run_(self, render, *extra):
+        pack = self.save("p.png", bottle((300, 300), 100, 116, 150, 260, 70, 44, PRINT))
+        src = self.save("r.png", render)
+        out = os.path.join(self.dir.name, "o.png")
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            try:
+                shape_fix.main(["--in", src, "--out", out, "--body", "F1B807", "--at", "205,330", "--packshot", pack, "--pack-at", "110,240", *extra])
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, log.getvalue(), out
+
+    def test_a_narrow_body_and_cap_are_widened_to_the_packshot(self):
+        code, log, out = self.run_(bottle((420, 400), 190, 232, 200, 380, 126, 88, PRINT, light=True), "--cap-h", "0.44")
+        self.assertEqual(code, 0, log)
+        self.assertIn("body widened", log)
+        fixed = np.asarray(Image.open(out).convert("RGB")).astype(np.float32)
+        d = shape_fix.body_region(fixed, (241, 184, 7), (205, 330))
+        self.assertLess(abs(d["hw"] / (116 / 100) - 1), 0.02)
+        self.assertLess(abs(shape_fix.cap_width(fixed, d, 0.44) / d["w"] - 0.70), 0.02)
+
+    def test_a_true_shape_is_left_alone(self):
+        render = bottle((420, 400), 200, 232, 200, 380, 140, 88, PRINT)
+        code, log, out = self.run_(render)
+        self.assertEqual(code, 0, log)
+        self.assertNotIn("widened", log)
+        self.assertTrue(np.array_equal(np.asarray(Image.open(out).convert("RGB")), render.astype(np.uint8)))
+
+    def test_a_render_far_off_is_refused(self):
+        code, log, _ = self.run_(bottle((420, 400), 170, 232, 200, 380, 120, 88, PRINT))
+        self.assertIn("make the render again", str(code))
+
+    def test_bad_inputs_stop_with_a_clear_message(self):
+        render = bottle((420, 400), 200, 232, 200, 380, 140, 88, PRINT)
+        self.assertIn("not on the body colour", str(self.run_(render, "--at", "5,5")[0]))
+        self.assertIn("a clear colour", str(self.run_(render, "--body", "808080")[0]))
+        self.assertIn("--cap-h must be", str(self.run_(render, "--cap-h", "9")[0]))
+
+
+class LabelTransfer(Tmp):
+    """Owner, 26-11-2026: the model redrew the small print (uneven spacing, ghosting). Only the real print is kept."""
+
+    def run_(self, render):
+        pack = self.save("p.png", bottle((300, 300), 100, 116, 150, 260, 70, 44, PRINT))
+        src = self.save("r.png", render)
+        out = os.path.join(self.dir.name, "o.png")
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            try:
+                label_transfer.main(["--in", src, "--out", out, "--body", "F1B807", "--at", "265,320", "--packshot", pack, "--pack-at", "110,240"])
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, log.getvalue(), out
+
+    def test_the_real_print_replaces_a_smeared_one_in_the_render_light(self):
+        import cv2
+        # The render: 1.5 x the packshot, lit from the left, its print smeared and one wrong (ghost) line added.
+        render = bottle((480, 400), 150, 174, 200, 440, 105, 66, light=True)
+        printed = bottle((480, 400), 150, 174, 200, 440, 105, 66, PRINT + [(0.25, 0.42, 0.75, 0.45)], light=True)
+        render = cv2.GaussianBlur(printed, (0, 0), 2.5) * 0.6 + render * 0.4
+        code, log, out = self.run_(render)
+        self.assertEqual(code, 0, log)
+        o = np.asarray(Image.open(out).convert("RGB")).astype(int)
+        x0, y0 = 200 - 75, 440 - 174
+        at = lambda fx, fy: o[y0 + int(fy * 174), x0 + int(fx * 150)]
+        self.assertLess(at(0.5, 0.52).sum(), 3 * 90)  # a real print line is dark and crisp
+        self.assertGreater(at(0.5, 0.435).sum(), 3 * 120)  # the ghost line is gone
+        self.assertGreater(at(0.15, 0.70)[0], at(0.85, 0.70)[0] + 20)  # the render's light is kept: left brighter
+
+    def test_a_render_with_no_matching_print_is_refused(self):
+        code, _, _ = self.run_(bottle((480, 400), 150, 174, 200, 440, 105, 66, [(0.1, 0.2, 0.2, 0.9)]))
+        self.assertIn("does not match the packshot", str(code))
+
+
+class WordContrast(Tmp):
+    """Owner, 26-11-2026 (B/SKIN tof): dark words on a mid sage wall were "really difficult to read"."""
+
+    def run_(self, colour, back):
+        src = self.save("in.png", np.full((500, 400, 3), back))
+        out = os.path.join(self.dir.name, "out.jpg")
+        with contextlib.redirect_stdout(io.StringIO()):
+            headline.main(["--in", src, "--out", out, "--font", FONT, "--headline", "Light enough", "--subline", "Absorbs fast.",
+                           "--area", "0.1,0.2,0.9,0.5", "--color", colour])
+        return out
+
+    def test_dark_words_on_mid_sage_are_refused_and_light_words_pass(self):
+        sage = (123, 142, 123)  # the wall under the words of the rejected draft
+        msg = exit_message(self.run_, "3B3836", sage)
+        self.assertIn("hard to read", msg)
+        self.assertIn("White words would give", msg)
+        self.assertTrue(os.path.isfile(self.run_("F6F2EA", sage)))
+        self.assertTrue(os.path.isfile(self.run_("3B3836", (219, 210, 185))))  # the cream wall: dark words pass
+
+    def test_apca_knows_light_words_from_dark_words(self):
+        self.assertGreater(headline.apca_lc((0, 0, 0), (255, 255, 255)), 100)
+        self.assertLess(headline.apca_lc((255, 255, 255), (0, 0, 0)), -100)
+        self.assertEqual(headline.apca_lc((128, 128, 128), (130, 130, 130)), 0)

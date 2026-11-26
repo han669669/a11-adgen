@@ -57,6 +57,14 @@ One tone under the words (owner, 21-11-2026: a white and yellow backdrop split c
 stops when a sharp colour or shadow edge runs straight down through a line of words, or across the words (between the
 lines too). A smooth light fall-off and photo grain are not an edge. Move --area onto one tone, or render the backdrop
 under the words as one tone.
+
+Words you can read (owner, 26-11-2026, B/SKIN tof: dark words on a mid sage wall were "really difficult to read"; light
+words on a darker green wall were approved): the script stops when a line of words has too little lightness contrast
+with the backdrop under it. It measures the APCA lightness contrast (Lc; it knows light words on a dark backdrop from
+dark words on a light one, which the older WCAG ratio does not) of --color against the median backdrop colour under
+each line, and needs at least 40. On the B/SKIN batch the rejected dark words on sage gave Lc 32 to 38, and the lowest
+line of an approved final gave 43. The message says what white and near-black words would give, so choose light or dark
+words (and the matching logo) from it, or move the words onto another tone.
 """
 import argparse
 import math
@@ -67,10 +75,11 @@ import unicodedata
 import urllib.parse
 import urllib.request
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageStat
 
 FORMATS = ["JPEG", "PNG", "WEBP"]
 MAX_LINES = 3
+MIN_LC = 40  # APCA lightness contrast that every line of words needs (owner, 26-11-2026)
 FOOT_MARGIN = 0.025  # the footnote is small: it may sit closer to the bottom edge than --min-margin (owner, 20-11-2026, the mirror ad)
 GOOGLE_CSS = "https://fonts.googleapis.com/css2?family={family}:wght@{wght}"
 FONT_HOST = "fonts.gstatic.com"
@@ -235,6 +244,32 @@ def body_centre(logo):
             break
         keep -= 1
     return (runs[0][0] + runs[keep - 1][1] + 1) / 2
+
+
+def apca_y(rgb):
+    """APCA screen luminance of an sRGB colour (0..255), with its soft clamp for near-black."""
+    r, g, b = (c / 255 for c in rgb)
+    y = 0.2126729 * r ** 2.4 + 0.7151522 * g ** 2.4 + 0.0721750 * b ** 2.4
+    return y + (0.022 - y) ** 1.414 if y < 0.022 else y
+
+
+def apca_lc(text, back):
+    """APCA-W3 lightness contrast (Lc) of text on a backdrop: positive for dark words, negative for light words."""
+    yt, yb = apca_y(text), apca_y(back)
+    if yb > yt:
+        s = (yb ** 0.56 - yt ** 0.57) * 1.14
+        return 0.0 if s < 0.1 else (s - 0.027) * 100
+    s = (yb ** 0.65 - yt ** 0.62) * 1.14
+    return 0.0 if s > -0.1 else (s + 0.027) * 100
+
+
+def backdrop_colour(im, box):
+    """The median colour of the backdrop in a box (the picture before any word is drawn)."""
+    W, H = im.size
+    x0, y0, x1, y1 = max(0, int(box[0])), max(0, int(box[1])), min(W, int(box[2]) + 1), min(H, int(box[3]) + 1)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return tuple(int(v) for v in ImageStat.Stat(im.crop((x0, y0, x1, y1)).convert("RGB")).median)
 
 
 def busy_share(im, box):
@@ -528,6 +563,17 @@ def main(argv=None):
         at = split_edge(src, b, vertical=False)
         if at is not None:
             sys.exit(across.format("across", 100 * at / H, "height"))
+    # Words you can read (owner, 26-11-2026): each line needs APCA Lc MIN_LC against the backdrop under it.
+    for b in boxes:
+        back = backdrop_colour(src, b)
+        if back is None:
+            continue
+        lc = apca_lc(color, back)
+        if abs(lc) < MIN_LC:
+            light, dark = apca_lc((255, 255, 255), back), apca_lc((20, 20, 20), back)
+            sys.exit(f"the words are hard to read: {a.color} on the backdrop under them ({'%02X%02X%02X' % back}) gives APCA Lc {abs(lc):.0f}, under {MIN_LC}. "
+                     f"White words would give Lc {abs(light):.0f}, near-black words Lc {abs(dark):.0f}: set --color to a light or a dark kit colour "
+                     "(with the matching logo), or move the words onto a tone with more contrast")
     if a.footnote:
         foot(im, a, sub_path, color, bx0, bx0 + bw)
     if logo:
