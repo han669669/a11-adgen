@@ -16,8 +16,14 @@ the print in the render does not match the packshot (a turned product, a wrong p
 Only the label box changes: --inset gives its edges inside the body, as fractions of the body width (left, top, right,
 bottom), so the curved sides of a round body keep the render's own pixels.
 
+The print that moves is the packshot's dark ink and a band round it (so the light parts of a mark come too). A light
+line away from the dark ink (a white net-weight line) moves only with --light-print: a sharp studio reflection on the
+packshot looks the same to the code, so the default leaves both behind. Give --light-print only when the label has
+separate light print and the packshot has no sharp glare on the label. The alignment always needs dark print: a label
+with only white print stops here, and gets a local patch from the packshot instead.
+
   python3 scripts/label_transfer.py --in <render> --out <picture> --body RRGGBB --at X,Y \\
-      --packshot <packshot> --pack-at X,Y [--inset 0.07,0.10,0.07,0.07] [--min-score 0.35]
+      --packshot <packshot> --pack-at X,Y [--inset 0.07,0.10,0.07,0.07] [--min-score 0.35] [--light-print]
 
 Then run scripts/photo_finish.py and scripts/headline.py as usual. Needs Python 3 with Pillow, numpy and OpenCV
 (scripts/requirements.txt).
@@ -59,7 +65,7 @@ def light_ink_mask(rgb, body, sigma):
     return lighter & near_edge
 
 
-def transfer(render, pack, r, q, inset, min_score):
+def transfer(render, pack, r, q, inset, min_score, light_print=False):
     H, W = render.shape[:2]
     pw, rw = q["w"], r["w"]
     pl, pr = q["cx"] - pw / 2, q["cx"] + pw / 2
@@ -118,13 +124,15 @@ def transfer(render, pack, r, q, inset, min_score):
     cr = np.dstack([masked_blur(render[..., i], rclean, sigma) for i in range(3)])  # the render's clean body light
     cp = np.dstack([masked_blur(placed[..., i], pclean, sigma) for i in range(3)])  # the packshot's clean body light
     gain = (lum(cr) / np.maximum(lum(cp), 1))[..., None]
-    # Only the packshot's print moves: its dark ink, its sharp-edged light ink (a white line), and a band of 1/20 of the
-    # body width round them, so the light parts of a mark (the silver stripes and curls of the B/SKIN mark) come too,
-    # with the soft letter edges. A soft studio highlight on the packshot's plain label is not print, so it stays behind
-    # (Devin Review, PR 156).
+    # Only the packshot's print moves: its dark ink and a band of 1/20 of the body width round it, so the light parts of
+    # a mark (the silver stripes and curls of the B/SKIN mark) come too, with the soft letter edges. A studio highlight on
+    # the packshot's plain label is not print, so it stays behind. Sharp light ink away from the dark ink (a white line)
+    # comes only with --light-print, because a sharp reflection looks the same (Devin Review, PR 156).
     k = max(3, int(round(rw / 10)) | 1)
     sig = max(rw / 30, 3)
-    printed = ink_mask(placed, in_label, sig) | light_ink_mask(placed, in_label, sig)
+    printed = ink_mask(placed, in_label, sig)
+    if light_print:
+        printed |= light_ink_mask(placed, in_label, sig)
     pmark = cv2.dilate(printed.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
     pmark = cv2.GaussianBlur(pmark.astype(np.float32), (0, 0), max(rw / 120, 1))[..., None]
     new = np.clip(cr + (placed - cp) * gain * pmark, 0, 255)
@@ -144,6 +152,7 @@ def main(argv=None):
     p.add_argument("--pack-at", required=True, help="X,Y: a point on the plain label colour in the packshot")
     p.add_argument("--inset", default="0.07,0.10,0.07,0.07", help="the label box inside the body: left,top,right,bottom as fractions of the body width")
     p.add_argument("--min-score", type=float, default=0.35, help="the lowest ink alignment score that is taken as a match")
+    p.add_argument("--light-print", action="store_true", help="also move sharp light print away from the dark ink (a white line); only when the packshot has no sharp glare on the label")
     a = p.parse_args(argv)
     try:
         inset = [float(v) for v in a.inset.split(",")]
@@ -157,7 +166,7 @@ def main(argv=None):
     render, pack = open_rgb(a.src), open_rgb(a.packshot)
     r = body_region(render, colour, point(a.at, "--at"))
     q = body_region(pack, colour, point(a.pack_at, "--pack-at"), "--pack-at")
-    out, _ = transfer(render, pack, r, q, inset, a.min_score)
+    out, _ = transfer(render, pack, r, q, inset, a.min_score, a.light_print)
     Image.fromarray(np.clip(out + 0.5, 0, 255).astype(np.uint8)).save(a.out, quality=95)
     print(f"{a.out}: the packshot's print set in the render's light")
 

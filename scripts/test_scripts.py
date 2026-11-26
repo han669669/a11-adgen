@@ -1184,18 +1184,25 @@ class LabelTransfer(Tmp):
         x, y = 125 + int(0.87 * 150), 266 + int(0.45 * 174)
         self.assertLess(int(np.abs(o[y, x] - render[y, x]).max()), 12)  # the render's own light, no strip
 
-    def test_a_separate_light_print_line_comes_across(self):
-        # Devin Review, PR 156: a white line away from the dark print is real print and must come back.
+    def light_line(self, extra):
+        # A sharp white line away from the dark print: a white net-weight line, or a sharp studio reflection.
         pack = bottle((300, 300), 100, 116, 150, 260, 70, 44, PRINT)
-        pack[144 + int(0.66 * 116):144 + int(0.70 * 116), 100 + 35:100 + 65] = (252, 250, 244)  # a white net-weight line
+        pack[144 + int(0.66 * 116):144 + int(0.70 * 116), 100 + 35:100 + 65] = (252, 250, 244)
         render = bottle((480, 400), 150, 174, 200, 440, 105, 66, PRINT, light=True)
         src, pk = self.save("r.png", render), self.save("p3.png", pack)
         out = os.path.join(self.dir.name, "o.png")
         with contextlib.redirect_stdout(io.StringIO()):
-            label_transfer.main(["--in", src, "--out", out, "--body", "F1B807", "--at", "265,320", "--packshot", pk, "--pack-at", "110,240"])
+            label_transfer.main(["--in", src, "--out", out, "--body", "F1B807", "--at", "265,320", "--packshot", pk, "--pack-at", "110,240"] + extra)
         o = np.asarray(Image.open(out).convert("RGB")).astype(int)
-        x, y = 125 + int(0.5 * 150), 266 + int(0.68 * 174)
-        self.assertGreater(int(o[y, x, 2]), 150)  # white, not the yellow body (blue channel near 6)
+        return o[266 + int(0.68 * 174), 125 + int(0.5 * 150)]
+
+    def test_a_sharp_light_line_stays_behind_by_default(self):
+        # Devin Review, PR 156: a sharp studio reflection looks like white print; by default it is not copied.
+        self.assertLess(int(self.light_line([])[2]), 60)  # the yellow body (blue channel near 6), no white strip
+
+    def test_a_separate_light_print_line_comes_across_with_light_print(self):
+        # Devin Review, PR 156: with --light-print, a white line away from the dark print is real print and comes back.
+        self.assertGreater(int(self.light_line(["--light-print"])[2]), 150)  # white, not the yellow body
 
     def test_a_render_with_no_matching_print_is_refused(self):
         code, _, _ = self.run_(bottle((480, 400), 150, 174, 200, 440, 105, 66, [(0.1, 0.2, 0.2, 0.9)]))
