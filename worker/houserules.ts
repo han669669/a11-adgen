@@ -108,6 +108,7 @@ const SECTIONS: readonly Section[] = [
       "The logo is optically centred on its wordmark (a TM or R mark is left out of the centre), big enough to read at a glance, and never an afterthought: in a column layout it heads the text column. On a dark backdrop use a light version of the logo (Oatside: cream on brown).",
       "The words sit on one plain tone: no sharp colour or shadow edge runs through them. A footnote never sits over an object or a shadow edge.",
       "The words and the logo sit inside the photograph, on its plain backdrop. Never a separate panel or colour block that holds the words above, below or beside a smaller inset photo (IRVINS, 21-11-2026: he rejected all nine at one look).",
+      "The words must read at a glance: light words on a mid or dark backdrop, dark words on a light one. scripts/headline.py refuses a line under APCA lightness contrast 40 and names the colour that reads (owner, 26-11-2026, B/SKIN: dark words on a mid sage wall were \"really difficult to read\"; light words on the green wall were approved). Change the words' colour (and use the matching logo) or the wall's tone, never the copy.",
     ],
   },
   {
@@ -117,11 +118,12 @@ const SECTIONS: readonly Section[] = [
     rules: [
       "The product matches the real one in every dimension. Before the first image, find its real height and width (the product page, a retailer's listing, the brand's photo of it beside its carton or in a hand) and save them with the source in the kit notes. The size guide is the brand's own photos, never an earlier render.",
       "Give scale through things in the picture (\"the pot rim level with the bottle's shoulder\"): the model ignores centimetres. A prop of unknown size is never the ruler; never shrink the product to a guessed prop size. Show true-scale cues where scale reads (a fridge so wide that its far side runs out of the frame; subway tiles and a worktop edge at true size).",
-      "Measure every draft and every final again: the shape against the packshot (scripts/pack_check.py, 2%), the cap on the body centre within 1% of its width (scripts/cap_check.py), and every printed word against the packshot (the net weight, TM against R). Fix wrong small print with a local patch from the packshot, not a new render.",
+      "Measure every draft and every final again: the shape against the packshot (scripts/pack_check.py, 2%), the cap on the body centre within 1% of its width (scripts/cap_check.py), and every printed word against the packshot (the net weight, TM against R). Fix wrong small print with a local patch from the packshot, not a new render. A front-on body that drifted (a model pass made it 1 to 5% taller, or the cap narrower) is corrected in code with scripts/shape_fix.py before the owner sees it; a drift over 8% is rendered again (owner, 26-11-2026).",
       "A pack is handled as a real one can be: a pouch folds at most once, above its print, and nothing covers the brand name, the logo or the product name. A box reads as a plain box with four sides.",
       "A packshot that is a flat or 3D mock-up is rebuilt as a real object in the final (a carton: light across the front, rounded paperboard edges, creased ears, a matte cap; a pouch: pillowy film, creases, foil in the open mouth, a contact shadow). Do not paste the mock-up print back over it.",
       "Multiples never look cloned: no identical packs at equal gaps. Small turns, uneven gaps, one lying or leaning, as a person would put them down. Back packs recede (shadow, soft focus) and never take the light from the hero.",
       "Never redraw scrambled print by hand or with a drawn patch: it reads as a shape pasted on the pack (IRVINS, 21-11-2026). When a rough drew scrambled print on a face that must read (a pouch lying down), make that draft from a layout plan that copies the rough's camera, place and size (product_lock.py layout), so reprint puts the real print back.",
+      "Know the product's surface (matte, satin or glossy) from the brand's own photos before the first image, and save it with the source in the kit notes. Every draft and final prompt names it (owner, 26-11-2026: the B/SKIN bottle is \"slightly matte\" satin, not glossy, and the drafts showed it glossy).",
     ],
   },
   {
@@ -130,10 +132,10 @@ const SECTIONS: readonly Section[] = [
     roles: ["art-director", "critic", "main"],
     rules: [
       "First-glance test: the picture looks photographed by a real camera at that exact angle. If it reads as an AI image at first glance, it fails, whatever else is right.",
-      "The product takes the scene's light: the highlight on the light's side, the shade on the far side, the scene seen in a glossy surface, a contact shadow that agrees with the other shadows (D10). A glossy or rounded product (a bottle, a tube, a glossy jar) gets the brand's real photo as a reference only: no skeleton paste and no reprint.",
+      "The product takes the scene's light: the highlight on the light's side, the shade on the far side, the scene seen in a glossy surface, a contact shadow that agrees with the other shadows (D10). A glossy or rounded product (a bottle, a tube, a glossy jar) gets the brand's real photo as a reference only: no skeleton paste and no product_lock.py reprint. A front-on printed label of a clear colour then goes back with scripts/label_transfer.py: it moves only the ink and keeps the scene's light; a white or pale label gets a local patch from the packshot (owner, 26-11-2026: the model redrew the B/SKIN small print, with uneven spacing and ghosting).",
       "No glare, streak or reflection across any printed letter: the print stays legible at phone size (D11).",
       "More control gives more AI look. Prefer a simple scene of few large real objects. When the owner picked a concept from its rough, make the drafts from that rough with a short prompt (under about 900 characters).",
-      "Run the real-camera finish (scripts/photo_finish.py) on drafts and finals: subtle, tuned by eye; hold a brand colour exact with --keep.",
+      "Run the real-camera finish (scripts/photo_finish.py) on drafts and finals: subtle, tuned by eye; hold a brand colour exact with --keep. It keeps each colour's hue: a lit yellow must not turn green (owner, 26-11-2026).",
       "What won his eye: a bright light reflecting on a prop, depth of field, real shadows and legible print, \"scroll stopping but not in your face\".",
       "A draft check judges an ad, not only defects: check each draft with its words and logo set, beside its rough and the owner's notes. A draft that lost the picked rough's device, put back a fact the owner changed, or no longer says the line at first glance is weak: set composition to fail, so it is not eligible, and say why in reason (IRVINS, 21-11-2026: nine eligible packshots that he rejected at one look).",
     ],
@@ -164,6 +166,7 @@ const SECTIONS: readonly Section[] = [
       "A side cup or glass is dry and empty by default. A real serving only as D6 allows it. A subtle real filled cup as a side prop (a real tulip cup with a flat white and faint steam) only when the owner asks. Never a CG-perfect cup.",
       "Hands only when the idea needs them, never beside food, and only when the hand looks like a real camera photo.",
       "The 3 drafts of an idea differ in how the device is staged (camera, crop, scale), not only in the backdrop colour.",
+      "Every prop, not only food, has a real photo of that real object as its reference, at its real size against the product and in a position a person would leave it in; without one, leave it out. A model-drawn prop is AI slop (owner, 26-11-2026, B/SKIN: a handheld fan with a stand behind its handle, then a small fan lying flat, \"ai ugly slop\").",
     ],
   },
   {

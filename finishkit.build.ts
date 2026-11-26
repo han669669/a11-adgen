@@ -11,6 +11,8 @@ export const FINISH_FILES = [
   "photo_finish.py",
   "product_lock.py",
   "pack_check.py",
+  "shape_fix.py",
+  "label_transfer.py",
   "cap_check.py",
   "box_print.py",
   "food_grade.py",
