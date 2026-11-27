@@ -33,6 +33,7 @@ headline = load("headline")
 photo_finish = load("photo_finish")
 pack_check = load("pack_check")
 cap_check = load("cap_check")
+exposure = load("exposure")
 sys.path.insert(0, HERE)  # label_transfer imports shape_fix from its own folder, as in the finish kit
 shape_fix = load("shape_fix")
 label_transfer = load("label_transfer")
@@ -202,6 +203,62 @@ class LayoutReprint(Tmp):
         a = dict(face=self.face, render=render, debug=None, min_score=0.8, search_scale=0.08, search_rot=1.5, search_px=70, light_px=14)
         a.update(kw)
         return self.ns(out=os.path.join(self.dir.name, "rp.png"), **a)
+
+    def test_reprint_keeps_a_soft_back_pack_soft(self):
+        # Devin Review, PR 159: layout blurs a pack with "blur" in the plan, and reprint put sharp print back on it.
+        plan = self.plan(products=[{"cx": 0.28, "base": 0.8, "height": 0.4, "side": "up", "rot": -0.5},
+                                   {"cx": 0.70, "base": 0.8, "height": 0.4, "side": "up", "rot": 0.5, "blur": 3}])
+        with contextlib.redirect_stdout(io.StringIO()):
+            product_lock.layout(self.ns(plan=plan))
+        sk = np.asarray(Image.open(os.path.join(self.dir.name, "out.png")).convert("RGB")).astype(np.float32)
+        rpath = self.save("render.png", sk.clip(0, 255))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            product_lock.reprint(self.rp(rpath, plan=plan))
+        self.assertIn("real print on 2 of 2 products", out.getvalue())
+        got = np.asarray(Image.open(os.path.join(self.dir.name, "rp.png")).convert("L")).astype(np.float32)
+        edge = lambda img, x0, x1: np.abs(np.diff(img[220:400, x0:x1], axis=0)).max()
+        soft = np.asarray(Image.fromarray(sk.astype("uint8")).convert("L")).astype(np.float32)
+        self.assertLess(edge(got, 250, 310), edge(soft, 250, 310) * 1.5 + 5, "the back pack's print stays soft")
+        self.assertGreater(edge(got, 85, 140), 100, "the front pack's print stays sharp")
+        # a final at twice the plan's size: the blur scales with it
+        big = np.asarray(Image.fromarray(sk.astype("uint8")).resize((800, 1000), Image.LANCZOS)).astype(np.float32)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            product_lock.reprint(self.rp(self.save("big.png", big), plan=plan, search_px=140))
+        self.assertIn("real print on 2 of 2 products", out.getvalue())
+        got2 = np.asarray(Image.open(os.path.join(self.dir.name, "rp.png")).convert("L")).astype(np.float32)
+        soft2 = np.asarray(Image.fromarray(big.astype("uint8")).convert("L")).astype(np.float32)
+        edge2 = lambda img: np.abs(np.diff(img[440:800, 500:620], axis=0)).max()
+        self.assertLess(edge2(got2), edge2(soft2) * 1.15 + 1, "the blur scales with the final's size")
+
+    def test_reprint_keeps_light_ink_true_on_a_strong_base_colour(self):
+        # PopoMama, 27-11-2026: on a red box the render's red drifted a little in its weak channels, and reprint read that
+        # drift as the room's colour: the cream skin on the box turned pink-lilac. Light ink must stay near the packshot's colour.
+        a = np.asarray(Image.open(self.pack).convert("RGB")).copy()
+        a[20:240, 30:130][np.all(a[20:240, 30:130] == 232, axis=2)] = (210, 32, 38)
+        a[100:140, 60:100][np.all(a[100:140, 60:100] == (210, 32, 38), axis=2)] = (255, 249, 245)   # cream skin on the red face
+        self.pack = self.save("red.png", a)
+        with contextlib.redirect_stdout(io.StringIO()):
+            product_lock.layout(self.ns())
+        sk = np.asarray(Image.open(os.path.join(self.dir.name, "out.png")).convert("RGB")).astype(np.float32)
+        render = sk * 0.9
+        red = np.all(np.abs(sk - (210, 32, 38)) < 6, axis=2)
+        render[red] = np.float32((205, 24, 46)) * 0.9                    # the model's red: the same red, a small drift in G and B
+        skin = np.all(np.abs(sk - (255, 249, 245)) < 6, axis=2)
+        self.assertGreater(int(skin.sum()), 200, "the fixture shows the skin")
+        rpath = self.save("render.png", render.clip(0, 255))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            product_lock.reprint(self.rp(rpath))
+        self.assertIn("real print on 2 of 2 products", out.getvalue())
+        got = np.asarray(Image.open(os.path.join(self.dir.name, "rp.png")).convert("RGB")).astype(np.float32)
+        import cv2
+        cv2_erode = lambda m: cv2.erode(m.astype(np.uint8), np.ones((9, 9), np.uint8))
+        core = skin & (cv2_erode(skin) > 0)
+        c = got[core].mean(axis=0)
+        self.assertLess(c.max() - c.min(), 20, f"the light ink took the red's drift as a colour cast: {c.round(0)}")
+        base = got[red & (cv2_erode(red) > 0)].mean(axis=0)
+        np.testing.assert_allclose(base, np.float32((205, 24, 46)) * 0.9, atol=12)   # the base keeps the render's red
 
     def test_layout_places_each_product_with_its_side(self):
         with contextlib.redirect_stdout(io.StringIO()):
@@ -1274,6 +1331,66 @@ class WordContrast(Tmp):
         self.assertGreater(headline.apca_lc((0, 0, 0), (255, 255, 255)), 100)
         self.assertLess(headline.apca_lc((255, 255, 255), (0, 0, 0)), -100)
         self.assertEqual(headline.apca_lc((128, 128, 128), (130, 130, 130)), 0)
+
+
+
+class Exposure(Tmp):
+    """One gain on the whole picture (owner, 27-11-2026, PopoMama: a lift of one box face in code looked pasted in)."""
+
+    def picture(self):
+        a = np.zeros((60, 90, 3), np.uint8)
+        a[:, :30] = (180, 40, 46)        # a red box front, too dark
+        a[:, 30:60] = (150, 130, 190)    # a lilac box front
+        a[:, 60:] = (236, 222, 226)      # a pale pink wall
+        return self.save("in.png", a)
+
+    def test_one_gain_keeps_each_colour_and_does_not_clip_a_pale_wall(self):
+        src, out = self.picture(), os.path.join(self.dir.name, "out.png")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(exposure.main(["--in", src, "--out", out, "--gain", "1.15"]), 0)
+        a = np.asarray(Image.open(src).convert("RGB")).astype(float)
+        b = np.asarray(Image.open(out).convert("RGB")).astype(float)
+        for x in (10, 40):   # the fronts: brighter, and the same colour (the channel ratios stay)
+            self.assertGreater(b[30, x].mean(), a[30, x].mean() * 1.08)
+            np.testing.assert_allclose(b[30, x] / b[30, x].sum(), a[30, x] / a[30, x].sum(), atol=0.01)
+        self.assertLess(b[30, 80].max(), 255, "the pale wall rolls off and does not clip")
+        self.assertGreater(b[30, 80, 0] - b[30, 80, 1], 8, "the pale wall keeps its pink")
+        self.assertEqual(len({tuple(b[y, 10]) for y in range(60)}), 1, "one gain for every pixel of a face: no face is lit on its own")
+
+    def test_measure_gives_the_gain_that_matches_the_draft(self):
+        src = self.picture()
+        draft = np.asarray(Image.open(src).convert("RGB")).astype(float) * 1.12
+        ref = self.save("draft.png", draft.clip(0, 255))
+        log = io.StringIO()
+        with contextlib.redirect_stdout(log):
+            exposure.main(["--in", src, "--measure", "0,0,30,60", "--ref", ref, "--ref-box", "0,0,30,60"])
+        self.assertIn("-10.", log.getvalue())
+        self.assertIn("a gain of 1.1", log.getvalue())
+
+    def test_measure_allows_for_the_shoulder_on_a_bright_front(self):
+        # Devin Review, PR 159: a grey front at 200 and a draft at 230 gave a linear gain of 1.150, and the final came out at 218.
+        src = self.save("grey.png", np.full((40, 40, 3), 200, np.uint8))
+        ref = self.save("draft.png", np.full((40, 40, 3), 230, np.uint8))
+        log = io.StringIO()
+        with contextlib.redirect_stdout(log):
+            exposure.main(["--in", src, "--measure", "0,0,40,40", "--ref", ref, "--ref-box", "0,0,40,40"])
+        gain = re.search(r"a gain of ([0-9.]+)", log.getvalue()).group(1)
+        out = os.path.join(self.dir.name, "out.png")
+        with contextlib.redirect_stdout(io.StringIO()):
+            exposure.main(["--in", src, "--out", out, "--gain", gain])
+        self.assertLess(abs(np.asarray(Image.open(out).convert("L")).astype(float).mean() - 230), 1.5)
+        white = self.save("white.png", np.full((40, 40, 3), 255, np.uint8))
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            exposure.main(["--in", white, "--measure", "0,0,40,40", "--ref", white, "--ref-box", "0,0,40,40"])
+        self.assertIn("no gain", log.getvalue())   # a front at the shoulder's top cannot reach 255 again: render it again
+
+    def test_bad_arguments_stop_with_a_clear_message(self):
+        src, out = self.picture(), os.path.join(self.dir.name, "out.png")
+        self.assertIn("0.5 to 2.0", exit_message(exposure.main, ["--in", src, "--out", out, "--gain", "3"]))
+        self.assertIn("--gain", exit_message(exposure.main, ["--in", src, "--out", out]))
+        self.assertIn("--ref", exit_message(exposure.main, ["--in", src, "--measure", "0,0,10,10"]))
+        self.assertIn("X1 > X0", exit_message(exposure.main, ["--in", src, "--measure", "10,0,5,10", "--ref", src, "--ref-box", "0,0,5,5"]))
+        self.assertIn("outside", exit_message(exposure.main, ["--in", src, "--measure", "0,0,500,10", "--ref", src, "--ref-box", "0,0,5,5"]))
 
 
 if __name__ == "__main__":

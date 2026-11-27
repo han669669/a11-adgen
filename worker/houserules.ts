@@ -124,6 +124,7 @@ const SECTIONS: readonly Section[] = [
       "Multiples never look cloned: no identical packs at equal gaps. Small turns, uneven gaps, one lying or leaning, as a person would put them down. Back packs recede (shadow, soft focus) and never take the light from the hero.",
       "Never redraw scrambled print by hand or with a drawn patch: it reads as a shape pasted on the pack (IRVINS, 21-11-2026). When a rough drew scrambled print on a face that must read (a pouch lying down), make that draft from a layout plan that copies the rough's camera, place and size (product_lock.py layout), so reprint puts the real print back.",
       "Know the product's surface (matte, satin or glossy) from the brand's own photos before the first image, and save it with the source in the kit notes. Every draft and final prompt names it (owner, 26-11-2026: the B/SKIN bottle is \"slightly matte\" satin, not glossy, and the drafts showed it glossy).",
+      "Two packs in one picture stand apart, with a clear gap between them. Where one pack overlaps another, the reprint of the back pack spills onto the front pack's edge and leaves a seam (owner, 27-11-2026, PopoMama: he circled the seams). A back pack in soft focus (as above) gets \"blur\" in its layout plan, and reprint keeps it as soft: check its print at full size.",
     ],
   },
   {
@@ -138,6 +139,7 @@ const SECTIONS: readonly Section[] = [
       "Run the real-camera finish (scripts/photo_finish.py) on drafts and finals: subtle, tuned by eye; hold a brand colour exact with --keep. It keeps each colour's hue: a lit yellow must not turn green (owner, 26-11-2026).",
       "What won his eye: a bright light reflecting on a prop, depth of field, real shadows and legible print, \"scroll stopping but not in your face\".",
       "A draft check judges an ad, not only defects: check each draft with its words and logo set, beside its rough and the owner's notes. A draft that lost the picked rough's device, put back a fact the owner changed, or no longer says the line at first glance is weak: set composition to fail, so it is not eligible, and say why in reason (IRVINS, 21-11-2026: nine eligible packshots that he rejected at one look).",
+      "Never brighten one face or one object in code: a product lit on its own reads as pasted in, not photographed (owner, 27-11-2026, PopoMama: \"doesnt feel like the actual product's there\"). A product that is too dark gets a new render with the scene relit (where the light comes from, the light across each front, the contact shadow), then at most one brightness gain on the whole picture (scripts/exposure.py). Before you show a final, measure each product front against the picked draft (scripts/exposure.py --measure): a final front more than 5% darker than in its draft gets the gain or a new render before you show it (the PopoMama finals were 10 to 17% darker, and he rejected them as too dark).",
     ],
   },
   {
@@ -167,6 +169,7 @@ const SECTIONS: readonly Section[] = [
       "Hands only when the idea needs them, never beside food, and only when the hand looks like a real camera photo.",
       "The 3 drafts of an idea differ in how the device is staged (camera, crop, scale), not only in the backdrop colour.",
       "Every prop, not only food, has a real photo of that real object as its reference, at its real size against the product and in a position a person would leave it in; without one, leave it out. A model-drawn prop is AI slop (owner, 26-11-2026, B/SKIN: a handheld fan with a stand behind its handle, then a small fan lying flat, \"ai ugly slop\").",
+      "A large prop behind or beside the product (a pot, a kettle, a jar) that the model draws reads as AI at first glance, even with a real photo as its reference: the model makes it too clean and perfect (owner, 27-11-2026, PopoMama: a steel pot behind the boxes gave the whole ad \"a very strong ai image look at first glance\"). Use no prop, or put the real photo's pixels of that prop into the skeleton (product_lock.py layout) and check it at full size after the render. reprint refuses a plan with a photographed item: reprint the pack from a second plan that holds only the pack, with the same place, size and turn.",
     ],
   },
   {

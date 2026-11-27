@@ -19,6 +19,7 @@ const USES: Record<string, string> = {
   "cap_check.py": "The cap on the body centre of a bottle (1% of its width).",
   "box_print.py": "The real box print on a boxed product, from a box-print config for that product.",
   "food_grade.py": "Moves the food colour of a packshot toward the brand's real close-up photo.",
+  "exposure.py": "One brightness gain on the whole picture, with the hue kept (--measure compares a product front with the picked draft). Never brighten one face or one object in code.",
   "requirements.txt": "The Python packages, for the setup script (Python 3.12 or newer).",
 };
 
