@@ -24,8 +24,12 @@ compose_final grain "off" on that final: this script makes the grain.
 --keep HEX keeps a brand colour exact (owner, 18-11-2026: the tone step turned the Fickle Feline brand yellow olive,
 because the highlight shoulder pulled the red channel down more than the green). Since 26-11-2026 the tone step keeps
 every pixel's hue (a bright yellow on a bottle's lit side turned lime, and --keep did not reach the lighter yellow),
-so --keep now only holds the brand colour's brightness too. Pixels near that colour skip the
-tone and halation steps; the soften, lens and grain steps still run there, so the backdrop reads as the same photo.
+and since 28-11-2026 the shoulder starts higher (0.9, was 0.78) and approaches a higher white (0.995, was 0.975):
+the old shoulder closed the gap between a pastel's highest and lowest channel, so a pink wall turned grey-mauve
+(owner, PopoMama, setting B of his A/B/C comparison). A white backdrop is a little brighter than before.
+--keep protects a brand colour from the tone and halation steps: pixels near that colour skip
+both, so they keep their brightness and are not lifted or trimmed. The soften, lens and grain steps still run there,
+so those pixels move by a little (mostly the grain), and the backdrop reads as the same photo.
 Use it on an engine 3 brand-colour stage with the kit's brand colour.
 
   python3 scripts/photo_finish.py --in <picture> --out <picture> [--strength 1] [--sharp x0,y0,x1,y1] [--keep HEX] [--no-STEP]
@@ -49,8 +53,9 @@ STEPS = ("tone", "soften", "halation", "lens", "grain")
 
 # Default amounts at --strength 1 (checked by eye at full size on the W46 Sonnet finals, 15-11-2026).
 DEFAULTS = {
-    "shoulder": 0.78,     # tone: highlights above this (0..1) roll off softly towards white
-    "white": 0.975,       # tone: the level the shoulder approaches (full white lands at about 0.91: no clipped digital white)
+    "shoulder": 0.9,      # tone: highlights above this (0..1) roll off softly towards white (0.78 until 28-11-2026)
+    "white": 0.995,       # tone: the level the shoulder approaches (full white lands at about 0.96: no clipped digital white;
+                          # 0.975 until 28-11-2026)
     "black": 0.012,       # tone: the deepest output value (a slight lift, as on a print)
     "sat_trim": 0.07,     # tone: how much the most saturated colours lose (s -> s * (1 - k * s^2))
     "soften_px": 0.7,     # soften: blur sigma
@@ -119,7 +124,8 @@ def tone(a, p, k):
 
     # Hue kept (owner, 26-11-2026: the B/SKIN bottle's lit side turned green): the curve moves each pixel's highest and
     # lowest channel, and the middle channel keeps its place between them. A curve on each channel alone pulls a bright
-    # red down more than a less bright green, so a bright yellow turned olive or lime.
+    # red down more than a less bright green, so a bright yellow turned olive or lime. Since 28-11-2026 the shoulder
+    # starts higher (see DEFAULTS), so a pastel wall keeps its colour.
     mx, mn = a.max(-1, keepdims=True), a.min(-1, keepdims=True)
     cmx, cmn = curve(mx), curve(mn)
     out = cmn + (a - mn) * (cmx - cmn) / np.maximum(mx - mn, 1e-6)
