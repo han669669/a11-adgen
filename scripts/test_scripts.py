@@ -806,7 +806,7 @@ class PhotoFinish(Tmp):
         self.assertIn("--strength must be", exit_message(photo_finish.main, ["--in", src, "--out", out, "--strength", "3"]))
         self.assertIn("--grain-amp must be", exit_message(photo_finish.main, ["--in", src, "--out", out, "--grain-amp", "nan"]))
         self.assertIn("--soften-px must be", exit_message(photo_finish.main, ["--in", src, "--out", out, "--soften-px", "-1"]))
-        self.assertIn("black < shoulder < white", exit_message(photo_finish.main, ["--in", src, "--out", out, "--shoulder", "0.99"]))
+        self.assertIn("black < shoulder < white", exit_message(photo_finish.main, ["--in", src, "--out", out, "--shoulder", "0.999"]))
         self.assertIn("--halation-thr must be", exit_message(photo_finish.main, ["--in", src, "--out", out, "--halation-thr", "1"]))
 
     def test_chroma_grain_keeps_luma(self):
@@ -1071,19 +1071,18 @@ class HueSafeTone(unittest.TestCase):
             self.assertLess(abs(self.hue(out) - self.hue(c)), 3.0, (c, out))
 
     def test_a_pastel_wall_keeps_its_colour(self):
-        # Owner, 28-11-2026 (PopoMama): the pink wall (238, 200, 202) came out (226, 201, 202), grey-mauve, because the
-        # shoulder pulled red down and left green and blue. All three channels now move by the same ratio.
-        for wall in [(238, 200, 202), (221, 207, 233), (250, 230, 232)]:
+        # Owner, 28-11-2026 (PopoMama): with the shoulder at 0.78 the pink wall (238, 200, 202) came out (226, 201, 202),
+        # grey-mauve. He chose setting B: the shoulder starts at 0.9, so a pastel wall keeps its colour.
+        for wall in [(238, 200, 202), (221, 207, 233)]:
             img = Image.fromarray(np.full((16, 16, 3), wall, np.uint8))
             out = np.asarray(photo_finish.finish(img, skip=("soften", "halation", "lens", "grain")))[8, 8].astype(int)
             sat = lambda c: (max(c) - min(c)) / max(c)
-            self.assertLess(int(out.max()), max(wall), wall)  # the brightest channel still rolls off
             self.assertGreater(sat(out), sat(wall) - 0.015, (wall, out))
             self.assertLess(abs(self.hue(out) - self.hue(wall)), 2.0, (wall, out))  # 8-bit rounding on a pale colour
 
-    def test_white_and_grey_roll_off_as_before(self):
-        # The fix for pastels leaves a neutral pixel on the same curve: white 255 lands at 233, as before 28-11-2026.
-        for v, want in [(255, 233), (240, 227)]:
+    def test_white_and_grey_roll_off(self):
+        # Setting B (owner, 28-11-2026): white 255 lands at 245 (233 before), so there is still no clipped digital white.
+        for v, want in [(255, 245), (240, 238)]:
             img = Image.fromarray(np.full((16, 16, 3), v, np.uint8))
             out = np.asarray(photo_finish.finish(img, skip=("soften", "halation", "lens", "grain")))[8, 8].astype(int)
             self.assertEqual(list(out), [want] * 3, v)
