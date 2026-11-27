@@ -703,6 +703,9 @@ def reprint(a):
         mv, s, dr, x, y = best
         img = np.asarray(turn(fpiece, length * s, q["side"], q["rot"] + dr)).astype(np.float32)
         new, m = img[..., :3], img[..., 3] / 255
+        if q.get("blur"):   # a pack further back stays as soft as layout made it: no sharp print on a soft pack (PR 159)
+            al = cv2.GaussianBlur(m, (0, 0), q["blur"])
+            new = cv2.GaussianBlur(new * m[..., None], (0, 0), q["blur"]) / np.maximum(al, 1e-3)[..., None]
         m = cv2.GaussianBlur(cv2.erode(m, np.ones((5, 5), np.uint8)), (0, 0), max(1.5, 3.0 * W / 1536))   # the face edge sits on plain pack: a soft seam
         # clip the piece to the picture
         h, w = m.shape

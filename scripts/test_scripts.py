@@ -204,6 +204,24 @@ class LayoutReprint(Tmp):
         a.update(kw)
         return self.ns(out=os.path.join(self.dir.name, "rp.png"), **a)
 
+    def test_reprint_keeps_a_soft_back_pack_soft(self):
+        # Devin Review, PR 159: layout blurs a pack with "blur" in the plan, and reprint put sharp print back on it.
+        plan = self.plan(products=[{"cx": 0.28, "base": 0.8, "height": 0.4, "side": "up", "rot": -0.5},
+                                   {"cx": 0.70, "base": 0.8, "height": 0.4, "side": "up", "rot": 0.5, "blur": 3}])
+        with contextlib.redirect_stdout(io.StringIO()):
+            product_lock.layout(self.ns(plan=plan))
+        sk = np.asarray(Image.open(os.path.join(self.dir.name, "out.png")).convert("RGB")).astype(np.float32)
+        rpath = self.save("render.png", sk.clip(0, 255))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            product_lock.reprint(self.rp(rpath, plan=plan))
+        self.assertIn("real print on 2 of 2 products", out.getvalue())
+        got = np.asarray(Image.open(os.path.join(self.dir.name, "rp.png")).convert("L")).astype(np.float32)
+        edge = lambda img, x0, x1: np.abs(np.diff(img[220:400, x0:x1], axis=0)).max()
+        soft = np.asarray(Image.fromarray(sk.astype("uint8")).convert("L")).astype(np.float32)
+        self.assertLess(edge(got, 250, 310), edge(soft, 250, 310) * 1.5 + 5, "the back pack's print stays soft")
+        self.assertGreater(edge(got, 85, 140), 100, "the front pack's print stays sharp")
+
     def test_reprint_keeps_light_ink_true_on_a_strong_base_colour(self):
         # PopoMama, 27-11-2026: on a red box the render's red drifted a little in its weak channels, and reprint read that
         # drift as the room's colour: the cream skin on the box turned pink-lilac. Light ink must stay near the packshot's colour.

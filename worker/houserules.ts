@@ -124,7 +124,7 @@ const SECTIONS: readonly Section[] = [
       "Multiples never look cloned: no identical packs at equal gaps. Small turns, uneven gaps, one lying or leaning, as a person would put them down. Back packs recede (shadow, soft focus) and never take the light from the hero.",
       "Never redraw scrambled print by hand or with a drawn patch: it reads as a shape pasted on the pack (IRVINS, 21-11-2026). When a rough drew scrambled print on a face that must read (a pouch lying down), make that draft from a layout plan that copies the rough's camera, place and size (product_lock.py layout), so reprint puts the real print back.",
       "Know the product's surface (matte, satin or glossy) from the brand's own photos before the first image, and save it with the source in the kit notes. Every draft and final prompt names it (owner, 26-11-2026: the B/SKIN bottle is \"slightly matte\" satin, not glossy, and the drafts showed it glossy).",
-      "Two packs in one picture stand apart, with a clear gap between them. Where one pack overlaps another, the reprint of the back pack spills onto the front pack's edge and leaves a seam (owner, 27-11-2026, PopoMama: he circled the seams). A back pack in soft focus (as above) must not get sharp print from the reprint: check its print at full size.",
+      "Two packs in one picture stand apart, with a clear gap between them. Where one pack overlaps another, the reprint of the back pack spills onto the front pack's edge and leaves a seam (owner, 27-11-2026, PopoMama: he circled the seams). A back pack in soft focus (as above) gets \"blur\" in its layout plan, and reprint keeps it as soft: check its print at full size.",
     ],
   },
   {
