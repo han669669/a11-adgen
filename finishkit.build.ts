@@ -16,6 +16,7 @@ export const FINISH_FILES = [
   "cap_check.py",
   "box_print.py",
   "food_grade.py",
+  "exposure.py",
   "requirements.txt",
 ] as const;
 

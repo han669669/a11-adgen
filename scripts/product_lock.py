@@ -745,6 +745,12 @@ def reprint(a):
         g_tint = np.divide(g_tint, own, out=np.ones_like(g_tint), where=ok)
         shade = sup * shade + (1 - sup) * g_shade
         tint = sup[..., None] * tint + (1 - sup[..., None]) * g_tint
+        # a strong base colour (a red box) holds little of its weak channels, so their light reading is noise: on light ink
+        # (a white face, cream skin) that noise turns the ink magenta or green (PopoMama, 27-11-2026). Light ink keeps the
+        # shade but takes the tint only as far as the base is unsaturated; the base colour and dark ink keep the full tint.
+        sat = float(base_col.max() - base_col.min()) / max(float(base_col.max()), 1)
+        light_ink = np.clip((fl - (float(base_col.mean()) + 27)) / 70, 0, 1)[..., None]
+        tint = tint * (1 - light_ink) + (1 + (tint - 1) * (1 - sat) ** 2) * light_ink
         lit = np.clip(new * shade[..., None] * tint, 0, 255)
         out[cy0:cy1, cx0:cx1] = out[cy0:cy1, cx0:cx1] * (1 - m[..., None]) + lit * m[..., None]
         debug[cy0:cy1, cx0:cx1] = np.maximum(debug[cy0:cy1, cx0:cx1], m)

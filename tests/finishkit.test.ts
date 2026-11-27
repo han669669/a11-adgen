@@ -19,7 +19,7 @@ import { FINISH_FILES } from "../finishkit.build";
 const BASE = "https://a11.example";
 // MEDIA is empty: a path that the URL parser moves out of /finish/ (/finish/../x is /x) falls to the web app, which has no file.
 const env = { PUBLIC_BASE_URL: BASE, MEDIA: { get: async () => null } } as unknown as Env;
-const NAMES = ["headline.py", "photo_finish.py", "product_lock.py", "pack_check.py", "shape_fix.py", "label_transfer.py", "cap_check.py", "box_print.py", "food_grade.py", "requirements.txt"];
+const NAMES = ["headline.py", "photo_finish.py", "product_lock.py", "pack_check.py", "shape_fix.py", "label_transfer.py", "cap_check.py", "box_print.py", "food_grade.py", "exposure.py", "requirements.txt"];
 const repoFile = (name: string) => readFileSync(new URL(`../scripts/${name}`, import.meta.url));
 
 const kit = async () => {
