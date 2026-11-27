@@ -43,12 +43,29 @@ def box(text):
     return v
 
 
-def mean_lum(path, b):
+def front(path, b):
+    """The mean luminance of a box in a picture, and the box's pixels (0..1)."""
     a = np.asarray(Image.open(path).convert("RGB")).astype(np.float32) / 255
     h, w = a.shape[:2]
     if b[2] > w or b[3] > h:
         sys.exit(f"the box {b} is outside {path} ({w}x{h})")
-    return float((a[b[1]:b[3], b[0]:b[2]] @ LUMA).mean()), (w, h)
+    crop = a[b[1]:b[3], b[0]:b[2]]
+    return float((crop @ LUMA).mean()), crop
+
+
+def saved_mean(crop, gain, shoulder):
+    """The mean luminance of the crop after expose and the 8-bit save, as the final will measure."""
+    return float((np.floor(expose(crop, gain, shoulder) * 255 + 0.5) / 255 @ LUMA).mean())
+
+
+def match_gain(crop, want, shoulder, lo=0.5, hi=2.0):
+    """The gain that brings the crop's mean to want, with the shoulder and the clip (it is not linear), or None."""
+    if not (saved_mean(crop, lo, shoulder) <= want <= saved_mean(crop, hi, shoulder)):
+        return None
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if saved_mean(crop, mid, shoulder) < want else (lo, mid)
+    return hi
 
 
 def main(argv=None):
@@ -68,9 +85,14 @@ def main(argv=None):
             mb, rb = box(a.measure), box(a.ref_box)
         except ValueError:
             sys.exit("a box is X0,Y0,X1,Y1 with X1 > X0 and Y1 > Y0")
-        got, _ = mean_lum(a.src, mb)
-        want, _ = mean_lum(a.ref, rb)
-        print(f"front brightness {got:.3f}, draft {want:.3f}: {100 * (got / max(want, 1e-4) - 1):+.1f}%; a gain of {want / max(got, 1e-4):.3f} matches the draft")
+        got, crop = front(a.src, mb)
+        want, _ = front(a.ref, rb)
+        diff = f"front brightness {got:.3f}, draft {want:.3f}: {100 * (got / max(want, 1e-4) - 1):+.1f}%"
+        gain = match_gain(crop, want, a.shoulder)
+        if gain is None:
+            print(f"{diff}; no gain from 0.5 to 2.0 matches the draft: render it again with the scene relit")
+        else:
+            print(f"{diff}; a gain of {gain:.3f} matches the draft (with --shoulder {a.shoulder})")
         return 0
     if a.out is None or a.gain is None:
         sys.exit("give --out and --gain (or --measure with --ref and --ref-box)")

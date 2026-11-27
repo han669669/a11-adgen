@@ -1340,6 +1340,23 @@ class Exposure(Tmp):
         self.assertIn("-10.", log.getvalue())
         self.assertIn("a gain of 1.1", log.getvalue())
 
+    def test_measure_allows_for_the_shoulder_on_a_bright_front(self):
+        # Devin Review, PR 159: a grey front at 200 and a draft at 230 gave a linear gain of 1.150, and the final came out at 218.
+        src = self.save("grey.png", np.full((40, 40, 3), 200, np.uint8))
+        ref = self.save("draft.png", np.full((40, 40, 3), 230, np.uint8))
+        log = io.StringIO()
+        with contextlib.redirect_stdout(log):
+            exposure.main(["--in", src, "--measure", "0,0,40,40", "--ref", ref, "--ref-box", "0,0,40,40"])
+        gain = re.search(r"a gain of ([0-9.]+)", log.getvalue()).group(1)
+        out = os.path.join(self.dir.name, "out.png")
+        with contextlib.redirect_stdout(io.StringIO()):
+            exposure.main(["--in", src, "--out", out, "--gain", gain])
+        self.assertLess(abs(np.asarray(Image.open(out).convert("L")).astype(float).mean() - 230), 1.5)
+        white = self.save("white.png", np.full((40, 40, 3), 255, np.uint8))
+        with contextlib.redirect_stdout(io.StringIO()) as log:
+            exposure.main(["--in", white, "--measure", "0,0,40,40", "--ref", white, "--ref-box", "0,0,40,40"])
+        self.assertIn("no gain", log.getvalue())   # a front at the shoulder's top cannot reach 255 again: render it again
+
     def test_bad_arguments_stop_with_a_clear_message(self):
         src, out = self.picture(), os.path.join(self.dir.name, "out.png")
         self.assertIn("0.5 to 2.0", exit_message(exposure.main, ["--in", src, "--out", out, "--gain", "3"]))
