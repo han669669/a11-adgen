@@ -24,7 +24,8 @@ compose_final grain "off" on that final: this script makes the grain.
 --keep HEX keeps a brand colour exact (owner, 18-11-2026: the tone step turned the Fickle Feline brand yellow olive,
 because the highlight shoulder pulled the red channel down more than the green). Since 26-11-2026 the tone step keeps
 every pixel's hue (a bright yellow on a bottle's lit side turned lime, and --keep did not reach the lighter yellow),
-so --keep now only holds the brand colour's brightness too. Pixels near that colour skip the
+and since 28-11-2026 its saturation too (a pastel pink wall turned grey-mauve): the shoulder dims all three channels
+of a pixel by the same ratio. So --keep now only holds the brand colour's brightness too. Pixels near that colour skip the
 tone and halation steps; the soften, lens and grain steps still run there, so the backdrop reads as the same photo.
 Use it on an engine 3 brand-colour stage with the kit's brand colour.
 
@@ -117,13 +118,13 @@ def tone(a, p, k):
         rolled = np.where(v > s0, s0 + sp * (1 - np.exp(-np.maximum(v - s0, 0) / sp)), v)
         return v + (rolled - v) * min(k, 1.0)
 
-    # Hue kept (owner, 26-11-2026: the B/SKIN bottle's lit side turned green): the curve moves each pixel's highest and
-    # lowest channel, and the middle channel keeps its place between them. A curve on each channel alone pulls a bright
-    # red down more than a less bright green, so a bright yellow turned olive or lime.
-    mx, mn = a.max(-1, keepdims=True), a.min(-1, keepdims=True)
-    cmx, cmn = curve(mx), curve(mn)
-    out = cmn + (a - mn) * (cmx - cmn) / np.maximum(mx - mn, 1e-6)
-    out = np.where(mx - mn > 1e-6, out, curve(a))
+    # Hue and saturation kept: the curve sets each pixel's highest channel, and all three channels move by the same
+    # ratio. A curve on each channel alone pulls a bright red down more than a less bright green, so a bright yellow
+    # turned olive or lime (owner, 26-11-2026, B/SKIN). A curve on the highest and lowest channel kept the hue but
+    # closed the gap between them, so a pastel pink or lilac wall turned grey (owner, 28-11-2026, PopoMama). A grey
+    # or white pixel rolls off as before.
+    mx = a.max(-1, keepdims=True)
+    out = a * (curve(mx) / np.maximum(mx, 1e-6))
     out = black * k + out * (1 - black * k)
     # Saturation trim around each pixel's own luminance; a grey stays grey.
     y = luma(out)[..., None]

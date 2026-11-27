@@ -1070,6 +1070,24 @@ class HueSafeTone(unittest.TestCase):
             self.assertEqual(list(np.argsort(out, kind="stable")), list(np.argsort(c, kind="stable")), (c, out))
             self.assertLess(abs(self.hue(out) - self.hue(c)), 3.0, (c, out))
 
+    def test_a_pastel_wall_keeps_its_colour(self):
+        # Owner, 28-11-2026 (PopoMama): the pink wall (238, 200, 202) came out (226, 201, 202), grey-mauve, because the
+        # shoulder pulled red down and left green and blue. All three channels now move by the same ratio.
+        for wall in [(238, 200, 202), (221, 207, 233), (250, 230, 232)]:
+            img = Image.fromarray(np.full((16, 16, 3), wall, np.uint8))
+            out = np.asarray(photo_finish.finish(img, skip=("soften", "halation", "lens", "grain")))[8, 8].astype(int)
+            sat = lambda c: (max(c) - min(c)) / max(c)
+            self.assertLess(int(out[0]), wall[0], wall)  # the highlight still rolls off
+            self.assertGreater(sat(out), sat(wall) - 0.015, (wall, out))
+            self.assertLess(abs(self.hue(out) - self.hue(wall)), 2.0, (wall, out))  # 8-bit rounding on a pale colour
+
+    def test_white_and_grey_roll_off_as_before(self):
+        # The fix for pastels leaves a neutral pixel on the same curve: white 255 lands at 233, as before 28-11-2026.
+        for v, want in [(255, 233), (240, 227)]:
+            img = Image.fromarray(np.full((16, 16, 3), v, np.uint8))
+            out = np.asarray(photo_finish.finish(img, skip=("soften", "halation", "lens", "grain")))[8, 8].astype(int)
+            self.assertEqual(list(out), [want] * 3, v)
+
     def test_each_saturated_colour_keeps_its_hue(self):
         for c in [(255, 200, 0), (250, 120, 40), (60, 200, 250), (240, 230, 120), (200, 40, 160)]:
             img = Image.fromarray(np.full((16, 16, 3), c, np.uint8))
