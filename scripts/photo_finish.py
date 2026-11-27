@@ -24,8 +24,9 @@ compose_final grain "off" on that final: this script makes the grain.
 --keep HEX keeps a brand colour exact (owner, 18-11-2026: the tone step turned the Fickle Feline brand yellow olive,
 because the highlight shoulder pulled the red channel down more than the green). Since 26-11-2026 the tone step keeps
 every pixel's hue (a bright yellow on a bottle's lit side turned lime, and --keep did not reach the lighter yellow),
-and since 28-11-2026 its saturation too (a pastel pink wall turned grey-mauve): the shoulder dims all three channels
-of a pixel by the same ratio. So --keep now only holds the brand colour's brightness too. Pixels near that colour skip the
+and since 28-11-2026 the shoulder keeps its saturation too (a pastel pink wall turned grey-mauve): it dims all three
+channels of a pixel by the same ratio. The small black lift and the trim of the most saturated colours still take a
+little saturation. --keep holds the brand colour exact: its brightness, and the black lift and trim. Pixels near that colour skip the
 tone and halation steps; the soften, lens and grain steps still run there, so the backdrop reads as the same photo.
 Use it on an engine 3 brand-colour stage with the kit's brand colour.
 

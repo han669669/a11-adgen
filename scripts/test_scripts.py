@@ -1077,7 +1077,7 @@ class HueSafeTone(unittest.TestCase):
             img = Image.fromarray(np.full((16, 16, 3), wall, np.uint8))
             out = np.asarray(photo_finish.finish(img, skip=("soften", "halation", "lens", "grain")))[8, 8].astype(int)
             sat = lambda c: (max(c) - min(c)) / max(c)
-            self.assertLess(int(out[0]), wall[0], wall)  # the highlight still rolls off
+            self.assertLess(int(out.max()), max(wall), wall)  # the brightest channel still rolls off
             self.assertGreater(sat(out), sat(wall) - 0.015, (wall, out))
             self.assertLess(abs(self.hue(out) - self.hue(wall)), 2.0, (wall, out))  # 8-bit rounding on a pale colour
 
