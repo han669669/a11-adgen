@@ -221,6 +221,15 @@ class LayoutReprint(Tmp):
         soft = np.asarray(Image.fromarray(sk.astype("uint8")).convert("L")).astype(np.float32)
         self.assertLess(edge(got, 250, 310), edge(soft, 250, 310) * 1.5 + 5, "the back pack's print stays soft")
         self.assertGreater(edge(got, 85, 140), 100, "the front pack's print stays sharp")
+        # a final at twice the plan's size: the blur scales with it
+        big = np.asarray(Image.fromarray(sk.astype("uint8")).resize((800, 1000), Image.LANCZOS)).astype(np.float32)
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            product_lock.reprint(self.rp(self.save("big.png", big), plan=plan, search_px=140))
+        self.assertIn("real print on 2 of 2 products", out.getvalue())
+        got2 = np.asarray(Image.open(os.path.join(self.dir.name, "rp.png")).convert("L")).astype(np.float32)
+        soft2 = np.asarray(Image.fromarray(big.astype("uint8")).convert("L")).astype(np.float32)
+        edge2 = lambda img: np.abs(np.diff(img[440:800, 500:620], axis=0)).max()
+        self.assertLess(edge2(got2), edge2(soft2) * 1.15 + 1, "the blur scales with the final's size")
 
     def test_reprint_keeps_light_ink_true_on_a_strong_base_colour(self):
         # PopoMama, 27-11-2026: on a red box the render's red drifted a little in its weak channels, and reprint read that
