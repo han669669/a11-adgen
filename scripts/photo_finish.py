@@ -26,8 +26,9 @@ because the highlight shoulder pulled the red channel down more than the green).
 every pixel's hue (a bright yellow on a bottle's lit side turned lime, and --keep did not reach the lighter yellow),
 and since 28-11-2026 the shoulder keeps its saturation too (a pastel pink wall turned grey-mauve): it dims all three
 channels of a pixel by the same ratio. The small black lift and the trim of the most saturated colours still take a
-little saturation. --keep holds the brand colour exact: its brightness, and the black lift and trim. Pixels near that colour skip the
-tone and halation steps; the soften, lens and grain steps still run there, so the backdrop reads as the same photo.
+little saturation. --keep protects a brand colour from the tone and halation steps: pixels near that colour skip
+both, so they keep their brightness and are not lifted or trimmed. The soften, lens and grain steps still run there,
+so those pixels move by a little (mostly the grain), and the backdrop reads as the same photo.
 Use it on an engine 3 brand-colour stage with the kit's brand colour.
 
   python3 scripts/photo_finish.py --in <picture> --out <picture> [--strength 1] [--sharp x0,y0,x1,y1] [--keep HEX] [--no-STEP]
