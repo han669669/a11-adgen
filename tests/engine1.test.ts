@@ -387,6 +387,37 @@ describe("engine v1 lessons of the Durian batch (owner, 28-11-2026)", () => {
     expect((await batch.batchGet(env, id)).nextStep).toBe("finals");
   });
 
+  it("ends an as-is approval when he passes on that draft, and waits for a high final he asked for later (Devin Review)", async () => {
+    const { env, raw, id, ideas } = await withConcepts();
+    const ids = [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id];
+    await run(env, "ideas_pick", { batchId: id, ids });
+    const keys = ids.map((x, i) => {
+      const r = `d0000000-0000-4000-8000-00000000001${i}`;
+      addDraft(raw, id, r, x, `2026-11-28T0${i}:00:00.000Z`);
+      return `renders/${r}/0.jpg`;
+    });
+    await batch.ideasUpdate(env, ids.map((x) => ({ id: x, finalPrompt: "Keep this photograph exactly." })));
+    await batch.batchUpdate(env, { id, status: "board" });
+    const verdict = (v: batch.OwnerVerdict) => batch.batchUpdate(env, { id, ownerVerdicts: [v] });
+    for (const key of keys) await verdict({ stage: "final", mark: "approve", key, ownerSaid: "keep this as it is" });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finish");
+    // He passes on draft 1 after all: the approval of that draft no longer stands, and its new draft needs his verdict.
+    await verdict({ stage: "draft", mark: "pass", ideaId: ids[0]!, ownerSaid: "actually no, the board is a distraction" });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("pictures");
+    addDraft(raw, id, "d0000000-0000-4000-8000-000000000020", ids[0]!, "2099-01-01T00:00:00.000Z");
+    expect((await batch.batchGet(env, id)).nextStep).toBe("owner_pick");
+    // A high final he asked for (for a pack) on approved draft 2: the step waits for it until it is done.
+    await batch.picksSave(env, id, [{ key: keys[1]! }]);
+    const pick = raw.prepare("SELECT render_key FROM picks WHERE idea_id = ?").get(ids[1]!) as { render_key: string };
+    raw.prepare(
+      `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, usd_est, created_at, updated_at)
+       VALUES ('f1', ?, ?, 'final', 'queued', 'p', '[]', 1536, 1920, 'high', 1, 0.07, '2099-01-02T00:00:00.000Z', '2099-01-02T00:00:00.000Z')`,
+    ).run(id, ids[1]!);
+    expect(pick.render_key).toBe(keys[1]);
+    await verdict({ stage: "final", mark: "approve", key: "renders/d0000000-0000-4000-8000-000000000020/0.jpg", ownerSaid: "ok this one" });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finals");
+  });
+
   it("adds one line to the notes with notesAdd and keeps the rest", async () => {
     const { env, id } = await withConcepts();
     await run(env, "batch_update", { id, notes: "ANGLE SHEET: A, B." });
@@ -396,6 +427,8 @@ describe("engine v1 lessons of the Durian batch (owner, 28-11-2026)", () => {
     await expect(run(env, "batch_update", { id, notes: "x", notesAdd: "y" })).rejects.toThrow("not both");
     for (let i = 0; i < 5; i++) await run(env, "batch_update", { id, notesAdd: "n".repeat(1990) });
     await expect(run(env, "batch_update", { id, notesAdd: "n".repeat(1990) })).rejects.toThrow(`would pass ${batch.MAX_NOTES} characters`);
+    // The whole field with the owner's start line put back must fit too.
+    await expect(run(env, "batch_update", { id, notes: "n".repeat(batch.MAX_NOTES) })).rejects.toThrow("with the owner's start line would pass");
   });
 
   it("serves the new engine 1 rules and names them in the wild and final prompts", () => {

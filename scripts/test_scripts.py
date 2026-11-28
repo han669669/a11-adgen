@@ -1442,6 +1442,21 @@ class PatchMerge(Tmp):
         out = os.path.join(self.dir.name, "out.png")
         self.assertIn("moved the composition", exit_message(patch_merge.main, ["--base", src, "--render", ren, "--box", "20,400,80,480", "--out", out]))
 
+    def test_a_softened_render_in_place_keeps_zero_shift(self):
+        # Devin Review, PR 161: a render that only softens the frame's edges gave a false 3 px shift on edge pixels alone.
+        a = np.full((500, 400, 3), 200, np.uint8)
+        a[150:156, 100:300] = a[344:350, 100:300] = 50
+        a[150:350, 100:106] = a[150:350, 294:300] = 50
+        src = self.save("wall.png", a)
+        out = os.path.join(self.dir.name, "out.png")
+        for radius in (0.5, 1.0):
+            ren = os.path.join(self.dir.name, f"soft{radius}.png")
+            Image.fromarray(a).filter(ImageFilter.GaussianBlur(radius)).save(ren)
+            log = io.StringIO()
+            with contextlib.redirect_stdout(log):
+                self.assertEqual(patch_merge.main(["--base", src, "--render", ren, "--box", "20,400,80,480", "--out", out]), 0)
+            self.assertIn("render shift 0,0", log.getvalue())
+
     def test_an_aligned_render_on_a_plain_wall_is_not_moved(self):
         # Devin Review, PR 161: with no texture outside the patch every shift ties; the smallest (none) wins.
         a = np.full((200, 160, 3), 180, np.uint8)

@@ -43,13 +43,27 @@ def patch_mask(size, boxes, ellipses, radius=18):
     return m
 
 
+def soft(g, r):
+    """A box blur of radius r, run twice (close to a Gaussian), with numpy only. The picture keeps its size."""
+    k = 2 * r + 1
+    for _ in range(2):
+        for ax in (0, 1):
+            pad = [(0, 0), (0, 0)]
+            pad[ax] = (r + 1, r)
+            c = np.cumsum(np.pad(g, pad, mode="edge"), axis=ax)
+            n = c.shape[ax]
+            g = (np.take(c, np.arange(k, n), axis=ax) - np.take(c, np.arange(0, n - k), axis=ax)) / k
+    return g
+
+
 def best_shift(base, render, keep, search, step=3):
     """The (dx, dy) for which render[y + dy, x + dx] best matches base[y, x] where keep is true, and the mean difference
-    there (0 to 255, grey, after the median difference is taken away). Only the textured samples count (edges, hair,
-    carving: the top 30% of the photo's local contrast), so a large plain wall cannot hide a moved object. Every
+    there (0 to 255, grey, after the median difference is taken away). Both pictures are softened a little first, so a
+    render that only softens an edge still matches in place. Only the textured areas count (both sides of each edge, hair,
+    carving: the top 30% of the softened photo's local contrast), so a large plain wall cannot hide a moved object. Every
     step-th pixel is compared, so a search of 6 px stays fast on a 1536x1920 picture. On a tie the smaller shift wins."""
-    g0 = base @ np.float32([0.299, 0.587, 0.114])
-    g1 = render @ np.float32([0.299, 0.587, 0.114])
+    g0 = soft(base @ np.float32([0.299, 0.587, 0.114]), 2)
+    g1 = soft(render @ np.float32([0.299, 0.587, 0.114]), 2)
     H, W = g0.shape
     s = search
     ys, xs = np.mgrid[s:H - s:step, s:W - s:step]
@@ -57,9 +71,9 @@ def best_shift(base, render, keep, search, step=3):
     ys, xs = ys[sel], xs[sel]
     if ys.size < 100:
         sys.exit("the patches cover almost the whole picture: nothing is left to align the render with")
-    gy, gx = np.gradient(g0)
+    gy, gx = np.gradient(soft(g0, 2))
     grad = np.hypot(gx, gy)[ys, xs]
-    textured = grad >= max(np.percentile(grad, 70), 2.0)
+    textured = grad >= max(np.percentile(grad, 70), 1.0)
     if textured.sum() >= 100:
         ys, xs = ys[textured], xs[textured]
     best = None

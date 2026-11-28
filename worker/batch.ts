@@ -278,8 +278,11 @@ export async function batchUpdate(
     // The first line of an engine 3 or engine 1 batch's notes is the owner's start (batchCreate): a new note keeps it.
     const old = await env.DB.prepare("SELECT notes FROM batches WHERE id = ? AND engine IN (1, 3)").bind(input.id).first<{ notes: string | null }>();
     const start = old?.notes?.startsWith(START) || old?.notes?.startsWith(START_E1) ? old.notes.split("\n")[0]! : null;
+    const notes = start && !(input.notes ?? "").startsWith(start) ? `${start}\n${input.notes ?? ""}` : input.notes;
+    if (notes.length > MAX_NOTES)
+      throw new Error(`The notes with the owner's start line would pass ${MAX_NOTES} characters. Send a shorter whole field.`);
     sets.push("notes = ?");
-    args.push(start && !(input.notes ?? "").startsWith(start) ? `${start}\n${input.notes ?? ""}` : input.notes);
+    args.push(notes);
   }
   if (input.notesAdd !== undefined) {
     // One new line at the end of the notes, in the same write, so no earlier line is lost (Durian batch, 28-11-2026).
@@ -884,14 +887,18 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
   for (const p of picks.results) if (p.by_owner === 1 && String(p.created_at) > (ownerPickAt.get(p.idea_id) ?? "")) ownerPickAt.set(p.idea_id, String(p.created_at));
   const passedAt = activePasses([...passes.results].reverse(), renders.results as { idea: string; kind: string; created_at: string }[]);
   // Engine v1 (house rule WI18): the ideas whose newest final verdict on a draft approves it as it is. Such a draft is the
-  // idea's final, with no pick row and no paid final.
+  // idea's final, with no pick row and no paid final, while it is current: a full pass after that draft ends it.
   const asIs = new Set<string>();
   if (b.engine === 1) {
     const rows = await env.DB.prepare(
-      `SELECT v.idea_id, v.mark FROM verdicts v JOIN renders r ON r.id = substr(v.render_key, 9, 36) AND r.batch = v.batch_id
+      `SELECT v.idea_id, v.mark, r.created_at AS drawn FROM verdicts v JOIN renders r ON r.id = substr(v.render_key, 9, 36) AND r.batch = v.batch_id
        WHERE v.batch_id = ? AND v.stage = 'final' AND r.kind = 'draft' AND v.idea_id IS NOT NULL ORDER BY v.created_at, v.rowid LIMIT 200`,
-    ).bind(id).all<{ idea_id: string; mark: string }>();
-    for (const r of rows.results) r.mark === "approve" ? asIs.add(r.idea_id) : asIs.delete(r.idea_id);
+    ).bind(id).all<{ idea_id: string; mark: string; drawn: string }>();
+    for (const r of rows.results) {
+      const pass = passedAt.get(r.idea_id);
+      if (r.mark === "approve" && (pass === undefined || r.drawn > pass)) asIs.add(r.idea_id);
+      else asIs.delete(r.idea_id);
+    }
   }
   const img = (key: string) => ({ key, url: fal.mediaUrl(env, key) });
   const [brief, conceptReview, directions, checks, rounds, plans] = await Promise.all([
@@ -1056,7 +1063,8 @@ export function nextStepV1(
   if (!["board", "finals", "done"].includes(status)) return picked.some((i) => !i.finalPrompt) ? "pictures" : "board";
   // A draft he approved as it is (WI18) is that idea's pick and its final.
   if (picked.some((i) => !ownerPicked.has(i.id) && !asIs.has(i.id))) return "owner_pick";
-  if (picked.some((i) => !asIs.has(i.id) && !i.finals.some((f) => f.status === "done"))) return "finals";
+  // A high final he asked for later (for a pack, WI18) must finish even when its draft was approved as it is.
+  if (picked.some((i) => (!asIs.has(i.id) || i.finals.length > 0) && !i.finals.some((f) => f.status === "done"))) return "finals";
   // A polled final is a raw render too: the logo is set in code and uploaded, then status 'done' ('final' prompt, step 6).
   return status === "done" ? "done" : "finish";
 }
