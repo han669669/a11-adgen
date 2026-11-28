@@ -727,6 +727,9 @@ export async function finalRender(env: Env, batchId: string, key: string) {
      JOIN batches b ON b.id = p.batch_id WHERE p.batch_id = ? AND p.render_key = ?`,
   ).bind(batchId, key).first<{ idea_id: string; final_render_id: string | null; final_prompt: string | null; final_refs: string; engine: number }>();
   if (!pick) throw new Error(`${key} is not a pick of batch ${batchId}.`);
+  // Engine v1: a high final asked for after the batch is done (for a pack, WI18) opens it again at 'finals', so nextStep
+  // asks for the logo on that final ('finish') before 'done' again.
+  const reopen = `UPDATE batches SET status = 'finals', updated_at = ? WHERE id = ? AND status IN ('drafts', 'board'${pick.engine === 1 ? ", 'done'" : ""})`;
   const held = pick.final_render_id;
   if (held?.startsWith("accepted:"))
     return { id: null, status: "already started", note: "fal accepted this final but its row was not saved; tell the owner; do not submit again." };
@@ -743,7 +746,7 @@ export async function finalRender(env: Env, batchId: string, key: string) {
     if (made) {
       await env.DB.batch([
         env.DB.prepare("UPDATE picks SET final_render_id = ? WHERE render_key = ? AND final_render_id = ?").bind(made.id, key, stale),
-        env.DB.prepare("UPDATE batches SET status = 'finals', updated_at = ? WHERE id = ? AND status IN ('drafts', 'board')").bind(now(), batchId),
+        env.DB.prepare(reopen).bind(now(), batchId),
       ]);
       return { id: made.id, status: "already started" };
     }
@@ -776,7 +779,7 @@ export async function finalRender(env: Env, batchId: string, key: string) {
   }
   await env.DB.batch([
     env.DB.prepare("UPDATE picks SET final_render_id = ? WHERE render_key = ? AND final_render_id = ?").bind(r.id, key, claim),
-    env.DB.prepare("UPDATE batches SET status = 'finals', updated_at = ? WHERE id = ? AND status IN ('drafts', 'board')").bind(now(), batchId),
+    env.DB.prepare(reopen).bind(now(), batchId),
   ]);
   return r;
 }
@@ -887,16 +890,17 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
   for (const p of picks.results) if (p.by_owner === 1 && String(p.created_at) > (ownerPickAt.get(p.idea_id) ?? "")) ownerPickAt.set(p.idea_id, String(p.created_at));
   const passedAt = activePasses([...passes.results].reverse(), renders.results as { idea: string; kind: string; created_at: string }[]);
   // Engine v1 (house rule WI18): the ideas whose newest final verdict on a draft approves it as it is. Such a draft is the
-  // idea's final, with no pick row and no paid final, while it is current: a full pass after that draft ends it.
+  // idea's final, with no pick row and no paid final, until a full pass after that approval.
   const asIs = new Set<string>();
   if (b.engine === 1) {
     const rows = await env.DB.prepare(
-      `SELECT v.idea_id, v.mark, r.created_at AS drawn FROM verdicts v JOIN renders r ON r.id = substr(v.render_key, 9, 36) AND r.batch = v.batch_id
+      `SELECT v.idea_id, v.mark, v.created_at AS at FROM verdicts v JOIN renders r ON r.id = substr(v.render_key, 9, 36) AND r.batch = v.batch_id
        WHERE v.batch_id = ? AND v.stage = 'final' AND r.kind = 'draft' AND v.idea_id IS NOT NULL ORDER BY v.created_at, v.rowid LIMIT 200`,
-    ).bind(id).all<{ idea_id: string; mark: string; drawn: string }>();
+    ).bind(id).all<{ idea_id: string; mark: string; at: string }>();
     for (const r of rows.results) {
+      // An approval saved before the idea's active full pass is over; one saved after it counts, of any draft he names.
       const pass = passedAt.get(r.idea_id);
-      if (r.mark === "approve" && (pass === undefined || r.drawn > pass)) asIs.add(r.idea_id);
+      if (r.mark === "approve" && (pass === undefined || r.at > pass)) asIs.add(r.idea_id);
       else asIs.delete(r.idea_id);
     }
   }

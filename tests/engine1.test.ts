@@ -418,6 +418,37 @@ describe("engine v1 lessons of the Durian batch (owner, 28-11-2026)", () => {
     expect((await batch.batchGet(env, id)).nextStep).toBe("finals");
   });
 
+  it("counts a draft he approves again after a pass, and opens a done batch again for a high final he asks for (Devin Review)", async () => {
+    const { env, raw, id, ideas } = await withConcepts();
+    const ids = [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id];
+    await run(env, "ideas_pick", { batchId: id, ids });
+    const keys = ids.map((x, i) => {
+      const r = `d0000000-0000-4000-8000-00000000003${i}`;
+      addDraft(raw, id, r, x, `2026-11-28T0${i}:00:00.000Z`);
+      return `renders/${r}/0.jpg`;
+    });
+    await batch.ideasUpdate(env, ids.map((x) => ({ id: x, finalPrompt: "Keep this photograph exactly." })));
+    await batch.batchUpdate(env, { id, status: "board" });
+    const verdict = (v: batch.OwnerVerdict) => batch.batchUpdate(env, { id, ownerVerdicts: [v] });
+    for (const key of keys) await verdict({ stage: "final", mark: "approve", key, ownerSaid: "keep this as it is" });
+    await verdict({ stage: "draft", mark: "pass", ideaId: ids[0]!, ownerSaid: "no, the board is a distraction" });
+    addDraft(raw, id, "d0000000-0000-4000-8000-000000000040", ids[0]!, "2099-01-01T00:00:00.000Z");
+    expect((await batch.batchGet(env, id)).nextStep).toBe("owner_pick");
+    // He compares the new draft with the old one and keeps the old one: a new approval, saved after the pass, counts.
+    await verdict({ stage: "final", mark: "approve", key: keys[0]!, ownerSaid: "keep the first one after all" });
+    raw.prepare("UPDATE verdicts SET created_at = '2099-06-01T00:00:00.000Z' WHERE rowid = (SELECT max(rowid) FROM verdicts)").run();
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finish");
+    await batch.batchUpdate(env, { id, status: "done" });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("done");
+    // Later he asks for a pack with draft 2: its high final opens the batch again, and the logo comes before 'done'.
+    await batch.picksSave(env, id, [{ key: keys[1]! }]);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ request_id: "q1", status_url: "https://queue.fal.run/s", response_url: "https://queue.fal.run/r" })));
+    await batch.finalRender(env, id, keys[1]!);
+    expect((await batch.batchGet(env, id)) as { status: string; nextStep: string }).toMatchObject({ status: "finals", nextStep: "finals" });
+    raw.prepare("UPDATE renders SET status = 'done', image_keys = '[\"renders/f/0.jpg\"]' WHERE kind = 'final'").run();
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finish");
+  });
+
   it("adds one line to the notes with notesAdd and keeps the rest", async () => {
     const { env, id } = await withConcepts();
     await run(env, "batch_update", { id, notes: "ANGLE SHEET: A, B." });
