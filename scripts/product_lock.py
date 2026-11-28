@@ -11,6 +11,8 @@ Needs Python 3 with Pillow and numpy (reprint also needs OpenCV: opencv-python-h
             Each draft gets its own placement, so the 3 drafts of an idea differ in layout, scale and crop.
   cutout    Make a silhouette mask for a product that is not a rounded box (a cake on its box, on a dark or white backdrop).
             Pass it as --alpha to skeleton and swap.
+  cutout-scene  The same mask for food in a brand photo on a board or table (no plain backdrop): GrabCut learns the
+            board's colour from --surface patches, so the board does not come into the ad.
   layout    A skeleton from a plan file: each product at its own place, size, side (standing or lying) and small turn,
             over flat shapes that draw real-scale cues (tile rows, a worktop edge). Use it for groups and true scale.
             A plan product may name its own real photo ("photo", with an "alpha" from `cutout`): for a range of
@@ -151,6 +153,55 @@ def cutout(a):
     soft.point(lambda v: 0 if v < 110 else min(255, (v - 110) * 255 // 110)).save(a.out)  # drops the faint rim a blurred hairline leaves
     ys, xs = np.where(best)
     print(f"{a.out}: product box x {xs.min()},{xs.max() + 1} y {ys.min()},{ys.max() + 1} ({int(best.sum())} px of {W * H}). Use --box {xs.min()},{ys.min()},{xs.max() + 1},{ys.max() + 1} --alpha {a.out}")
+
+
+def cutout_scene(a):
+    """Cut the food out of a brand photo that stands on a board, a table or another surface (no plain backdrop), with
+    OpenCV GrabCut. --box frames the food and the surface around it; each --surface marks a patch of the board or table,
+    so its colour is learned as backdrop; each --keep marks a patch that is surely food. The mask is reduced to its largest
+    piece, its holes are filled, and its edge is softened a little, as `cutout` does.
+    Why (owner, 28-11-2026, Durian Delivery engine v1 batch): the brand's durian photos stand on a wooden board, and the
+    board came into the ad with the food ("the wooden board below seems a distraction")."""
+    import cv2
+    from PIL import ImageFilter
+    im = Image.open(a.packshot, formats=FORMATS).convert("RGB")
+    W, H = im.size
+    rect = ints(a.box, 4)
+    surfaces = [ints(s, 4) for s in a.surface]
+    keeps = [ints(k, 4) for k in (a.keep or [])]
+    check_box(rect, (W, H))
+    for b in surfaces:
+        check_box(b, (W, H), "--surface")
+    for b in keeps:
+        check_box(b, (W, H), "--keep")
+    if not surfaces:
+        sys.exit("give at least one --surface: a patch of the board or table under the food")
+    if not (1 <= a.iter <= 20):
+        sys.exit("--iter must be from 1 to 20")
+    img = cv2.cvtColor(np.asarray(im), cv2.COLOR_RGB2BGR)
+    mask = np.full((H, W), cv2.GC_BGD, np.uint8)
+    x0, y0, x1, y1 = rect
+    mask[y0:y1, x0:x1] = cv2.GC_PR_FGD
+    for sx0, sy0, sx1, sy1 in surfaces:
+        mask[sy0:sy1, sx0:sx1] = cv2.GC_BGD
+    for kx0, ky0, kx1, ky1 in keeps:
+        mask[ky0:ky1, kx0:kx1] = cv2.GC_FGD
+    bgd, fgd = np.zeros((1, 65), np.float64), np.zeros((1, 65), np.float64)
+    cv2.grabCut(img, mask, None, bgd, fgd, a.iter, cv2.GC_INIT_WITH_MASK)
+    fg = ((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD)).astype(np.uint8)
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(fg, connectivity=8)
+    if n < 2:
+        sys.exit("no food found: every pixel counts as backdrop. Check --box, and that no --surface covers the food.")
+    best = (lab == 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))).astype(np.uint8)
+    # Fill holes: whatever the border cannot reach from outside the piece is inside it.
+    flood = np.pad(1 - best, 1, constant_values=1)
+    cv2.floodFill(flood, None, (0, 0), 2)
+    best = ((best == 1) | (flood[1:-1, 1:-1] == 1)).astype(np.uint8) * 255
+    soft = Image.fromarray(best, "L").filter(ImageFilter.GaussianBlur(0.9))
+    soft.point(lambda v: 0 if v < 110 else min(255, (v - 110) * 255 // 110)).save(a.out)
+    ys, xs = np.where(best > 0)
+    print(f"{a.out}: food box x {xs.min()},{xs.max() + 1} y {ys.min()},{ys.max() + 1} ({int((best > 0).sum())} px of {W * H}). "
+          f"Check it at full size over the photo. Use --box {xs.min()},{ys.min()},{xs.max() + 1},{ys.max() + 1} --alpha {a.out}")
 
 
 def cut(pack, box, band_top=None):
@@ -809,6 +860,14 @@ def main():
     c.add_argument("--erode", type=int, default=1, help="how many 1 px erosions to apply at the end (more removes a dark fringe of backdrop)")
     c.add_argument("--edges", default="top,bottom,left,right", help="which picture edges the backdrop may touch (comma list). Drop an edge where a dark or pale part of the product touches it, so it is not read as backdrop")
     c.set_defaults(fn=cutout)
+    g = sub.add_parser("cutout-scene", help="cut the food out of a brand photo that stands on a board or table (no plain backdrop) into a mask file")
+    g.add_argument("--packshot", required=True, help="the brand's photo")
+    g.add_argument("--box", required=True, help="x0,y0,x1,y1 around the food and the surface near it; everything outside is backdrop")
+    g.add_argument("--surface", action="append", required=True, help="x0,y0,x1,y1 of a patch of the board or table (repeat); its colour is learned as backdrop")
+    g.add_argument("--keep", action="append", help="x0,y0,x1,y1 of a patch that is surely food (repeat)")
+    g.add_argument("--iter", type=int, default=5, help="GrabCut rounds (1 to 20)")
+    g.add_argument("--out", required=True, help="the mask: a grey PNG the size of the photo")
+    g.set_defaults(fn=cutout_scene)
     d = sub.add_parser("pad45", help="pad a square packshot to 4:5 for a model edit")
     d.add_argument("--packshot", required=True)
     d.add_argument("--out", required=True)

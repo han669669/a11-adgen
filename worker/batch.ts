@@ -166,6 +166,10 @@ export interface OwnerVerdict {
 async function verdictInserts(env: Env, batchId: string, verdicts: OwnerVerdict[]) {
   const at = now();
   const out = [];
+  // Engine v1 (house rule WI18, owner 28-11-2026: "no final render needed"): a draft he approves as it is is the final.
+  const engine = verdicts.some((v) => v.stage === "final")
+    ? (await env.DB.prepare("SELECT engine FROM batches WHERE id = ?").bind(batchId).first<{ engine: number }>())?.engine
+    : undefined;
   for (const [i, v] of verdicts.entries()) {
     const where = `ownerVerdicts[${i}]`;
     if (!(VERDICT_MARKS[v.stage] as readonly string[]).includes(v.mark)) {
@@ -185,7 +189,8 @@ async function verdictInserts(env: Env, batchId: string, verdicts: OwnerVerdict[
       // The key must be a saved picture of the render: one of its images, or its composed final.
       const saved = !!render && ((JSON.parse(render.image_keys ?? "[]") as string[]).includes(v.key) || render.composed_key === v.key);
       if (!render || !saved) throw new Error(`${where}: ${v.key} is not a picture of this batch.`);
-      if (v.stage === "final" && render.kind !== "final") throw new Error(`${where}: ${v.key} is a ${render.kind}, not a final picture.`);
+      if (v.stage === "final" && render.kind !== "final" && !(engine === 1 && render.kind === "draft"))
+        throw new Error(`${where}: ${v.key} is a ${render.kind}, not a final picture${engine === 1 ? " or a draft" : ""}.`);
       if (v.stage === "draft" && render.kind === "rough") throw new Error(`${where}: ${v.key} is a rough, not a draft picture.`);
       if (ideaId && render.idea && render.idea !== ideaId) throw new Error(`${where}: ${v.key} is a picture of another idea.`);
       ideaId ??= render.idea;
@@ -219,10 +224,14 @@ const BOARD1_GUARD = `${BOARD3_GUARD}
   AND NOT EXISTS (SELECT 1 FROM ideas i WHERE i.batch_id = batches.id AND i.picked = 1
     AND NOT EXISTS (SELECT 1 FROM renders r WHERE r.batch = i.batch_id AND r.idea = i.id AND r.kind = 'draft' AND r.image_keys IS NOT NULL))`;
 
+/** The longest batch notes: notesAdd stops here, and notes (the whole field) takes up to this many characters too. */
+export const MAX_NOTES = 12000;
+
 export async function batchUpdate(
   env: Env,
-  input: { id: string; status?: string; insights?: unknown[]; notes?: string; ownerVerdicts?: OwnerVerdict[] },
+  input: { id: string; status?: string; insights?: unknown[]; notes?: string; notesAdd?: string; ownerVerdicts?: OwnerVerdict[] },
 ) {
+  if (input.notes !== undefined && input.notesAdd !== undefined) throw new Error("Send notes (the whole field) or notesAdd (one new line), not both.");
   // Every picked idea with drafts must have its final prompt before the picks are made (D2: Claude picks the drafts).
   let guard = "";
   if (input.status === "board") {
@@ -269,8 +278,19 @@ export async function batchUpdate(
     // The first line of an engine 3 or engine 1 batch's notes is the owner's start (batchCreate): a new note keeps it.
     const old = await env.DB.prepare("SELECT notes FROM batches WHERE id = ? AND engine IN (1, 3)").bind(input.id).first<{ notes: string | null }>();
     const start = old?.notes?.startsWith(START) || old?.notes?.startsWith(START_E1) ? old.notes.split("\n")[0]! : null;
+    const notes = start && !(input.notes ?? "").startsWith(start) ? `${start}\n${input.notes ?? ""}` : input.notes;
+    if (notes.length > MAX_NOTES)
+      throw new Error(`The notes with the owner's start line would pass ${MAX_NOTES} characters. Send a shorter whole field.`);
     sets.push("notes = ?");
-    args.push(start && !(input.notes ?? "").startsWith(start) ? `${start}\n${input.notes ?? ""}` : input.notes);
+    args.push(notes);
+  }
+  if (input.notesAdd !== undefined) {
+    // One new line at the end of the notes, in the same write, so no earlier line is lost (Durian batch, 28-11-2026).
+    const old = await env.DB.prepare("SELECT length(notes) AS n FROM batches WHERE id = ?").bind(input.id).first<{ n: number | null }>();
+    if ((old?.n ?? 0) + input.notesAdd.length + 1 > MAX_NOTES)
+      throw new Error(`The notes would pass ${MAX_NOTES} characters. Read batch_get and send a shorter whole field with notes.`);
+    sets.push("notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE notes || char(10) || ? END");
+    args.push(input.notesAdd, input.notesAdd);
   }
   const verdicts = input.ownerVerdicts ?? [];
   if (sets.length === 0 && verdicts.length === 0) throw new Error("Nothing to update.");
@@ -362,6 +382,11 @@ export interface IdeaUpdate {
 }
 
 export async function ideasUpdate(env: Env, updates: IdeaUpdate[]) {
+  // The pick limit is checked row by row, so a swap of picks in one call fails when a pick comes before its unpick
+  // (Durian batch, 28-11-2026). Run the unpicks first. When an idea comes twice, keep the order as sent.
+  if (new Set(updates.map((u) => u.id)).size === updates.length) {
+    updates = [...updates.filter((u) => u.picked === false), ...updates.filter((u) => u.picked !== false)];
+  }
   const stmts: D1PreparedStatement[] = [];
   const owner: (string | null)[] = []; // the idea id each statement must change (null: a statement that may change nothing)
   for (const u of updates) {
@@ -702,6 +727,9 @@ export async function finalRender(env: Env, batchId: string, key: string) {
      JOIN batches b ON b.id = p.batch_id WHERE p.batch_id = ? AND p.render_key = ?`,
   ).bind(batchId, key).first<{ idea_id: string; final_render_id: string | null; final_prompt: string | null; final_refs: string; engine: number }>();
   if (!pick) throw new Error(`${key} is not a pick of batch ${batchId}.`);
+  // Engine v1: a high final asked for after the batch is done (for a pack, WI18) opens it again at 'finals', so nextStep
+  // asks for the logo on that final ('finish') before 'done' again.
+  const reopen = `UPDATE batches SET status = 'finals', updated_at = ? WHERE id = ? AND status IN ('drafts', 'board'${pick.engine === 1 ? ", 'done'" : ""})`;
   const held = pick.final_render_id;
   if (held?.startsWith("accepted:"))
     return { id: null, status: "already started", note: "fal accepted this final but its row was not saved; tell the owner; do not submit again." };
@@ -718,7 +746,7 @@ export async function finalRender(env: Env, batchId: string, key: string) {
     if (made) {
       await env.DB.batch([
         env.DB.prepare("UPDATE picks SET final_render_id = ? WHERE render_key = ? AND final_render_id = ?").bind(made.id, key, stale),
-        env.DB.prepare("UPDATE batches SET status = 'finals', updated_at = ? WHERE id = ? AND status IN ('drafts', 'board')").bind(now(), batchId),
+        env.DB.prepare(reopen).bind(now(), batchId),
       ]);
       return { id: made.id, status: "already started" };
     }
@@ -751,7 +779,7 @@ export async function finalRender(env: Env, batchId: string, key: string) {
   }
   await env.DB.batch([
     env.DB.prepare("UPDATE picks SET final_render_id = ? WHERE render_key = ? AND final_render_id = ?").bind(r.id, key, claim),
-    env.DB.prepare("UPDATE batches SET status = 'finals', updated_at = ? WHERE id = ? AND status IN ('drafts', 'board')").bind(now(), batchId),
+    env.DB.prepare(reopen).bind(now(), batchId),
   ]);
   return r;
 }
@@ -814,21 +842,25 @@ export async function batchGetOwner(env: Env, id: string) {
  * verdicts: oldest first.
  */
 export function activePasses(
-  verdicts: { idea_id: string; mark: string; at: string }[],
+  verdicts: { idea_id: string; mark: string; at: string; seq?: number }[],
   renders: { idea: string; kind: string; created_at: string }[],
+  seqOut?: Map<string, number>,
 ): Map<string, string> {
-  const passes = new Map<string, string[]>(); // each idea's passes that stand, oldest first
+  const passes = new Map<string, { at: string; seq?: number }[]>(); // each idea's passes that stand, oldest first
   for (const v of verdicts) {
     const list = passes.get(v.idea_id) ?? [];
-    if (v.mark === "pass") passes.set(v.idea_id, [...list, v.at]);
+    if (v.mark === "pass") passes.set(v.idea_id, [...list, { at: v.at, seq: v.seq }]);
     else if (v.mark === "fix") {
-      const at = list[list.length - 1];
+      const at = list[list.length - 1]?.at;
       if (at !== undefined && !renders.some((r) => r.idea === v.idea_id && r.kind === "draft" && r.created_at > at && r.created_at <= v.at)) {
         list.pop();
       }
     }
   }
-  return new Map([...passes].filter(([, list]) => list.length > 0).map(([idea, list]) => [idea, list[list.length - 1] as string]));
+  const active = [...passes].filter(([, list]) => list.length > 0).map(([idea, list]) => [idea, list[list.length - 1]!] as const);
+  // seqOut: the row of each active pass, which breaks a tie with another verdict of the same save.
+  for (const [idea, p] of active) if (p.seq !== undefined) seqOut?.set(idea, p.seq);
+  return new Map(active.map(([idea, p]) => [idea, p.at]));
 }
 
 /** Everything about one batch, for Claude and for the board. */
@@ -848,8 +880,8 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
     // The owner's newest draft verdicts (bounded; reversed to oldest first below): they give each idea's active full pass
     // (docs/design/owner-verdicts.md).
     env.DB.prepare(
-      "SELECT idea_id, mark, created_at AS at FROM verdicts WHERE batch_id = ? AND stage = 'draft' AND idea_id IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 400",
-    ).bind(id).all<{ idea_id: string; mark: string; at: string }>(),
+      "SELECT idea_id, mark, created_at AS at, rowid AS seq FROM verdicts WHERE batch_id = ? AND stage = 'draft' AND idea_id IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 400",
+    ).bind(id).all<{ idea_id: string; mark: string; at: string; seq: number }>(),
     latestKit(env, b.brand_id, b.kit_version),
   ]);
   const rankBy = new Map(ranks.results.map((r) => [r.render_key, r]));
@@ -860,7 +892,24 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
   // The newest owner pick of each idea: an engine 3 pick saved after a full pass ends the draft steps of that idea.
   const ownerPickAt = new Map<string, string>();
   for (const p of picks.results) if (p.by_owner === 1 && String(p.created_at) > (ownerPickAt.get(p.idea_id) ?? "")) ownerPickAt.set(p.idea_id, String(p.created_at));
-  const passedAt = activePasses([...passes.results].reverse(), renders.results as { idea: string; kind: string; created_at: string }[]);
+  const passSeq = new Map<string, number>();
+  const passedAt = activePasses([...passes.results].reverse(), renders.results as { idea: string; kind: string; created_at: string }[], passSeq);
+  // Engine v1 (house rule WI18): the ideas whose newest final verdict on a draft approves it as it is. Such a draft is the
+  // idea's final, with no pick row and no paid final, until a full pass after that approval.
+  const asIs = new Set<string>();
+  if (b.engine === 1) {
+    const rows = await env.DB.prepare(
+      `SELECT v.idea_id, v.mark, v.created_at AS at, v.rowid AS seq FROM verdicts v JOIN renders r ON r.id = substr(v.render_key, 9, 36) AND r.batch = v.batch_id
+       WHERE v.batch_id = ? AND v.stage = 'final' AND r.kind = 'draft' AND v.idea_id IS NOT NULL ORDER BY v.created_at, v.rowid LIMIT 200`,
+    ).bind(id).all<{ idea_id: string; mark: string; at: string; seq: number }>();
+    // The row order breaks a tie: the verdicts of one save share one time.
+    for (const r of rows.results) {
+      // An approval saved before the idea's active full pass is over; one saved after it counts, of any draft he names.
+      const pass = passedAt.get(r.idea_id);
+      if (r.mark === "approve" && (pass === undefined || r.at > pass || (r.at === pass && r.seq > (passSeq.get(r.idea_id) ?? 0)))) asIs.add(r.idea_id);
+      else asIs.delete(r.idea_id);
+    }
+  }
   const img = (key: string) => ({ key, url: fal.mediaUrl(env, key) });
   const [brief, conceptReview, directions, checks, rounds, plans] = await Promise.all([
     briefGet(env, id),
@@ -981,7 +1030,7 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
     picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, byOwner: p.by_owner === 1, finalRenderId: p.final_render_id })),
     drafting: renders.results.filter((r) => r.status === "queued").map((r) => r.id),
     // Engine 1 and engine 3: the next step of the batch, from its rows (design pack §1.11). Engine 2 batches have none.
-    ...(engine === 1 ? { nextStep: nextStepV1(b.status as string, ideasOut.map((i) => ({ ...i, hasPicture: hasPicture.get(i.id) === true })), ownerPicked) } : {}),
+    ...(engine === 1 ? { nextStep: nextStepV1(b.status as string, ideasOut.map((i) => ({ ...i, hasPicture: hasPicture.get(i.id) === true })), ownerPicked, asIs) } : {}),
     ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, draftsDone: draftsDone.get(i.id) === true, redirect: redirect.get(i.id) === true, decided: ownerDecided.get(i.id) === true, rendered: renders.results.some((r) => r.idea === i.id && r.kind !== "rough"), directed: directions.get(i.id)?.current === true })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.n > conceptReview.lastN) }) } : {}),
   };
 }
@@ -1014,15 +1063,19 @@ export function nextStepV1(
   status: string,
   ideas: { id: string; picked: boolean; hasPicture: boolean; finalPrompt?: string | null; finals: { status: unknown }[] }[],
   ownerPicked: Set<string>,
+  asIs: Set<string> = new Set(),
 ): string {
   const picked = ideas.filter((i) => i.picked);
   if (ideas.length === 0) return "concepts";
   if (picked.length < 3) return "concept_pick";
-  if (picked.some((i) => !i.hasPicture)) return "pictures";
+  // A draft he approved as it is (WI18) is that idea's picture too, even when it is older than a pass.
+  if (picked.some((i) => !i.hasPicture && !asIs.has(i.id))) return "pictures";
   // A polled draft is a raw render: the logo and the final prompt come after it (the 'wild' prompt, step 4).
   if (!["board", "finals", "done"].includes(status)) return picked.some((i) => !i.finalPrompt) ? "pictures" : "board";
-  if (picked.some((i) => !ownerPicked.has(i.id))) return "owner_pick";
-  if (picked.some((i) => !i.finals.some((f) => f.status === "done"))) return "finals";
+  // A draft he approved as it is (WI18) is that idea's pick and its final.
+  if (picked.some((i) => !ownerPicked.has(i.id) && !asIs.has(i.id))) return "owner_pick";
+  // A high final he asked for later (for a pack, WI18) must finish even when its draft was approved as it is.
+  if (picked.some((i) => (!asIs.has(i.id) || i.finals.length > 0) && !i.finals.some((f) => f.status === "done"))) return "finals";
   // A polled final is a raw render too: the logo is set in code and uploaded, then status 'done' ('final' prompt, step 6).
   return status === "done" ? "done" : "finish";
 }

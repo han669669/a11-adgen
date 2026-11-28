@@ -330,3 +330,188 @@ describe("engine v1: rules and the wild prompt", () => {
     expect(b.messages[0]!.content.text).toContain(glossy);
   });
 });
+
+describe("engine v1 lessons of the Durian batch (owner, 28-11-2026)", () => {
+  it("swaps picks in one ideas_update call: the unpicks run first", async () => {
+    const { env, id, ideas } = await withConcepts();
+    await run(env, "ideas_pick", { batchId: id, ids: [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id] });
+    await run(env, "ideas_update", { updates: [{ id: ideas[3]!.id, picked: true }, { id: ideas[0]!.id, picked: false }] });
+    const got = (await batch.batchGet(env, id)) as { ideas: { id: string; picked: boolean }[] };
+    expect(got.ideas.filter((i) => i.picked).map((i) => i.id).sort()).toEqual([ideas[1]!.id, ideas[2]!.id, ideas[3]!.id].sort());
+    // A swap that still passes the limit is refused, and nothing changes.
+    await expect(run(env, "ideas_update", { updates: [{ id: ideas[4]!.id, picked: true }, { id: ideas[5]!.id, picked: true }, { id: ideas[1]!.id, picked: false }] }))
+      .rejects.toThrow("Pick limit");
+    const after = (await batch.batchGet(env, id)) as { ideas: { id: string; picked: boolean }[] };
+    expect(after.ideas.filter((i) => i.picked)).toHaveLength(3);
+  });
+
+  it("takes a final approval on an engine 1 draft (a draft he approves as it is, WI18), and refuses it on engine 2", async () => {
+    const { env, raw, base, id, ideas } = await withConcepts();
+    await run(env, "ideas_pick", { batchId: id, ids: [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id] });
+    const r0 = "d0000000-0000-4000-8000-000000000001", r9 = "d0000000-0000-4000-8000-000000000009";
+    addDraft(raw, id, r0, ideas[0]!.id);
+    const said = "keep this i approve of it ... no final render needed i believe unless u disapprove. ".repeat(10).trim();
+    expect(said.length).toBeGreaterThan(600);
+    const out = await run(env, "batch_update", { id, ownerVerdicts: [{ stage: "final", mark: "approve", key: `renders/${r0}/0.jpg`, ownerSaid: said }] });
+    expect(out.verdictsSaved).toBe(1);
+    expect(raw.prepare("SELECT stage, mark, idea_id, owner_said FROM verdicts").get()).toEqual({ stage: "final", mark: "approve", idea_id: ideas[0]!.id, owner_said: said });
+    const e2 = await run(env, "batch_create", base);
+    raw.prepare("INSERT INTO ideas (id, batch_id, n, format, insight, visual, headline, created_at) VALUES ('e2i', ?, 1, 'tof', 'i', 'v', 'h', 'now')").run(e2.id);
+    addDraft(raw, e2.id, r9, "e2i");
+    await expect(run(env, "batch_update", { id: e2.id, ownerVerdicts: [{ stage: "final", mark: "approve", key: `renders/${r9}/0.jpg`, ownerSaid: "ok" }] }))
+      .rejects.toThrow("is a draft, not a final picture.");
+  });
+
+  it("counts a draft approved as it is as that idea's pick and final in nextStep, beside a normal high final (Devin Review)", async () => {
+    const { env, raw, id, ideas } = await withConcepts();
+    const ids = [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id];
+    await run(env, "ideas_pick", { batchId: id, ids });
+    const keys = ids.map((x, i) => {
+      const r = `d0000000-0000-4000-8000-00000000000${i}`;
+      addDraft(raw, id, r, x);
+      return `renders/${r}/0.jpg`;
+    });
+    await batch.ideasUpdate(env, ids.map((x) => ({ id: x, finalPrompt: "Keep this photograph exactly." })));
+    await batch.batchUpdate(env, { id, status: "board" });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("owner_pick");
+    const approve = (key: string) => batch.batchUpdate(env, { id, ownerVerdicts: [{ stage: "final", mark: "approve", key, ownerSaid: "keep this as it is" }] });
+    await approve(keys[0]!);
+    await approve(keys[1]!);
+    expect((await batch.batchGet(env, id)).nextStep).toBe("owner_pick");    // idea 3 still waits for him
+    await batch.picksSave(env, id, [{ key: keys[2]! }]);
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finals");        // idea 3 gets its high final; ideas 1 and 2 need none
+    await approve(keys[2]!);
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finish");
+    // A later fix on an approved draft takes it back.
+    await batch.batchUpdate(env, { id, ownerVerdicts: [{ stage: "final", mark: "fix", key: keys[2]!, ownerSaid: "the fingers look weird" }] });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finals");
+  });
+
+  it("ends an as-is approval when he passes on that draft, and waits for a high final he asked for later (Devin Review)", async () => {
+    const { env, raw, id, ideas } = await withConcepts();
+    const ids = [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id];
+    await run(env, "ideas_pick", { batchId: id, ids });
+    const keys = ids.map((x, i) => {
+      const r = `d0000000-0000-4000-8000-00000000001${i}`;
+      addDraft(raw, id, r, x, `2026-11-28T0${i}:00:00.000Z`);
+      return `renders/${r}/0.jpg`;
+    });
+    await batch.ideasUpdate(env, ids.map((x) => ({ id: x, finalPrompt: "Keep this photograph exactly." })));
+    await batch.batchUpdate(env, { id, status: "board" });
+    const verdict = (v: batch.OwnerVerdict) => batch.batchUpdate(env, { id, ownerVerdicts: [v] });
+    for (const key of keys) await verdict({ stage: "final", mark: "approve", key, ownerSaid: "keep this as it is" });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finish");
+    // He passes on draft 1 after all: the approval of that draft no longer stands, and its new draft needs his verdict.
+    await verdict({ stage: "draft", mark: "pass", ideaId: ids[0]!, ownerSaid: "actually no, the board is a distraction" });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("pictures");
+    addDraft(raw, id, "d0000000-0000-4000-8000-000000000020", ids[0]!, "2099-01-01T00:00:00.000Z");
+    expect((await batch.batchGet(env, id)).nextStep).toBe("owner_pick");
+    // A high final he asked for (for a pack) on approved draft 2: the step waits for it until it is done.
+    await batch.picksSave(env, id, [{ key: keys[1]! }]);
+    const pick = raw.prepare("SELECT render_key FROM picks WHERE idea_id = ?").get(ids[1]!) as { render_key: string };
+    raw.prepare(
+      `INSERT INTO renders (id, batch, idea, kind, status, prompt, refs, width, height, quality, num_images, usd_est, created_at, updated_at)
+       VALUES ('f1', ?, ?, 'final', 'queued', 'p', '[]', 1536, 1920, 'high', 1, 0.07, '2099-01-02T00:00:00.000Z', '2099-01-02T00:00:00.000Z')`,
+    ).run(id, ids[1]!);
+    expect(pick.render_key).toBe(keys[1]);
+    await verdict({ stage: "final", mark: "approve", key: "renders/d0000000-0000-4000-8000-000000000020/0.jpg", ownerSaid: "ok this one" });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finals");
+  });
+
+  it("counts a draft he approves again after a pass, and opens a done batch again for a high final he asks for (Devin Review)", async () => {
+    const { env, raw, id, ideas } = await withConcepts();
+    const ids = [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id];
+    await run(env, "ideas_pick", { batchId: id, ids });
+    const keys = ids.map((x, i) => {
+      const r = `d0000000-0000-4000-8000-00000000003${i}`;
+      addDraft(raw, id, r, x, `2026-11-28T0${i}:00:00.000Z`);
+      return `renders/${r}/0.jpg`;
+    });
+    await batch.ideasUpdate(env, ids.map((x) => ({ id: x, finalPrompt: "Keep this photograph exactly." })));
+    await batch.batchUpdate(env, { id, status: "board" });
+    const verdict = (v: batch.OwnerVerdict) => batch.batchUpdate(env, { id, ownerVerdicts: [v] });
+    for (const key of keys) await verdict({ stage: "final", mark: "approve", key, ownerSaid: "keep this as it is" });
+    await verdict({ stage: "draft", mark: "pass", ideaId: ids[0]!, ownerSaid: "no, the board is a distraction" });
+    addDraft(raw, id, "d0000000-0000-4000-8000-000000000040", ids[0]!, "2099-01-01T00:00:00.000Z");
+    expect((await batch.batchGet(env, id)).nextStep).toBe("owner_pick");
+    // He compares the new draft with the old one and keeps the old one: a new approval, saved after the pass, counts.
+    await verdict({ stage: "final", mark: "approve", key: keys[0]!, ownerSaid: "keep the first one after all" });
+    raw.prepare("UPDATE verdicts SET created_at = '2099-06-01T00:00:00.000Z' WHERE rowid = (SELECT max(rowid) FROM verdicts)").run();
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finish");
+    await batch.batchUpdate(env, { id, status: "done" });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("done");
+    // Later he asks for a pack with draft 2: its high final opens the batch again, and the logo comes before 'done'.
+    await batch.picksSave(env, id, [{ key: keys[1]! }]);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ request_id: "q1", status_url: "https://queue.fal.run/s", response_url: "https://queue.fal.run/r" })));
+    await batch.finalRender(env, id, keys[1]!);
+    expect((await batch.batchGet(env, id)) as { status: string; nextStep: string }).toMatchObject({ status: "finals", nextStep: "finals" });
+    raw.prepare("UPDATE renders SET status = 'done', image_keys = '[\"renders/f/0.jpg\"]' WHERE kind = 'final'").run();
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finish");
+  });
+
+  it("needs no new picture when he approves a passed draft again before its replacement, also in the same save (Devin Review)", async () => {
+    const { env, raw, id, ideas } = await withConcepts();
+    const ids = [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id];
+    await run(env, "ideas_pick", { batchId: id, ids });
+    const keys = ids.map((x, i) => {
+      const r = `d0000000-0000-4000-8000-00000000005${i}`;
+      addDraft(raw, id, r, x, `2026-11-28T0${i}:00:00.000Z`);
+      return `renders/${r}/0.jpg`;
+    });
+    await batch.ideasUpdate(env, ids.map((x) => ({ id: x, finalPrompt: "Keep this photograph exactly." })));
+    await batch.batchUpdate(env, { id, status: "board" });
+    for (const key of keys.slice(1)) await batch.batchUpdate(env, { id, ownerVerdicts: [{ stage: "final", mark: "approve", key, ownerSaid: "keep this as it is" }] });
+    // One save: a pass on idea 1, then an approval of its draft. The two rows share one time; the row order decides.
+    await batch.batchUpdate(env, { id, ownerVerdicts: [
+      { stage: "draft", mark: "pass", ideaId: ids[0]!, ownerSaid: "no" },
+      { stage: "final", mark: "approve", key: keys[0]!, ownerSaid: "wait, keep it as it is" },
+    ] });
+    const times = raw.prepare("SELECT DISTINCT created_at FROM verdicts WHERE idea_id = ?").all(ids[0]!);
+    expect(times).toHaveLength(1);
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finish");
+    // The other order in one save: the pass is the newer word, so a new picture is needed.
+    await batch.batchUpdate(env, { id, ownerVerdicts: [
+      { stage: "final", mark: "approve", key: keys[0]!, ownerSaid: "keep it" },
+      { stage: "draft", mark: "pass", ideaId: ids[0]!, ownerSaid: "no, after all" },
+    ] });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("pictures");
+    // One save: pass, approve, pass, fix. The fix withdraws the second pass, so the first pass stands and the approval after it counts.
+    await batch.batchUpdate(env, { id, ownerVerdicts: [
+      { stage: "draft", mark: "pass", ideaId: ids[0]!, ownerSaid: "no" },
+      { stage: "final", mark: "approve", key: keys[0]!, ownerSaid: "keep it" },
+      { stage: "draft", mark: "pass", ideaId: ids[0]!, ownerSaid: "no" },
+      { stage: "draft", mark: "fix", ideaId: ids[0]!, ownerSaid: "that pass was a mistake" },
+    ] });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finish");
+  });
+
+  it("adds one line to the notes with notesAdd and keeps the rest", async () => {
+    const { env, id } = await withConcepts();
+    await run(env, "batch_update", { id, notes: "ANGLE SHEET: A, B." });
+    await run(env, "batch_update", { id, notesAdd: "ROUND 1: three drafts." });
+    await run(env, "batch_update", { id, notesAdd: "ROUND 2: two drafts." });
+    expect((await batch.batchGet(env, id)).notes).toMatch(/^Engine 1 \(wild\) started by the owner .+\nANGLE SHEET: A, B\.\nROUND 1: three drafts\.\nROUND 2: two drafts\.$/);
+    await expect(run(env, "batch_update", { id, notes: "x", notesAdd: "y" })).rejects.toThrow("not both");
+    for (let i = 0; i < 5; i++) await run(env, "batch_update", { id, notesAdd: "n".repeat(1990) });
+    await expect(run(env, "batch_update", { id, notesAdd: "n".repeat(1990) })).rejects.toThrow(`would pass ${batch.MAX_NOTES} characters`);
+    // The whole field with the owner's start line put back must fit too.
+    await expect(run(env, "batch_update", { id, notes: "n".repeat(batch.MAX_NOTES) })).rejects.toThrow("with the owner's start line would pass");
+  });
+
+  it("serves the new engine 1 rules and names them in the wild and final prompts", () => {
+    const rules = houseRules("critic").rules;
+    for (const t of ["WI11: First glance, no lore", "WI12: A brand photo whose food stands on a board", "WI13: Depth comes from the lock",
+      "WI14: Real scene, real pixels", "WI15: People and depth order", "WI16: A screen in the picture", "WI17: Every draft and final prompt says",
+      "WI18: A draft can be the finished picture"]) expect(rules).toContain(t);
+    expect(rules).toContain("unless WI18 calls for a high final");
+    const text = (name: string, args: Record<string, string>) => {
+      const out = promptGet(name, args);
+      if (typeof out === "string") throw new Error(out);
+      return out.messages[0]!.content.text;
+    };
+    const wild = text("wild", { brand: "duriandelivery", batchId: "6dbef700-a167-4bc0-8be7-bdd76be7a52d" });
+    for (const t of ["cutout-scene", "scripts/patch_merge.py", "keep the exact composition; the top fifth stays plain", "is the final as it is (WI18)"]) expect(wild).toContain(t);
+    const final = text("final", { batchId: "6dbef700-a167-4bc0-8be7-bdd76be7a52d" });
+    expect(final).toContain("a chosen draft is the final as it is (WI18)");
+  });
+});

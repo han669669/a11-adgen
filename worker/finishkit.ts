@@ -12,7 +12,7 @@ import kit from "../dist/finish-kit.json";
 const USES: Record<string, string> = {
   "headline.py": "Sets the approved headline, subline and kit logo inside the picture, in the kit font (Google Fonts, or a font file the brand's site serves). Run it on every draft before the owner sees it, and on every final.",
   "photo_finish.py": "The real-camera finish on drafts and finals, before headline.py.",
-  "product_lock.py": "The real pack: skeleton and layout (a layout plan), reprint (the real print back on a render made from a skeleton), swap (the real pack into a picked draft), cutout.",
+  "product_lock.py": "The real pack: skeleton and layout (a layout plan), reprint (the real print back on a render made from a skeleton), swap (the real pack into a picked draft), cutout, and cutout-scene (food on a board or table in a brand photo, the board left out).",
   "pack_check.py": "The pack's height over width against the packshot (2%).",
   "shape_fix.py": "Measures a front-on product body (and its cap) against the packshot and corrects a small drift in code, before the owner sees the picture.",
   "label_transfer.py": "Puts the packshot's real label print on a front-on product in a render, in the render's own light (it needs shape_fix.py beside it). It moves the dark print; add --light-print for separate white print, only when the packshot has no sharp glare on the label.",
@@ -20,6 +20,7 @@ const USES: Record<string, string> = {
   "box_print.py": "The real box print on a boxed product, from a box-print config for that product.",
   "food_grade.py": "Moves the food colour of a packshot toward the brand's real close-up photo.",
   "exposure.py": "One brightness gain on the whole picture, with the hue kept (--measure compares a product front with the picked draft). Never brighten one face or one object in code.",
+  "patch_merge.py": "Keeps the real photo and takes from a render only the areas that had to change (--box, --ellipse), after it finds the render's small shift; it stops when the render moved the composition.",
   "requirements.txt": "The Python packages, for the setup script (Python 3.12 or newer).",
 };
 

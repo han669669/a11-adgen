@@ -14,7 +14,7 @@ import types
 import unittest
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -34,6 +34,7 @@ photo_finish = load("photo_finish")
 pack_check = load("pack_check")
 cap_check = load("cap_check")
 exposure = load("exposure")
+patch_merge = load("patch_merge")
 sys.path.insert(0, HERE)  # label_transfer imports shape_fix from its own folder, as in the finish kit
 shape_fix = load("shape_fix")
 label_transfer = load("label_transfer")
@@ -439,7 +440,7 @@ class LayoutReprint(Tmp):
         import subprocess
         out = subprocess.run([sys.executable, os.path.join(HERE, "product_lock.py"), "--help"], capture_output=True, text=True, check=True).stdout
         cmds = set(re.search(r"\{([a-z0-9,-]+)\}", out).group(1).split(","))
-        self.assertEqual(cmds, {"relight", "vary-food", "cutout", "pad45", "open-source", "layout", "reprint", "skeleton", "swap"})
+        self.assertEqual(cmds, {"relight", "vary-food", "cutout", "cutout-scene", "pad45", "open-source", "layout", "reprint", "skeleton", "swap"})   # cutout-scene only cuts a real photo (28-11-2026)
 
     def test_reprint_leaves_a_product_that_does_not_fit(self):
         flat = self.save("flat.png", np.full((500, 400, 3), 128))
@@ -1391,6 +1392,133 @@ class Exposure(Tmp):
         self.assertIn("--ref", exit_message(exposure.main, ["--in", src, "--measure", "0,0,10,10"]))
         self.assertIn("X1 > X0", exit_message(exposure.main, ["--in", src, "--measure", "10,0,5,10", "--ref", src, "--ref-box", "0,0,5,5"]))
         self.assertIn("outside", exit_message(exposure.main, ["--in", src, "--measure", "0,0,500,10", "--ref", src, "--ref-box", "0,0,5,5"]))
+
+
+class PatchMerge(Tmp):
+    """Real pixels, patches only (owner, 28-11-2026, Durian gallery: a model pass over the whole real crowd made odd heads)."""
+
+    def photo(self):
+        rng = np.random.default_rng(3)
+        yy, xx = np.mgrid[0:120, 0:96]
+        a = np.stack([xx * 2.6, yy * 2.0, 128 + 0 * xx], -1) + rng.normal(0, 30, (120, 96, 3))   # light that changes across the frame, and texture
+        return Image.fromarray(a.clip(0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(1.2))
+
+    def test_takes_only_the_patch_and_undoes_the_render_shift(self):
+        real = self.photo()
+        src = os.path.join(self.dir.name, "real.png")
+        real.save(src)
+        r = np.asarray(real).astype(np.float32) + np.float32(6)          # the render's colour drifts a little everywhere
+        r = np.roll(r, (2, -1), axis=(0, 1))                            # and it sits 2 px lower and 1 px left
+        r[40:80, 30:70] = (230, 30, 30)                                  # the changed area
+        ren = self.save("render.png", r.clip(0, 255))
+        out = os.path.join(self.dir.name, "out.png")
+        log = io.StringIO()
+        with contextlib.redirect_stdout(log):
+            self.assertEqual(patch_merge.main(["--base", src, "--render", ren, "--box", "36,38,72,82", "--out", out, "--feather", "2"]), 0)
+        self.assertIn("render shift -1,2", log.getvalue())   # out[y, x] = render[y + 2, x - 1]
+        a = np.asarray(Image.open(out).convert("RGB")).astype(int)
+        b = np.asarray(real).astype(int)
+        self.assertTrue((a[:25] == b[:25]).all(), "outside the patch every pixel is the real photo")
+        self.assertTrue((a[100:] == b[100:]).all())
+        np.testing.assert_array_equal(a[58, 52], (230, 30, 30))          # inside it, the render (shifted back)
+
+    def test_stops_when_the_render_moved_the_composition(self):
+        real = self.photo()
+        src = os.path.join(self.dir.name, "real.png")
+        real.save(src)
+        ren = self.save("render.png", np.asarray(real.transpose(Image.FLIP_LEFT_RIGHT)))
+        out = os.path.join(self.dir.name, "out.png")
+        msg = exit_message(patch_merge.main, ["--base", src, "--render", ren, "--box", "10,10,40,40", "--out", out])
+        self.assertIn("moved the composition", msg)
+        self.assertFalse(os.path.exists(out))
+
+    def test_a_plain_wall_does_not_hide_a_moved_frame(self):
+        # Devin Review, PR 161: on a large plain wall a thin frame moved 25 px gave a low mean difference over all samples.
+        a = np.full((500, 400, 3), 200, np.uint8)
+        a[150:156, 100:300] = a[344:350, 100:300] = 50                 # a thin dark frame
+        a[150:350, 100:106] = a[150:350, 294:300] = 50
+        src = self.save("wall.png", a)
+        ren = self.save("render.png", np.roll(a, 25, axis=1))
+        out = os.path.join(self.dir.name, "out.png")
+        self.assertIn("moved the composition", exit_message(patch_merge.main, ["--base", src, "--render", ren, "--box", "20,400,80,480", "--out", out]))
+
+    def test_a_softened_render_in_place_keeps_zero_shift(self):
+        # Devin Review, PR 161: a render that only softens the frame's edges gave a false 3 px shift on edge pixels alone.
+        a = np.full((500, 400, 3), 200, np.uint8)
+        a[150:156, 100:300] = a[344:350, 100:300] = 50
+        a[150:350, 100:106] = a[150:350, 294:300] = 50
+        src = self.save("wall.png", a)
+        out = os.path.join(self.dir.name, "out.png")
+        for radius in (0.5, 1.0):
+            ren = os.path.join(self.dir.name, f"soft{radius}.png")
+            Image.fromarray(a).filter(ImageFilter.GaussianBlur(radius)).save(ren)
+            log = io.StringIO()
+            with contextlib.redirect_stdout(log):
+                self.assertEqual(patch_merge.main(["--base", src, "--render", ren, "--box", "20,400,80,480", "--out", out]), 0)
+            self.assertIn("render shift 0,0", log.getvalue())
+
+    def test_an_aligned_render_on_a_plain_wall_is_not_moved(self):
+        # Devin Review, PR 161: with no texture outside the patch every shift ties; the smallest (none) wins.
+        a = np.full((200, 160, 3), 180, np.uint8)
+        src = self.save("plain.png", a)
+        r = a.copy()
+        r[60:120, 50:110] = (20, 200, 40)
+        ren = self.save("render.png", r)
+        out = os.path.join(self.dir.name, "out.png")
+        log = io.StringIO()
+        with contextlib.redirect_stdout(log):
+            patch_merge.main(["--base", src, "--render", ren, "--box", "40,50,120,130", "--out", out, "--feather", "1"])
+        self.assertIn("render shift 0,0", log.getvalue())
+        np.testing.assert_array_equal(np.asarray(Image.open(out).convert("RGB"))[61, 51], (20, 200, 40))
+
+    def test_scales_a_smaller_render_and_checks_the_arguments(self):
+        real = self.photo()
+        src = os.path.join(self.dir.name, "real.png")
+        real.save(src)
+        small = os.path.join(self.dir.name, "small.png")
+        real.resize((64, 80), Image.LANCZOS).save(small)
+        out = os.path.join(self.dir.name, "out.png")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(patch_merge.main(["--base", src, "--render", small, "--ellipse", "20,20,60,70", "--out", out]), 0)
+        self.assertEqual(Image.open(out).size, (96, 120))
+        wide = self.save("wide.png", np.zeros((80, 120, 3)))
+        self.assertIn("shape", exit_message(patch_merge.main, ["--base", src, "--render", wide, "--box", "1,1,5,5", "--out", out]))
+        self.assertIn("at least one", exit_message(patch_merge.main, ["--base", src, "--render", small, "--out", out]))
+        self.assertIn("outside", exit_message(patch_merge.main, ["--base", src, "--render", small, "--box", "0,0,500,10", "--out", out]))
+        self.assertIn("X1 > X0", exit_message(patch_merge.main, ["--base", src, "--render", small, "--box", "9,0,5,10", "--out", out]))
+
+
+class CutoutScene(Tmp):
+    """Food on a board (owner, 28-11-2026, Durian: "the wooden board below seems a distraction")."""
+
+    def test_learns_the_board_from_a_surface_patch_and_keeps_only_the_food(self):
+        rng = np.random.default_rng(5)
+        a = np.zeros((160, 160, 3), float)
+        a[:] = (205, 205, 200)                                           # the room behind
+        a[70:150, 15:145] = (140, 92, 52)                                # the wooden board, in the box with the food
+        a[70:150:6, 15:145] = (118, 76, 40)                              # its grain
+        yy, xx = np.mgrid[0:160, 0:160]
+        food = ((xx - 80) / 42.0) ** 2 + ((yy - 75) / 50.0) ** 2 <= 1    # the durian half, over the board
+        a[food] = (226, 170, 52)
+        a += rng.normal(0, 4, a.shape)
+        src = self.save("photo.png", a.clip(0, 255))
+        out = os.path.join(self.dir.name, "mask.png")
+        with contextlib.redirect_stdout(io.StringIO()):
+            product_lock.cutout_scene(types.SimpleNamespace(packshot=src, box="10,20,150,155", surface=["20,135,60,148", "110,130,140,148"],
+                                                            keep=None, iter=5, out=out))
+        m = np.asarray(Image.open(out)) > 127
+        self.assertGreater((m & food).sum() / food.sum(), 0.95, "the food is kept")
+        board = np.zeros_like(food)
+        board[70:150, 15:145] = True
+        board &= ~food
+        self.assertLess((m & board).sum() / board.sum(), 0.03, "the board is left out")
+
+    def test_needs_a_surface_patch_inside_the_photo(self):
+        src = self.save("photo.png", np.full((40, 40, 3), 120))
+        out = os.path.join(self.dir.name, "mask.png")
+        ns = lambda surface: types.SimpleNamespace(packshot=src, box="2,2,38,38", surface=surface, keep=None, iter=5, out=out)
+        self.assertIn("--surface", exit_message(product_lock.cutout_scene, ns(["0,0,90,9"])))
+        self.assertIn("at least one --surface", exit_message(product_lock.cutout_scene, ns([])))
 
 
 if __name__ == "__main__":
