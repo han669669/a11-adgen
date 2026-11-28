@@ -842,21 +842,25 @@ export async function batchGetOwner(env: Env, id: string) {
  * verdicts: oldest first.
  */
 export function activePasses(
-  verdicts: { idea_id: string; mark: string; at: string }[],
+  verdicts: { idea_id: string; mark: string; at: string; seq?: number }[],
   renders: { idea: string; kind: string; created_at: string }[],
+  seqOut?: Map<string, number>,
 ): Map<string, string> {
-  const passes = new Map<string, string[]>(); // each idea's passes that stand, oldest first
+  const passes = new Map<string, { at: string; seq?: number }[]>(); // each idea's passes that stand, oldest first
   for (const v of verdicts) {
     const list = passes.get(v.idea_id) ?? [];
-    if (v.mark === "pass") passes.set(v.idea_id, [...list, v.at]);
+    if (v.mark === "pass") passes.set(v.idea_id, [...list, { at: v.at, seq: v.seq }]);
     else if (v.mark === "fix") {
-      const at = list[list.length - 1];
+      const at = list[list.length - 1]?.at;
       if (at !== undefined && !renders.some((r) => r.idea === v.idea_id && r.kind === "draft" && r.created_at > at && r.created_at <= v.at)) {
         list.pop();
       }
     }
   }
-  return new Map([...passes].filter(([, list]) => list.length > 0).map(([idea, list]) => [idea, list[list.length - 1] as string]));
+  const active = [...passes].filter(([, list]) => list.length > 0).map(([idea, list]) => [idea, list[list.length - 1]!] as const);
+  // seqOut: the row of each active pass, which breaks a tie with another verdict of the same save.
+  for (const [idea, p] of active) if (p.seq !== undefined) seqOut?.set(idea, p.seq);
+  return new Map(active.map(([idea, p]) => [idea, p.at]));
 }
 
 /** Everything about one batch, for Claude and for the board. */
@@ -888,7 +892,8 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
   // The newest owner pick of each idea: an engine 3 pick saved after a full pass ends the draft steps of that idea.
   const ownerPickAt = new Map<string, string>();
   for (const p of picks.results) if (p.by_owner === 1 && String(p.created_at) > (ownerPickAt.get(p.idea_id) ?? "")) ownerPickAt.set(p.idea_id, String(p.created_at));
-  const passedAt = activePasses([...passes.results].reverse(), renders.results as { idea: string; kind: string; created_at: string }[]);
+  const passSeq = new Map<string, number>();
+  const passedAt = activePasses([...passes.results].reverse(), renders.results as { idea: string; kind: string; created_at: string }[], passSeq);
   // Engine v1 (house rule WI18): the ideas whose newest final verdict on a draft approves it as it is. Such a draft is the
   // idea's final, with no pick row and no paid final, until a full pass after that approval.
   const asIs = new Set<string>();
@@ -898,12 +903,10 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
        WHERE v.batch_id = ? AND v.stage = 'final' AND r.kind = 'draft' AND v.idea_id IS NOT NULL ORDER BY v.created_at, v.rowid LIMIT 200`,
     ).bind(id).all<{ idea_id: string; mark: string; at: string; seq: number }>();
     // The row order breaks a tie: the verdicts of one save share one time.
-    const passSeq = (idea: string, at: string) =>
-      Math.max(...passes.results.filter((p) => p.idea_id === idea && p.mark === "pass" && p.at === at).map((p) => p.seq));
     for (const r of rows.results) {
       // An approval saved before the idea's active full pass is over; one saved after it counts, of any draft he names.
       const pass = passedAt.get(r.idea_id);
-      if (r.mark === "approve" && (pass === undefined || r.at > pass || (r.at === pass && r.seq > passSeq(r.idea_id, pass)))) asIs.add(r.idea_id);
+      if (r.mark === "approve" && (pass === undefined || r.at > pass || (r.at === pass && r.seq > (passSeq.get(r.idea_id) ?? 0)))) asIs.add(r.idea_id);
       else asIs.delete(r.idea_id);
     }
   }

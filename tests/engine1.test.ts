@@ -475,6 +475,14 @@ describe("engine v1 lessons of the Durian batch (owner, 28-11-2026)", () => {
       { stage: "draft", mark: "pass", ideaId: ids[0]!, ownerSaid: "no, after all" },
     ] });
     expect((await batch.batchGet(env, id)).nextStep).toBe("pictures");
+    // One save: pass, approve, pass, fix. The fix withdraws the second pass, so the first pass stands and the approval after it counts.
+    await batch.batchUpdate(env, { id, ownerVerdicts: [
+      { stage: "draft", mark: "pass", ideaId: ids[0]!, ownerSaid: "no" },
+      { stage: "final", mark: "approve", key: keys[0]!, ownerSaid: "keep it" },
+      { stage: "draft", mark: "pass", ideaId: ids[0]!, ownerSaid: "no" },
+      { stage: "draft", mark: "fix", ideaId: ids[0]!, ownerSaid: "that pass was a mistake" },
+    ] });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finish");
   });
 
   it("adds one line to the notes with notesAdd and keeps the rest", async () => {
