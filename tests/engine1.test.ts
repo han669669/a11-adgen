@@ -449,6 +449,34 @@ describe("engine v1 lessons of the Durian batch (owner, 28-11-2026)", () => {
     expect((await batch.batchGet(env, id)).nextStep).toBe("finish");
   });
 
+  it("needs no new picture when he approves a passed draft again before its replacement, also in the same save (Devin Review)", async () => {
+    const { env, raw, id, ideas } = await withConcepts();
+    const ids = [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id];
+    await run(env, "ideas_pick", { batchId: id, ids });
+    const keys = ids.map((x, i) => {
+      const r = `d0000000-0000-4000-8000-00000000005${i}`;
+      addDraft(raw, id, r, x, `2026-11-28T0${i}:00:00.000Z`);
+      return `renders/${r}/0.jpg`;
+    });
+    await batch.ideasUpdate(env, ids.map((x) => ({ id: x, finalPrompt: "Keep this photograph exactly." })));
+    await batch.batchUpdate(env, { id, status: "board" });
+    for (const key of keys.slice(1)) await batch.batchUpdate(env, { id, ownerVerdicts: [{ stage: "final", mark: "approve", key, ownerSaid: "keep this as it is" }] });
+    // One save: a pass on idea 1, then an approval of its draft. The two rows share one time; the row order decides.
+    await batch.batchUpdate(env, { id, ownerVerdicts: [
+      { stage: "draft", mark: "pass", ideaId: ids[0]!, ownerSaid: "no" },
+      { stage: "final", mark: "approve", key: keys[0]!, ownerSaid: "wait, keep it as it is" },
+    ] });
+    const times = raw.prepare("SELECT DISTINCT created_at FROM verdicts WHERE idea_id = ?").all(ids[0]!);
+    expect(times).toHaveLength(1);
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finish");
+    // The other order in one save: the pass is the newer word, so a new picture is needed.
+    await batch.batchUpdate(env, { id, ownerVerdicts: [
+      { stage: "final", mark: "approve", key: keys[0]!, ownerSaid: "keep it" },
+      { stage: "draft", mark: "pass", ideaId: ids[0]!, ownerSaid: "no, after all" },
+    ] });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("pictures");
+  });
+
   it("adds one line to the notes with notesAdd and keeps the rest", async () => {
     const { env, id } = await withConcepts();
     await run(env, "batch_update", { id, notes: "ANGLE SHEET: A, B." });

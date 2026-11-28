@@ -876,8 +876,8 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
     // The owner's newest draft verdicts (bounded; reversed to oldest first below): they give each idea's active full pass
     // (docs/design/owner-verdicts.md).
     env.DB.prepare(
-      "SELECT idea_id, mark, created_at AS at FROM verdicts WHERE batch_id = ? AND stage = 'draft' AND idea_id IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 400",
-    ).bind(id).all<{ idea_id: string; mark: string; at: string }>(),
+      "SELECT idea_id, mark, created_at AS at, rowid AS seq FROM verdicts WHERE batch_id = ? AND stage = 'draft' AND idea_id IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 400",
+    ).bind(id).all<{ idea_id: string; mark: string; at: string; seq: number }>(),
     latestKit(env, b.brand_id, b.kit_version),
   ]);
   const rankBy = new Map(ranks.results.map((r) => [r.render_key, r]));
@@ -894,13 +894,16 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
   const asIs = new Set<string>();
   if (b.engine === 1) {
     const rows = await env.DB.prepare(
-      `SELECT v.idea_id, v.mark, v.created_at AS at FROM verdicts v JOIN renders r ON r.id = substr(v.render_key, 9, 36) AND r.batch = v.batch_id
+      `SELECT v.idea_id, v.mark, v.created_at AS at, v.rowid AS seq FROM verdicts v JOIN renders r ON r.id = substr(v.render_key, 9, 36) AND r.batch = v.batch_id
        WHERE v.batch_id = ? AND v.stage = 'final' AND r.kind = 'draft' AND v.idea_id IS NOT NULL ORDER BY v.created_at, v.rowid LIMIT 200`,
-    ).bind(id).all<{ idea_id: string; mark: string; at: string }>();
+    ).bind(id).all<{ idea_id: string; mark: string; at: string; seq: number }>();
+    // The row order breaks a tie: the verdicts of one save share one time.
+    const passSeq = (idea: string, at: string) =>
+      Math.max(...passes.results.filter((p) => p.idea_id === idea && p.mark === "pass" && p.at === at).map((p) => p.seq));
     for (const r of rows.results) {
       // An approval saved before the idea's active full pass is over; one saved after it counts, of any draft he names.
       const pass = passedAt.get(r.idea_id);
-      if (r.mark === "approve" && (pass === undefined || r.at > pass)) asIs.add(r.idea_id);
+      if (r.mark === "approve" && (pass === undefined || r.at > pass || (r.at === pass && r.seq > passSeq(r.idea_id, pass)))) asIs.add(r.idea_id);
       else asIs.delete(r.idea_id);
     }
   }
@@ -1062,7 +1065,8 @@ export function nextStepV1(
   const picked = ideas.filter((i) => i.picked);
   if (ideas.length === 0) return "concepts";
   if (picked.length < 3) return "concept_pick";
-  if (picked.some((i) => !i.hasPicture)) return "pictures";
+  // A draft he approved as it is (WI18) is that idea's picture too, even when it is older than a pass.
+  if (picked.some((i) => !i.hasPicture && !asIs.has(i.id))) return "pictures";
   // A polled draft is a raw render: the logo and the final prompt come after it (the 'wild' prompt, step 4).
   if (!["board", "finals", "done"].includes(status)) return picked.some((i) => !i.finalPrompt) ? "pictures" : "board";
   // A draft he approved as it is (WI18) is that idea's pick and its final.
