@@ -166,6 +166,10 @@ export interface OwnerVerdict {
 async function verdictInserts(env: Env, batchId: string, verdicts: OwnerVerdict[]) {
   const at = now();
   const out = [];
+  // Engine v1 (house rule WI18, owner 28-11-2026: "no final render needed"): a draft he approves as it is is the final.
+  const engine = verdicts.some((v) => v.stage === "final")
+    ? (await env.DB.prepare("SELECT engine FROM batches WHERE id = ?").bind(batchId).first<{ engine: number }>())?.engine
+    : undefined;
   for (const [i, v] of verdicts.entries()) {
     const where = `ownerVerdicts[${i}]`;
     if (!(VERDICT_MARKS[v.stage] as readonly string[]).includes(v.mark)) {
@@ -185,7 +189,8 @@ async function verdictInserts(env: Env, batchId: string, verdicts: OwnerVerdict[
       // The key must be a saved picture of the render: one of its images, or its composed final.
       const saved = !!render && ((JSON.parse(render.image_keys ?? "[]") as string[]).includes(v.key) || render.composed_key === v.key);
       if (!render || !saved) throw new Error(`${where}: ${v.key} is not a picture of this batch.`);
-      if (v.stage === "final" && render.kind !== "final") throw new Error(`${where}: ${v.key} is a ${render.kind}, not a final picture.`);
+      if (v.stage === "final" && render.kind !== "final" && !(engine === 1 && render.kind === "draft"))
+        throw new Error(`${where}: ${v.key} is a ${render.kind}, not a final picture${engine === 1 ? " or a draft" : ""}.`);
       if (v.stage === "draft" && render.kind === "rough") throw new Error(`${where}: ${v.key} is a rough, not a draft picture.`);
       if (ideaId && render.idea && render.idea !== ideaId) throw new Error(`${where}: ${v.key} is a picture of another idea.`);
       ideaId ??= render.idea;
@@ -219,10 +224,14 @@ const BOARD1_GUARD = `${BOARD3_GUARD}
   AND NOT EXISTS (SELECT 1 FROM ideas i WHERE i.batch_id = batches.id AND i.picked = 1
     AND NOT EXISTS (SELECT 1 FROM renders r WHERE r.batch = i.batch_id AND r.idea = i.id AND r.kind = 'draft' AND r.image_keys IS NOT NULL))`;
 
+/** The longest batch notes that notesAdd makes (the whole field that notes sends is at most 4000 characters). */
+export const MAX_NOTES = 12000;
+
 export async function batchUpdate(
   env: Env,
-  input: { id: string; status?: string; insights?: unknown[]; notes?: string; ownerVerdicts?: OwnerVerdict[] },
+  input: { id: string; status?: string; insights?: unknown[]; notes?: string; notesAdd?: string; ownerVerdicts?: OwnerVerdict[] },
 ) {
+  if (input.notes !== undefined && input.notesAdd !== undefined) throw new Error("Send notes (the whole field) or notesAdd (one new line), not both.");
   // Every picked idea with drafts must have its final prompt before the picks are made (D2: Claude picks the drafts).
   let guard = "";
   if (input.status === "board") {
@@ -271,6 +280,14 @@ export async function batchUpdate(
     const start = old?.notes?.startsWith(START) || old?.notes?.startsWith(START_E1) ? old.notes.split("\n")[0]! : null;
     sets.push("notes = ?");
     args.push(start && !(input.notes ?? "").startsWith(start) ? `${start}\n${input.notes ?? ""}` : input.notes);
+  }
+  if (input.notesAdd !== undefined) {
+    // One new line at the end of the notes, in the same write, so no earlier line is lost (Durian batch, 28-11-2026).
+    const old = await env.DB.prepare("SELECT length(notes) AS n FROM batches WHERE id = ?").bind(input.id).first<{ n: number | null }>();
+    if ((old?.n ?? 0) + input.notesAdd.length + 1 > MAX_NOTES)
+      throw new Error(`The notes would pass ${MAX_NOTES} characters. Read batch_get and send a shorter whole field with notes.`);
+    sets.push("notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE notes || char(10) || ? END");
+    args.push(input.notesAdd, input.notesAdd);
   }
   const verdicts = input.ownerVerdicts ?? [];
   if (sets.length === 0 && verdicts.length === 0) throw new Error("Nothing to update.");
@@ -362,6 +379,11 @@ export interface IdeaUpdate {
 }
 
 export async function ideasUpdate(env: Env, updates: IdeaUpdate[]) {
+  // The pick limit is checked row by row, so a swap of picks in one call fails when a pick comes before its unpick
+  // (Durian batch, 28-11-2026). Run the unpicks first. When an idea comes twice, keep the order as sent.
+  if (new Set(updates.map((u) => u.id)).size === updates.length) {
+    updates = [...updates.filter((u) => u.picked === false), ...updates.filter((u) => u.picked !== false)];
+  }
   const stmts: D1PreparedStatement[] = [];
   const owner: (string | null)[] = []; // the idea id each statement must change (null: a statement that may change nothing)
   for (const u of updates) {

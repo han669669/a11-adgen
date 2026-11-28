@@ -330,3 +330,63 @@ describe("engine v1: rules and the wild prompt", () => {
     expect(b.messages[0]!.content.text).toContain(glossy);
   });
 });
+
+describe("engine v1 lessons of the Durian batch (owner, 28-11-2026)", () => {
+  it("swaps picks in one ideas_update call: the unpicks run first", async () => {
+    const { env, id, ideas } = await withConcepts();
+    await run(env, "ideas_pick", { batchId: id, ids: [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id] });
+    await run(env, "ideas_update", { updates: [{ id: ideas[3]!.id, picked: true }, { id: ideas[0]!.id, picked: false }] });
+    const got = (await batch.batchGet(env, id)) as { ideas: { id: string; picked: boolean }[] };
+    expect(got.ideas.filter((i) => i.picked).map((i) => i.id).sort()).toEqual([ideas[1]!.id, ideas[2]!.id, ideas[3]!.id].sort());
+    // A swap that still passes the limit is refused, and nothing changes.
+    await expect(run(env, "ideas_update", { updates: [{ id: ideas[4]!.id, picked: true }, { id: ideas[5]!.id, picked: true }, { id: ideas[1]!.id, picked: false }] }))
+      .rejects.toThrow("Pick limit");
+    const after = (await batch.batchGet(env, id)) as { ideas: { id: string; picked: boolean }[] };
+    expect(after.ideas.filter((i) => i.picked)).toHaveLength(3);
+  });
+
+  it("takes a final approval on an engine 1 draft (a draft he approves as it is, WI18), and refuses it on engine 2", async () => {
+    const { env, raw, base, id, ideas } = await withConcepts();
+    await run(env, "ideas_pick", { batchId: id, ids: [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id] });
+    const r0 = "d0000000-0000-4000-8000-000000000001", r9 = "d0000000-0000-4000-8000-000000000009";
+    addDraft(raw, id, r0, ideas[0]!.id);
+    const said = "keep this i approve of it ... no final render needed i believe unless u disapprove. ".repeat(10).trim();
+    expect(said.length).toBeGreaterThan(600);
+    const out = await run(env, "batch_update", { id, ownerVerdicts: [{ stage: "final", mark: "approve", key: `renders/${r0}/0.jpg`, ownerSaid: said }] });
+    expect(out.verdictsSaved).toBe(1);
+    expect(raw.prepare("SELECT stage, mark, idea_id, owner_said FROM verdicts").get()).toEqual({ stage: "final", mark: "approve", idea_id: ideas[0]!.id, owner_said: said });
+    const e2 = await run(env, "batch_create", base);
+    raw.prepare("INSERT INTO ideas (id, batch_id, n, format, insight, visual, headline, created_at) VALUES ('e2i', ?, 1, 'tof', 'i', 'v', 'h', 'now')").run(e2.id);
+    addDraft(raw, e2.id, r9, "e2i");
+    await expect(run(env, "batch_update", { id: e2.id, ownerVerdicts: [{ stage: "final", mark: "approve", key: `renders/${r9}/0.jpg`, ownerSaid: "ok" }] }))
+      .rejects.toThrow("is a draft, not a final picture.");
+  });
+
+  it("adds one line to the notes with notesAdd and keeps the rest", async () => {
+    const { env, id } = await withConcepts();
+    await run(env, "batch_update", { id, notes: "ANGLE SHEET: A, B." });
+    await run(env, "batch_update", { id, notesAdd: "ROUND 1: three drafts." });
+    await run(env, "batch_update", { id, notesAdd: "ROUND 2: two drafts." });
+    expect((await batch.batchGet(env, id)).notes).toMatch(/^Engine 1 \(wild\) started by the owner .+\nANGLE SHEET: A, B\.\nROUND 1: three drafts\.\nROUND 2: two drafts\.$/);
+    await expect(run(env, "batch_update", { id, notes: "x", notesAdd: "y" })).rejects.toThrow("not both");
+    for (let i = 0; i < 5; i++) await run(env, "batch_update", { id, notesAdd: "n".repeat(1990) });
+    await expect(run(env, "batch_update", { id, notesAdd: "n".repeat(1990) })).rejects.toThrow(`would pass ${batch.MAX_NOTES} characters`);
+  });
+
+  it("serves the new engine 1 rules and names them in the wild and final prompts", () => {
+    const rules = houseRules("critic").rules;
+    for (const t of ["WI11: First glance, no lore", "WI12: A brand photo whose food stands on a board", "WI13: Depth comes from the lock",
+      "WI14: Real scene, real pixels", "WI15: People and depth order", "WI16: A screen in the picture", "WI17: Every draft and final prompt says",
+      "WI18: A draft can be the finished picture"]) expect(rules).toContain(t);
+    expect(rules).toContain("unless WI18 calls for a high final");
+    const text = (name: string, args: Record<string, string>) => {
+      const out = promptGet(name, args);
+      if (typeof out === "string") throw new Error(out);
+      return out.messages[0]!.content.text;
+    };
+    const wild = text("wild", { brand: "duriandelivery", batchId: "6dbef700-a167-4bc0-8be7-bdd76be7a52d" });
+    for (const t of ["cutout-scene", "scripts/patch_merge.py", "keep the exact composition; the top fifth stays plain", "is the final as it is (WI18)"]) expect(wild).toContain(t);
+    const final = text("final", { batchId: "6dbef700-a167-4bc0-8be7-bdd76be7a52d" });
+    expect(final).toContain("a chosen draft is the final as it is (WI18)");
+  });
+});

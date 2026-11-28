@@ -326,7 +326,7 @@ export const TOOLS: Tool[] = [
   {
     name: "batch_update",
     description:
-      "Save batch state: status (research → ideas → drafts → board → finals → done; 'board' = the owner reviews the drafts and picks; do not go on until he has), the insight sheet (8 to 12 buyer truths, each with its source), or notes. notes replaces the whole field: read batch_get first and send the old notes with the new line. ownerVerdicts saves what the owner said about drafts, finals or pack copy (a full pass on the 3 drafts of an idea, a note on a final, an approval or a rejection), with his exact words, so taste_log and learn read it: save only what he said, never write a verdict for him. Marks: draft 'pass' or 'fix'; final and pack 'fix', 'approve' or 'reject'. Rows are only added: to correct one, save a new one (the newest is his current view). Draft 'pass' means he rejected all drafts of the idea: never use it for a usable draft. A later 'fix' on the same idea, with no new draft made between the two, withdraws a mistaken 'pass'.",
+      "Save batch state: status (research → ideas → drafts → board → finals → done; 'board' = the owner reviews the drafts and picks; do not go on until he has), the insight sheet (8 to 12 buyer truths, each with its source), or notes. notes replaces the whole field: read batch_get first and send the old notes with the new line. notesAdd adds one line at the end and keeps the rest (send one of the two). ownerVerdicts saves what the owner said about drafts, finals or pack copy (a full pass on the 3 drafts of an idea, a note on a final, an approval or a rejection), with his exact words, so taste_log and learn read it: save only what he said, never write a verdict for him. Marks: draft 'pass' or 'fix'; final and pack 'fix', 'approve' or 'reject'. A final verdict needs the final's key; on an engine 1 batch it may be a draft's key, for a draft he approved as it is (house rule WI18). Rows are only added: to correct one, save a new one (the newest is his current view). Draft 'pass' means he rejected all drafts of the idea: never use it for a usable draft. A later 'fix' on the same idea, with no new draft made between the two, withdraws a mistaken 'pass'.",
     inputSchema: {
       type: "object",
       properties: {
@@ -347,6 +347,7 @@ export const TOOLS: Tool[] = [
           },
         },
         notes: { type: "string", maxLength: 4000 },
+        notesAdd: { type: "string", minLength: 1, maxLength: 2000, pattern: "\\S", description: "One new line at the end of the notes; the rest stays" },
         ownerVerdicts: {
           type: "array",
           minItems: 1,
@@ -356,7 +357,7 @@ export const TOOLS: Tool[] = [
             properties: {
               stage: { type: "string", enum: ["draft", "final", "pack"] },
               mark: { type: "string", enum: ["pass", "fix", "approve", "reject"] },
-              ownerSaid: { type: "string", minLength: 1, maxLength: 600, pattern: "\\S", description: "His exact words" },
+              ownerSaid: { type: "string", minLength: 1, maxLength: 2000, pattern: "\\S", description: "His exact words" },
               ideaId: { type: "string", pattern: "^[0-9a-f-]{36}$", description: "Needed for stage 'draft'" },
               key: { type: "string", pattern: "^renders/[0-9a-f-]{36}/[A-Za-z0-9._-]{1,80}$", description: "The picture; needed for stage 'final'" },
               packVersion: { type: "integer", minimum: 1, description: "The pack version, when the pack exists" },
