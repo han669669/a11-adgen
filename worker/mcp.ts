@@ -346,7 +346,7 @@ export const TOOLS: Tool[] = [
             additionalProperties: false,
           },
         },
-        notes: { type: "string", maxLength: 4000 },
+        notes: { type: "string", maxLength: 12000 },
         notesAdd: { type: "string", minLength: 1, maxLength: 2000, pattern: "\\S", description: "One new line at the end of the notes; the rest stays" },
         ownerVerdicts: {
           type: "array",

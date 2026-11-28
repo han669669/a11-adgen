@@ -362,6 +362,31 @@ describe("engine v1 lessons of the Durian batch (owner, 28-11-2026)", () => {
       .rejects.toThrow("is a draft, not a final picture.");
   });
 
+  it("counts a draft approved as it is as that idea's pick and final in nextStep, beside a normal high final (Devin Review)", async () => {
+    const { env, raw, id, ideas } = await withConcepts();
+    const ids = [ideas[0]!.id, ideas[1]!.id, ideas[2]!.id];
+    await run(env, "ideas_pick", { batchId: id, ids });
+    const keys = ids.map((x, i) => {
+      const r = `d0000000-0000-4000-8000-00000000000${i}`;
+      addDraft(raw, id, r, x);
+      return `renders/${r}/0.jpg`;
+    });
+    await batch.ideasUpdate(env, ids.map((x) => ({ id: x, finalPrompt: "Keep this photograph exactly." })));
+    await batch.batchUpdate(env, { id, status: "board" });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("owner_pick");
+    const approve = (key: string) => batch.batchUpdate(env, { id, ownerVerdicts: [{ stage: "final", mark: "approve", key, ownerSaid: "keep this as it is" }] });
+    await approve(keys[0]!);
+    await approve(keys[1]!);
+    expect((await batch.batchGet(env, id)).nextStep).toBe("owner_pick");    // idea 3 still waits for him
+    await batch.picksSave(env, id, [{ key: keys[2]! }]);
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finals");        // idea 3 gets its high final; ideas 1 and 2 need none
+    await approve(keys[2]!);
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finish");
+    // A later fix on an approved draft takes it back.
+    await batch.batchUpdate(env, { id, ownerVerdicts: [{ stage: "final", mark: "fix", key: keys[2]!, ownerSaid: "the fingers look weird" }] });
+    expect((await batch.batchGet(env, id)).nextStep).toBe("finals");
+  });
+
   it("adds one line to the notes with notesAdd and keeps the rest", async () => {
     const { env, id } = await withConcepts();
     await run(env, "batch_update", { id, notes: "ANGLE SHEET: A, B." });

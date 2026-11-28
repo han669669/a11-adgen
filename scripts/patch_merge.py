@@ -10,7 +10,7 @@ of the render that best matches the real photo OUTSIDE the patches (the areas th
 shift matches well: then the render moved the composition, and it needs a new render that keeps it.
 
   python3 scripts/patch_merge.py --base <real photo> --render <render> --box X0,Y0,X1,Y1 [--ellipse X0,Y0,X1,Y1] \\
-      --out <picture> [--feather 9] [--search 6] [--max-diff 14] [--debug mask.png]
+      --out <picture> [--feather 9] [--search 6] [--max-diff 20] [--debug mask.png]
 
 The boxes and ellipses are in the pixels of --base. A render of another size with the same shape (1024x1280 against
 1536x1920) is scaled to --base first. Run photo_finish.py and headline.py after it, as for any picture.
@@ -45,7 +45,9 @@ def patch_mask(size, boxes, ellipses, radius=18):
 
 def best_shift(base, render, keep, search, step=3):
     """The (dx, dy) for which render[y + dy, x + dx] best matches base[y, x] where keep is true, and the mean difference
-    there (0 to 255, grey, after the median difference is taken away). Every step-th pixel is compared, so a search of 6 px stays fast on a 1536x1920 picture."""
+    there (0 to 255, grey, after the median difference is taken away). Only the textured samples count (edges, hair,
+    carving: the top 30% of the photo's local contrast), so a large plain wall cannot hide a moved object. Every
+    step-th pixel is compared, so a search of 6 px stays fast on a 1536x1920 picture. On a tie the smaller shift wins."""
     g0 = base @ np.float32([0.299, 0.587, 0.114])
     g1 = render @ np.float32([0.299, 0.587, 0.114])
     H, W = g0.shape
@@ -55,13 +57,17 @@ def best_shift(base, render, keep, search, step=3):
     ys, xs = ys[sel], xs[sel]
     if ys.size < 100:
         sys.exit("the patches cover almost the whole picture: nothing is left to align the render with")
+    gy, gx = np.gradient(g0)
+    grad = np.hypot(gx, gy)[ys, xs]
+    textured = grad >= max(np.percentile(grad, 70), 2.0)
+    if textured.sum() >= 100:
+        ys, xs = ys[textured], xs[textured]
     best = None
-    for dy in range(-s, s + 1):
-        for dx in range(-s, s + 1):
-            e = g0[ys, xs] - g1[ys + dy, xs + dx]
-            d = float(np.abs(e - np.median(e)).mean())   # a render often drifts a little in brightness: compare the shapes, not the level
-            if best is None or d < best[0]:
-                best = (d, dx, dy)
+    for dy, dx in sorted(((dy, dx) for dy in range(-s, s + 1) for dx in range(-s, s + 1)), key=lambda v: abs(v[0]) + abs(v[1])):
+        e = g0[ys, xs] - g1[ys + dy, xs + dx]
+        d = float(np.abs(e - np.median(e)).mean())   # a render often drifts a little in brightness: compare the shapes, not the level
+        if best is None or d < best[0] - 1e-6:
+            best = (d, dx, dy)
     return best[1], best[2], best[0]
 
 
@@ -84,7 +90,7 @@ def main(argv=None):
     p.add_argument("--out", required=True)
     p.add_argument("--feather", type=float, default=9, help="blur of the patch edges, in px of --base")
     p.add_argument("--search", type=int, default=6, help="the largest shift of the render to try, in px of --base")
-    p.add_argument("--max-diff", type=float, default=14, help="the largest mean grey difference outside the patches (0 to 255) after the best shift")
+    p.add_argument("--max-diff", type=float, default=20, help="the largest mean grey difference on the textured areas outside the patches (0 to 255) after the best shift")
     p.add_argument("--debug", help="writes the paste mask (PNG) here")
     a = p.parse_args(argv)
     try:
@@ -125,7 +131,7 @@ def main(argv=None):
     out = moved * w + base * (1 - w)
     Image.fromarray((out + 0.5).clip(0, 255).astype(np.uint8)).save(a.out, quality=97, subsampling=0)
     share = float((np.asarray(soft) > 127).mean())
-    print(f"{a.out}: render shift {dx},{dy}, mean difference outside the patches {diff:.1f}; {100 * share:.1f}% of the picture from the render")
+    print(f"{a.out}: render shift {dx},{dy}, mean difference on the textured areas outside the patches {diff:.1f}; {100 * share:.1f}% of the picture from the render")
     return 0
 
 

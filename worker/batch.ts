@@ -224,7 +224,7 @@ const BOARD1_GUARD = `${BOARD3_GUARD}
   AND NOT EXISTS (SELECT 1 FROM ideas i WHERE i.batch_id = batches.id AND i.picked = 1
     AND NOT EXISTS (SELECT 1 FROM renders r WHERE r.batch = i.batch_id AND r.idea = i.id AND r.kind = 'draft' AND r.image_keys IS NOT NULL))`;
 
-/** The longest batch notes that notesAdd makes (the whole field that notes sends is at most 4000 characters). */
+/** The longest batch notes: notesAdd stops here, and notes (the whole field) takes up to this many characters too. */
 export const MAX_NOTES = 12000;
 
 export async function batchUpdate(
@@ -883,6 +883,16 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
   const ownerPickAt = new Map<string, string>();
   for (const p of picks.results) if (p.by_owner === 1 && String(p.created_at) > (ownerPickAt.get(p.idea_id) ?? "")) ownerPickAt.set(p.idea_id, String(p.created_at));
   const passedAt = activePasses([...passes.results].reverse(), renders.results as { idea: string; kind: string; created_at: string }[]);
+  // Engine v1 (house rule WI18): the ideas whose newest final verdict on a draft approves it as it is. Such a draft is the
+  // idea's final, with no pick row and no paid final.
+  const asIs = new Set<string>();
+  if (b.engine === 1) {
+    const rows = await env.DB.prepare(
+      `SELECT v.idea_id, v.mark FROM verdicts v JOIN renders r ON r.id = substr(v.render_key, 9, 36) AND r.batch = v.batch_id
+       WHERE v.batch_id = ? AND v.stage = 'final' AND r.kind = 'draft' AND v.idea_id IS NOT NULL ORDER BY v.created_at, v.rowid LIMIT 200`,
+    ).bind(id).all<{ idea_id: string; mark: string }>();
+    for (const r of rows.results) r.mark === "approve" ? asIs.add(r.idea_id) : asIs.delete(r.idea_id);
+  }
   const img = (key: string) => ({ key, url: fal.mediaUrl(env, key) });
   const [brief, conceptReview, directions, checks, rounds, plans] = await Promise.all([
     briefGet(env, id),
@@ -1003,7 +1013,7 @@ export async function batchGet(env: Env, id: string, { withPlans = false } = {})
     picks: picks.results.map((p) => ({ key: p.render_key, ideaId: p.idea_id, note: p.note, byOwner: p.by_owner === 1, finalRenderId: p.final_render_id })),
     drafting: renders.results.filter((r) => r.status === "queued").map((r) => r.id),
     // Engine 1 and engine 3: the next step of the batch, from its rows (design pack §1.11). Engine 2 batches have none.
-    ...(engine === 1 ? { nextStep: nextStepV1(b.status as string, ideasOut.map((i) => ({ ...i, hasPicture: hasPicture.get(i.id) === true })), ownerPicked) } : {}),
+    ...(engine === 1 ? { nextStep: nextStepV1(b.status as string, ideasOut.map((i) => ({ ...i, hasPicture: hasPicture.get(i.id) === true })), ownerPicked, asIs) } : {}),
     ...(engine === 3 ? { nextStep: nextStepV3(b.status as string, brief !== null, ideasOut.map((i) => ({ ...i, draftsDone: draftsDone.get(i.id) === true, redirect: redirect.get(i.id) === true, decided: ownerDecided.get(i.id) === true, rendered: renders.results.some((r) => r.idea === i.id && r.kind !== "rough"), directed: directions.get(i.id)?.current === true })), ownerPicked, conceptReview && { outcome: conceptReview.outcome, reworks: conceptReview.reworks, newIdeas: ideas.results.some((i) => i.n > conceptReview.lastN) }) } : {}),
   };
 }
@@ -1036,6 +1046,7 @@ export function nextStepV1(
   status: string,
   ideas: { id: string; picked: boolean; hasPicture: boolean; finalPrompt?: string | null; finals: { status: unknown }[] }[],
   ownerPicked: Set<string>,
+  asIs: Set<string> = new Set(),
 ): string {
   const picked = ideas.filter((i) => i.picked);
   if (ideas.length === 0) return "concepts";
@@ -1043,8 +1054,9 @@ export function nextStepV1(
   if (picked.some((i) => !i.hasPicture)) return "pictures";
   // A polled draft is a raw render: the logo and the final prompt come after it (the 'wild' prompt, step 4).
   if (!["board", "finals", "done"].includes(status)) return picked.some((i) => !i.finalPrompt) ? "pictures" : "board";
-  if (picked.some((i) => !ownerPicked.has(i.id))) return "owner_pick";
-  if (picked.some((i) => !i.finals.some((f) => f.status === "done"))) return "finals";
+  // A draft he approved as it is (WI18) is that idea's pick and its final.
+  if (picked.some((i) => !ownerPicked.has(i.id) && !asIs.has(i.id))) return "owner_pick";
+  if (picked.some((i) => !asIs.has(i.id) && !i.finals.some((f) => f.status === "done"))) return "finals";
   // A polled final is a raw render too: the logo is set in code and uploaded, then status 'done' ('final' prompt, step 6).
   return status === "done" ? "done" : "finish";
 }

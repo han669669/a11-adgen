@@ -1432,6 +1432,30 @@ class PatchMerge(Tmp):
         self.assertIn("moved the composition", msg)
         self.assertFalse(os.path.exists(out))
 
+    def test_a_plain_wall_does_not_hide_a_moved_frame(self):
+        # Devin Review, PR 161: on a large plain wall a thin frame moved 25 px gave a low mean difference over all samples.
+        a = np.full((500, 400, 3), 200, np.uint8)
+        a[150:156, 100:300] = a[344:350, 100:300] = 50                 # a thin dark frame
+        a[150:350, 100:106] = a[150:350, 294:300] = 50
+        src = self.save("wall.png", a)
+        ren = self.save("render.png", np.roll(a, 25, axis=1))
+        out = os.path.join(self.dir.name, "out.png")
+        self.assertIn("moved the composition", exit_message(patch_merge.main, ["--base", src, "--render", ren, "--box", "20,400,80,480", "--out", out]))
+
+    def test_an_aligned_render_on_a_plain_wall_is_not_moved(self):
+        # Devin Review, PR 161: with no texture outside the patch every shift ties; the smallest (none) wins.
+        a = np.full((200, 160, 3), 180, np.uint8)
+        src = self.save("plain.png", a)
+        r = a.copy()
+        r[60:120, 50:110] = (20, 200, 40)
+        ren = self.save("render.png", r)
+        out = os.path.join(self.dir.name, "out.png")
+        log = io.StringIO()
+        with contextlib.redirect_stdout(log):
+            patch_merge.main(["--base", src, "--render", ren, "--box", "40,50,120,130", "--out", out, "--feather", "1"])
+        self.assertIn("render shift 0,0", log.getvalue())
+        np.testing.assert_array_equal(np.asarray(Image.open(out).convert("RGB"))[61, 51], (20, 200, 40))
+
     def test_scales_a_smaller_render_and_checks_the_arguments(self):
         real = self.photo()
         src = os.path.join(self.dir.name, "real.png")
